@@ -1,0 +1,6 @@
+google-genai
+chromadb
+beautifulsoup4
+rank_bm25
+streamlit
+python-dotenv
