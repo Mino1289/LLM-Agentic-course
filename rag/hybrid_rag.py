@@ -1,119 +1,485 @@
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import os
-import json
-import glob
+import re
 import time
-from rank_bm25 import BM25Okapi
+from dataclasses import dataclass, field
+from typing import Generator, Literal, Optional
+
 import chromadb
+from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from rank_bm25 import BM25Okapi
 
-from dotenv import load_dotenv
+from rag.paths import CHROMA_DB_DIR, ENV_FILE, PROCESSED_DATA_DIR
 
-# Charge les variables d'environnement du fichier .env
-load_dotenv("../.env")
+load_dotenv(ENV_FILE)
 
-# Ensure your GEMINI_API_KEY is set in environment variables
-# export GEMINI_API_KEY="your-api-key"
+SearchMode = Literal["hybrid", "vector", "bm25"]
+ChunkStrategy = Literal["fixed", "recursive", "semantic"]
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(BASE_DIR, "processed_data")
-CHROMA_DB_DIR = os.path.join(BASE_DIR, "chroma_db")
+DEFAULT_MAX_CHUNK_SIZE = 1500
+DEFAULT_MIN_CHUNK_SIZE = 80
+
+DEFAULT_RERANKER = "mixedbread-ai/mxbai-rerank-xsmall-v1"
+DEFAULT_LLM_MODEL = "gemma-4-31b-it"
+DEFAULT_DAILY_EMBEDDING_LIMIT = 1000
+DEFAULT_EMBEDDING_RPM = 100
 
 
-def chunk_text(text, chunk_size=1000, overlap=200):
+@dataclass
+class EmbeddingPlan:
+    chunk_strategy: str
+    collection_name: str
+    section_files: int
+    total_chunks: int
+    already_indexed: int
+    missing_chunks: int
+    daily_limit: int
+    daily_used: int
+    daily_remaining: int
+    embeddable_now: int
+    deferred_chunks: int
+    estimated_minutes: float
+    rpm_limit: int
+
+    def summary(self) -> str:
+        lines = [
+            f"=== Plan d'embedding ({self.chunk_strategy}) ===",
+            f"Collection ChromaDB : {self.collection_name}",
+            f"Fichiers .txt source  : {self.section_files}",
+            f"Chunks totaux         : {self.total_chunks:,}",
+            f"Déjà indexés          : {self.already_indexed:,}",
+            f"Manquants             : {self.missing_chunks:,}",
+            "",
+            f"Quota journalier      : {self.daily_used:,} / {self.daily_limit:,} utilisés",
+            f"Quota restant aujourd'hui : {self.daily_remaining:,}",
+            f"Embeddings prévus now : {self.embeddable_now:,}",
+            f"Reportés (quota)      : {self.deferred_chunks:,}",
+            f"Durée estimée         : ~{self.estimated_minutes:.1f} min "
+            f"({self.rpm_limit} req/min)",
+        ]
+        if self.missing_chunks > self.daily_remaining:
+            days = (self.deferred_chunks // max(self.daily_remaining, 1)) + (
+                1 if self.deferred_chunks % max(self.daily_remaining, 1) else 0
+            )
+            lines.append(
+                f"\n⚠️  Indexation complète : ~{days} jour(s) supplémentaire(s) au rythme actuel."
+            )
+        elif self.missing_chunks == 0:
+            lines.append("\n✅ Rien à embedder — index vectoriel à jour.")
+        else:
+            lines.append("\n✅ Tout peut être indexé aujourd'hui avec le quota restant.")
+        return "\n".join(lines)
+
+
+def embedding_sleep_seconds(rpm_limit: int = DEFAULT_EMBEDDING_RPM) -> float:
+    return 60.0 / max(rpm_limit, 1)
+
+
+@dataclass
+class RetrievalResult:
+    chunks: list[str] = field(default_factory=list)
+    metadatas: list[dict] = field(default_factory=list)
+    chunk_indices: list[int] = field(default_factory=list)
+    retrieval_latency_ms: float = 0.0
+    rerank_latency_ms: float = 0.0
+    search_mode: str = "hybrid"
+    reranking_enabled: bool = False
+
+
+def chunk_text_fixed(text: str, chunk_size: int = 1000, overlap: int = 200) -> list[str]:
     chunks = []
     start = 0
     while start < len(text):
         end = start + chunk_size
         chunks.append(text[start:end])
         start += chunk_size - overlap
+        if start >= len(text):
+            break
     return chunks
 
 
+def chunk_text_recursive(text: str, chunk_size: int = 1000, overlap: int = 200) -> list[str]:
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=overlap,
+        separators=["\n\n| ", "\n\n", "\n| ", "\n", ". ", " ", ""],
+    )
+    return splitter.split_text(text)
+
+
+def _is_markdown_table_line(line: str) -> bool:
+    stripped = line.strip()
+    return stripped.startswith("|") and stripped.endswith("|")
+
+
+def split_semantic_blocks(text: str) -> list[str]:
+    """Split into paragraphs and markdown tables without breaking table rows."""
+    blocks: list[str] = []
+    current_lines: list[str] = []
+    in_table = False
+
+    for line in text.split("\n"):
+        stripped = line.strip()
+        is_table_line = _is_markdown_table_line(stripped)
+
+        if is_table_line:
+            if current_lines and not in_table:
+                block = "\n".join(current_lines).strip()
+                if block:
+                    blocks.append(block)
+                current_lines = []
+            in_table = True
+            current_lines.append(line)
+            continue
+
+        if in_table:
+            block = "\n".join(current_lines).strip()
+            if block:
+                blocks.append(block)
+            current_lines = []
+            in_table = False
+
+        if not stripped:
+            if current_lines:
+                block = "\n".join(current_lines).strip()
+                if block:
+                    blocks.append(block)
+                current_lines = []
+            continue
+
+        current_lines.append(line)
+
+    if current_lines:
+        block = "\n".join(current_lines).strip()
+        if block:
+            blocks.append(block)
+
+    if not blocks and text.strip():
+        blocks = [part.strip() for part in re.split(r"\n{2,}", text) if part.strip()]
+
+    return blocks
+
+
+def split_sentences(text: str) -> list[str]:
+    parts = re.split(r'(?<=[.!?])\s+(?=[A-Z0-9"(\[])', text)
+    return [part.strip() for part in parts if part.strip()]
+
+
+def split_markdown_table(table: str, max_size: int) -> list[str]:
+    lines = [line for line in table.split("\n") if line.strip()]
+    if len(lines) <= 2:
+        return [table]
+
+    header = lines[0]
+    separator = lines[1]
+    rows = lines[2:]
+    prefix = f"{header}\n{separator}"
+    chunks: list[str] = []
+    current_rows: list[str] = []
+
+    for row in rows:
+        candidate_rows = current_rows + [row]
+        candidate = prefix + "\n" + "\n".join(candidate_rows)
+        if len(candidate) > max_size and current_rows:
+            chunks.append(prefix + "\n" + "\n".join(current_rows))
+            current_rows = [row]
+        else:
+            current_rows = candidate_rows
+
+    if current_rows:
+        chunks.append(prefix + "\n" + "\n".join(current_rows))
+
+    return chunks or [table]
+
+
+def split_block_by_sentences(block: str, max_size: int) -> list[str]:
+    if _is_markdown_table_line(block.split("\n", 1)[0].strip()):
+        return split_markdown_table(block, max_size)
+
+    sentences = split_sentences(block)
+    if len(sentences) <= 1:
+        return [block]
+
+    chunks: list[str] = []
+    current = ""
+    for sentence in sentences:
+        candidate = f"{current} {sentence}".strip() if current else sentence
+        if len(candidate) <= max_size:
+            current = candidate
+        else:
+            if current:
+                chunks.append(current)
+            current = sentence if len(sentence) <= max_size else sentence[:max_size]
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def merge_semantic_blocks(
+    blocks: list[str],
+    max_size: int = DEFAULT_MAX_CHUNK_SIZE,
+    min_size: int = DEFAULT_MIN_CHUNK_SIZE,
+) -> list[str]:
+    chunks: list[str] = []
+    current = ""
+
+    for block in blocks:
+        if len(block) > max_size:
+            if current:
+                chunks.append(current)
+                current = ""
+            chunks.extend(split_block_by_sentences(block, max_size))
+            continue
+
+        candidate = f"{current}\n\n{block}".strip() if current else block
+        if len(candidate) <= max_size:
+            current = candidate
+        else:
+            if current:
+                chunks.append(current)
+            current = block
+
+    if current:
+        chunks.append(current)
+
+    merged: list[str] = []
+    for chunk in chunks:
+        if merged and len(chunk) < min_size:
+            merged[-1] = f"{merged[-1]}\n\n{chunk}".strip()
+        else:
+            merged.append(chunk)
+
+    return [chunk for chunk in merged if chunk.strip()]
+
+
+def chunk_text_semantic(
+    text: str,
+    max_size: int = DEFAULT_MAX_CHUNK_SIZE,
+    min_size: int = DEFAULT_MIN_CHUNK_SIZE,
+) -> list[str]:
+    """Chunk by paragraphs/tables first, then sentences for oversized blocks."""
+    if not text.strip():
+        return []
+    blocks = split_semantic_blocks(text)
+    return merge_semantic_blocks(blocks, max_size=max_size, min_size=min_size)
+
+
+def parse_processed_filename(file_path: str) -> tuple[str, str]:
+    basename = os.path.basename(file_path)
+    stem = basename[:-4] if basename.endswith(".txt") else basename
+    if "__" in stem:
+        source, section = stem.rsplit("__", 1)
+        return source, section
+    return stem, "unknown"
+
+
+def extract_year_from_source(source: str) -> str:
+    patterns = [
+        r"(20\d{2})[-_/]?(0[1-9]|1[0-2])[-_/]?(0[1-9]|[12]\d|3[01])",
+        r"(20\d{2})",
+        r"(19\d{2})",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, source)
+        if match:
+            return match.group(1)
+    return ""
+
+
+def extract_ticker_from_source(source: str) -> str:
+    match = re.match(r"^([a-zA-Z]{1,5})[-_]", source)
+    if match:
+        return match.group(1).upper()
+    return ""
+
+
+def extract_file_type_from_source(source: str) -> str:
+    ext = os.path.splitext(source)[1].lower().lstrip(".")
+    return ext or "txt"
+
+
+def estimate_tokens(text: str) -> int:
+    return max(1, len(text) // 4)
+
+
 class HybridRAG:
-    def __init__(self, collection_name="10k_reports"):
+    def __init__(
+        self,
+        chunk_strategy: ChunkStrategy = "fixed",
+        search_mode: SearchMode = "hybrid",
+        use_reranking: bool = False,
+        reranker_model: str = DEFAULT_RERANKER,
+        collection_name: Optional[str] = None,
+    ):
+        self.chunk_strategy = chunk_strategy
+        self.search_mode = search_mode
+        self.use_reranking = use_reranking
+        self.reranker_model = reranker_model
+
         self.bm25 = None
-        self.documents = []
-        self.doc_metadata = []
+        self.documents: list[str] = []
+        self.doc_metadata: list[dict] = []
+        self.chunk_ids: list[str] = []
+        self._reranker = None
 
-        # Initialize Google GenAI client
         self.client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-
-        # Initialize ChromaDB
-        self.chroma_client = chromadb.PersistentClient(path=CHROMA_DB_DIR)
+        self.chroma_client = chromadb.PersistentClient(path=str(CHROMA_DB_DIR))
+        resolved_collection = collection_name or f"10k_reports_{chunk_strategy}"
         self.collection = self.chroma_client.get_or_create_collection(
-            name=collection_name
+            name=resolved_collection
         )
 
-    def load_and_index_data(self, max_files=None, max_new_embeddings=1000):
-        print("Loading and indexing data...")
-        files = glob.glob(os.path.join(DATA_DIR, "*.json"))
+    def _get_chunker(self):
+        if self.chunk_strategy == "recursive":
+            return chunk_text_recursive
+        if self.chunk_strategy == "semantic":
+            return chunk_text_semantic
+        return chunk_text_fixed
 
+    def _build_metadata(self, source: str, section: str, chunk_index: int) -> dict:
+        return {
+            "source": source,
+            "section": section,
+            "chunk_index": chunk_index,
+            "file_type": extract_file_type_from_source(source),
+            "year": extract_year_from_source(source),
+            "ticker": extract_ticker_from_source(source),
+            "chunk_strategy": self.chunk_strategy,
+        }
+
+    def _build_corpus(
+        self, max_files: Optional[int] = None
+    ) -> tuple[list[str], list[dict], list[str], int]:
+        files = sorted(PROCESSED_DATA_DIR.glob("*.txt"))
         if max_files:
             files = files[:max_files]
 
-        all_chunks = []
-        all_metadata = []
-        all_ids = []
+        chunker = self._get_chunker()
+        all_chunks: list[str] = []
+        all_metadata: list[dict] = []
+        all_ids: list[str] = []
 
         for file_path in files:
-            with open(file_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
+            source, section = parse_processed_filename(str(file_path))
+            text = file_path.read_text(encoding="utf-8")
 
-            filename = os.path.basename(file_path).replace(".json", "")
+            if not text.strip():
+                continue
 
-            for section_name, text in data.items():
-                if not text:
-                    continue
-                chunks = chunk_text(text)
-                for i, chunk in enumerate(chunks):
-                    chunk_id = f"{filename}_{section_name}_{i}"
-                    all_chunks.append(chunk)
-                    all_metadata.append(
-                        {"source": filename, "section": section_name, "chunk_index": i}
-                    )
-                    all_ids.append(chunk_id)
+            for i, chunk in enumerate(chunker(text)):
+                chunk_id = f"{source}__{section}__{self.chunk_strategy}__{i}"
+                all_chunks.append(chunk)
+                all_metadata.append(self._build_metadata(source, section, i))
+                all_ids.append(chunk_id)
 
-        self.documents = all_chunks
-        self.doc_metadata = all_metadata
+        return all_chunks, all_metadata, all_ids, len(files)
 
-        print(f"Total chunks found in files: {len(self.documents)}")
+    def get_embedding_plan(
+        self,
+        max_files: Optional[int] = None,
+        daily_quota_used: int = 0,
+        daily_quota_limit: int = DEFAULT_DAILY_EMBEDDING_LIMIT,
+        max_new_embeddings: Optional[int] = None,
+        rpm_limit: int = DEFAULT_EMBEDDING_RPM,
+    ) -> EmbeddingPlan:
+        all_chunks, _, all_ids, section_files = self._build_corpus(max_files=max_files)
+        total_chunks = len(all_chunks)
 
-        # 1. Index with BM25 (Always everything for local search)
-        tokenized_corpus = [doc.lower().split(" ") for doc in self.documents]
-        self.bm25 = BM25Okapi(tokenized_corpus)
-        print("BM25 Indexing complete.")
+        existing_ids = set(self.collection.get()["ids"])
+        missing_count = sum(1 for cid in all_ids if cid not in existing_ids)
+        already_indexed = total_chunks - missing_count
 
-        # 2. Vectorize ONLY what's missing in ChromaDB
-        print("Checking for missing embeddings in ChromaDB...")
+        daily_remaining = max(0, daily_quota_limit - daily_quota_used)
+        budget = daily_remaining if max_new_embeddings is None else max_new_embeddings
+        budget = max(0, min(budget, daily_remaining))
+        embeddable_now = min(missing_count, budget)
+        deferred = max(0, missing_count - embeddable_now)
 
-        # Get all existing IDs in the collection
-        existing_result = self.collection.get()
-        existing_ids = set(existing_result["ids"])
-
-        missing_indices = [
-            i for i, cid in enumerate(all_ids) if cid not in existing_ids
-        ]
-
-        if not missing_indices:
-            print("All chunks are already indexed in ChromaDB.")
-            return
-
-        print(f"{len(missing_indices)} chunks are missing from ChromaDB.")
-
-        # Limit to max_new_embeddings for today's quota
-        indices_to_embed = missing_indices[:max_new_embeddings]
-        print(
-            f"Embedding {len(indices_to_embed)} new chunks (Quota limit: {max_new_embeddings})..."
+        return EmbeddingPlan(
+            chunk_strategy=self.chunk_strategy,
+            collection_name=self.collection.name,
+            section_files=section_files,
+            total_chunks=total_chunks,
+            already_indexed=already_indexed,
+            missing_chunks=missing_count,
+            daily_limit=daily_quota_limit,
+            daily_used=daily_quota_used,
+            daily_remaining=daily_remaining,
+            embeddable_now=embeddable_now,
+            deferred_chunks=deferred,
+            estimated_minutes=embeddable_now / max(rpm_limit, 1),
+            rpm_limit=rpm_limit,
         )
 
-        for idx in indices_to_embed:
+    def load_and_index_data(
+        self,
+        max_files: Optional[int] = None,
+        max_new_embeddings: Optional[int] = None,
+        daily_quota_used: int = 0,
+        daily_quota_limit: int = DEFAULT_DAILY_EMBEDDING_LIMIT,
+        rpm_limit: int = DEFAULT_EMBEDDING_RPM,
+        dry_run: bool = False,
+    ) -> EmbeddingPlan:
+        print(f"Loading and indexing data (chunk_strategy={self.chunk_strategy})...")
+
+        all_chunks, all_metadata, all_ids, _ = self._build_corpus(max_files=max_files)
+        self.documents = all_chunks
+        self.doc_metadata = all_metadata
+        self.chunk_ids = all_ids
+
+        plan = self.get_embedding_plan(
+            max_files=max_files,
+            daily_quota_used=daily_quota_used,
+            daily_quota_limit=daily_quota_limit,
+            max_new_embeddings=max_new_embeddings,
+            rpm_limit=rpm_limit,
+        )
+        print(plan.summary())
+
+        if not self.documents:
+            print("No documents to index.")
+            return plan
+
+        tokenized_corpus = [doc.lower().split() for doc in self.documents]
+        self.bm25 = BM25Okapi(tokenized_corpus)
+        print("BM25 indexing complete.")
+
+        if dry_run:
+            print("\nMode --plan : aucun embedding lancé.")
+            return plan
+
+        if plan.missing_chunks == 0:
+            print("All chunks are already indexed in ChromaDB.")
+            return plan
+
+        if plan.embeddable_now == 0:
+            print(
+                "\n⛔ Quota journalier épuisé — relance demain ou augmentez le quota restant."
+            )
+            return plan
+
+        existing_ids = set(self.collection.get()["ids"])
+        missing_indices = [i for i, cid in enumerate(all_ids) if cid not in existing_ids]
+        indices_to_embed = missing_indices[: plan.embeddable_now]
+
+        print(
+            f"\nEmbedding {len(indices_to_embed)} / {plan.missing_chunks} chunks manquants..."
+        )
+
+        sleep_sec = embedding_sleep_seconds(rpm_limit)
+        for n, idx in enumerate(indices_to_embed, start=1):
             chunk = self.documents[idx]
             metadata = self.doc_metadata[idx]
             chunk_id = all_ids[idx]
 
             try:
-                # Use Gemini to generate individual embedding
                 response = self.client.models.embed_content(
                     model="gemini-embedding-2", contents=chunk
                 )
@@ -125,23 +491,38 @@ class HybridRAG:
                     metadatas=[metadata],
                     ids=[chunk_id],
                 )
-                # Respecter le quota RPM (Requests Per Minute)
-                time.sleep(0.6)
+                if n % 25 == 0 or n == len(indices_to_embed):
+                    print(f"  Progression : {n}/{len(indices_to_embed)}")
+                time.sleep(sleep_sec)
             except Exception as e:
                 print(f"Error embedding chunk {chunk_id}: {e}")
-                break  # Stop if we hit a quota error or other issue
+                break
 
-        print(f"Vector Indexing complete. Total in DB: {self.collection.count()}")
+        print(f"Vector indexing complete. Total in DB: {self.collection.count()}")
+        if plan.deferred_chunks > 0:
+            print(
+                f"⏳ {plan.deferred_chunks} chunks restants — "
+                f"relancez demain avec --quota-used mis à jour."
+            )
+        return plan
 
-    def _bm25_search(self, query, top_k=30):
-        tokenized_query = query.lower().split(" ")
+    def _get_reranker(self):
+        if self._reranker is None:
+            from sentence_transformers import CrossEncoder
+
+            self._reranker = CrossEncoder(self.reranker_model, device="cpu")
+        return self._reranker
+
+    def _bm25_search(self, query: str, top_k: int = 50) -> list[int]:
+        if self.bm25 is None:
+            return []
+        tokenized_query = query.lower().split()
         doc_scores = self.bm25.get_scores(tokenized_query)
-        top_indices = sorted(
+        return sorted(
             range(len(doc_scores)), key=lambda i: doc_scores[i], reverse=True
         )[:top_k]
-        return [self.documents[i] for i in top_indices]
 
-    def _vector_search(self, query, top_k=5):
+    def _vector_search(self, query: str, top_k: int = 10) -> list[int]:
         try:
             query_embedding = (
                 self.client.models.embed_content(
@@ -154,47 +535,222 @@ class HybridRAG:
             results = self.collection.query(
                 query_embeddings=[query_embedding], n_results=top_k
             )
-            if results["documents"]:
-                return results["documents"][0]
-            return []
+            if not results["ids"] or not results["ids"][0]:
+                return []
+
+            returned_ids = results["ids"][0]
+            id_to_index = {cid: i for i, cid in enumerate(self.chunk_ids)}
+            indices = [id_to_index[cid] for cid in returned_ids if cid in id_to_index]
+            return indices
         except Exception as e:
             print(f"Vector search warning/error: {e}")
             return []
 
-    def retrieve(self, query):
-        bm25_results = self._bm25_search(query, top_k=30)
-        vector_results = self._vector_search(query, top_k=5)
+    def _apply_metadata_filter(self, indices: list[int], metadata_filter: Optional[dict]) -> list[int]:
+        if not metadata_filter:
+            return indices
+        filtered = []
+        for idx in indices:
+            metadata = self.doc_metadata[idx]
+            if all(metadata.get(k) == v for k, v in metadata_filter.items()):
+                filtered.append(idx)
+        return filtered
 
-        # Deduplicate
-        all_results = list(set(bm25_results + vector_results))
-        return all_results
+    def _deduplicate_indices(self, indices: list[int]) -> list[int]:
+        seen = set()
+        deduped = []
+        for idx in indices:
+            if idx not in seen:
+                seen.add(idx)
+                deduped.append(idx)
+        return deduped
 
-    def answer_question(self, query):
-        retrieved_chunks = self.retrieve(query)
-        context = "\n\n---\n\n".join(retrieved_chunks)
+    def _rerank(self, query: str, indices: list[int], top_k: int = 10) -> list[int]:
+        if not indices:
+            return []
 
-        prompt = f"""En te basant uniquement sur les extraits du rapport 10-K suivants, quels sont les signaux positifs ou négatifs concernant la trajectoire financière de l'entreprise ?
-        
-        Extraits:
-        {context}
-        
-        Question: {query}
-        """
+        pairs = [(query, self.documents[idx]) for idx in indices]
+        scores = self._get_reranker().predict(pairs)
+        ranked = sorted(
+            zip(indices, scores), key=lambda item: item[1], reverse=True
+        )
+        return [idx for idx, _ in ranked[:top_k]]
+
+    def retrieve(
+        self,
+        query: str,
+        search_mode: Optional[SearchMode] = None,
+        use_reranking: Optional[bool] = None,
+        metadata_filter: Optional[dict] = None,
+        top_k: int = 10,
+        candidate_pool: int = 50,
+    ) -> RetrievalResult:
+        mode = search_mode or self.search_mode
+        rerank_enabled = self.use_reranking if use_reranking is None else use_reranking
+
+        start = time.perf_counter()
+        candidate_indices: list[int] = []
+
+        if mode in ("hybrid", "bm25"):
+            candidate_indices.extend(self._bm25_search(query, top_k=candidate_pool))
+        if mode in ("hybrid", "vector"):
+            candidate_indices.extend(self._vector_search(query, top_k=min(candidate_pool, 20)))
+
+        candidate_indices = self._deduplicate_indices(candidate_indices)
+        candidate_indices = self._apply_metadata_filter(candidate_indices, metadata_filter)
+
+        retrieval_latency_ms = (time.perf_counter() - start) * 1000
+
+        rerank_start = time.perf_counter()
+        if rerank_enabled and candidate_indices:
+            final_indices = self._rerank(query, candidate_indices, top_k=top_k)
+        else:
+            final_indices = candidate_indices[:top_k]
+
+        rerank_latency_ms = (time.perf_counter() - rerank_start) * 1000
+
+        return RetrievalResult(
+            chunks=[self.documents[i] for i in final_indices],
+            metadatas=[self.doc_metadata[i] for i in final_indices],
+            chunk_indices=final_indices,
+            retrieval_latency_ms=retrieval_latency_ms,
+            rerank_latency_ms=rerank_latency_ms,
+            search_mode=mode,
+            reranking_enabled=rerank_enabled,
+        )
+
+    def count_context_tokens(self, chunks: list[str]) -> int:
+        context = "\n\n---\n\n".join(chunks)
+        try:
+            response = self.client.models.count_tokens(
+                model=DEFAULT_LLM_MODEL,
+                contents=context,
+            )
+            return response.total_tokens
+        except Exception:
+            return estimate_tokens(context)
+
+    def build_prompt(self, query: str, chunks: list[str]) -> str:
+        context = "\n\n---\n\n".join(chunks)
+        return f"""En te basant uniquement sur les extraits du rapport 10-K suivants, quels sont les signaux positifs ou négatifs concernant la trajectoire financière de l'entreprise ?
+
+Extraits:
+{context}
+
+Question: {query}
+"""
+
+    def answer_question(
+        self,
+        query: str,
+        search_mode: Optional[SearchMode] = None,
+        use_reranking: Optional[bool] = None,
+        metadata_filter: Optional[dict] = None,
+    ) -> tuple[str, RetrievalResult]:
+        retrieval = self.retrieve(
+            query,
+            search_mode=search_mode,
+            use_reranking=use_reranking,
+            metadata_filter=metadata_filter,
+        )
+        prompt = self.build_prompt(query, retrieval.chunks)
 
         response = self.client.models.generate_content(
-            model="gemma-4-31b-it",
+            model=DEFAULT_LLM_MODEL,
             contents=prompt,
         )
 
-        return response.text
+        return response.text, retrieval
+
+    def answer_question_stream(
+        self,
+        query: str,
+        search_mode: Optional[SearchMode] = None,
+        use_reranking: Optional[bool] = None,
+        metadata_filter: Optional[dict] = None,
+    ) -> Generator[str, None, RetrievalResult]:
+        retrieval = self.retrieve(
+            query,
+            search_mode=search_mode,
+            use_reranking=use_reranking,
+            metadata_filter=metadata_filter,
+        )
+        prompt = self.build_prompt(query, retrieval.chunks)
+
+        stream = self.client.models.generate_content_stream(
+            model=DEFAULT_LLM_MODEL,
+            contents=prompt,
+        )
+
+        for chunk in stream:
+            if chunk.text:
+                yield chunk.text
+
+        return retrieval
 
 
 if __name__ == "__main__":
-    rag = HybridRAG()
-    # On indexe tous les fichiers, avec une limite de 800 nouveaux embeddings aujourd'hui
-    rag.load_and_index_data(max_files=None, max_new_embeddings=800)
+    import argparse
 
-    query = "Quels sont les facteurs de risques principaux ou changements financiers mentionnés récemment chez NVIDIA ?"
-    print(f"\nQuestion: {query}")
-    answer = rag.answer_question(query)
-    print(f"\nRéponse:\n{answer}")
+    parser = argparse.ArgumentParser(
+        description="Hybrid RAG — planifier ou lancer l'indexation vectorielle."
+    )
+    parser.add_argument(
+        "--plan",
+        action="store_true",
+        help="Afficher le nombre de chunks et le quota sans embedder (défaut).",
+    )
+    parser.add_argument(
+        "--embed",
+        action="store_true",
+        help="Lancer les embeddings (respecte le quota restant).",
+    )
+    parser.add_argument(
+        "--strategy",
+        choices=["fixed", "recursive", "semantic"],
+        default=os.getenv("CHUNK_STRATEGY", "semantic"),
+    )
+    parser.add_argument(
+        "--quota-used",
+        type=int,
+        default=int(os.getenv("EMBEDDING_DAILY_USED", "0")),
+        help="Embeddings déjà consommés aujourd'hui (ex: 269).",
+    )
+    parser.add_argument(
+        "--quota-limit",
+        type=int,
+        default=int(os.getenv("EMBEDDING_DAILY_LIMIT", str(DEFAULT_DAILY_EMBEDDING_LIMIT))),
+    )
+    parser.add_argument(
+        "--max-new",
+        type=int,
+        default=None,
+        help="Plafond explicite d'embeddings pour cette session (≤ quota restant).",
+    )
+    parser.add_argument(
+        "--rpm",
+        type=int,
+        default=int(os.getenv("EMBEDDING_RPM", str(DEFAULT_EMBEDDING_RPM))),
+    )
+    parser.add_argument("--max-files", type=int, default=None)
+    args = parser.parse_args()
+
+    if not args.embed:
+        args.plan = True
+
+    rag = HybridRAG(chunk_strategy=args.strategy)
+    rag.load_and_index_data(
+        max_files=args.max_files,
+        max_new_embeddings=args.max_new,
+        daily_quota_used=args.quota_used,
+        daily_quota_limit=args.quota_limit,
+        rpm_limit=args.rpm,
+        dry_run=args.plan and not args.embed,
+    )
+
+    if args.plan and not args.embed:
+        print(
+            "\nPour lancer l'embedding : "
+            f"python3 rag/hybrid_rag.py --embed --strategy {args.strategy} "
+            f"--quota-used {args.quota_used}"
+        )
