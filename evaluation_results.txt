@@ -1,0 +1,45 @@
+==================================================================================================================================
+RAG STRATEGY LEADERBOARD (sorted by NDCG@k)
+==================================================================================================================================
+Rank  Embedding    Chunking     Search     Rerank   Recall@k   MRR        Precision@k  NDCG@k    
+----------------------------------------------------------------------------------------------------------------------------------
+1     bge-base     simple       hybrid     no       1.000      1.000      0.829        0.994     
+2     bge-base     paragraph    hybrid     no       1.000      1.000      0.829        0.993     
+3     bge-small    simple       vector     yes      1.000      1.000      0.971        0.966     
+4     bge-small    simple       vector     no       1.000      1.000      0.914        0.963     
+5     bge-small    paragraph    vector     no       1.000      1.000      0.914        0.961     
+6     bge-base     simple       vector     no       1.000      1.000      0.829        0.961     
+7     bge-small    paragraph    vector     yes      1.000      1.000      0.971        0.954     
+8     bge-small    simple       hybrid     no       1.000      1.000      0.829        0.952     
+9     bge-small    paragraph    hybrid     no       1.000      1.000      0.829        0.951     
+10    bge-large    simple       vector     no       1.000      1.000      0.943        0.935     
+11    bge-large    simple       hybrid     no       1.000      1.000      0.829        0.922     
+12    bge-base     paragraph    vector     no       1.000      0.905      0.771        0.896     
+13    bge-large    paragraph    hybrid     yes      0.857      0.857      0.829        0.853     
+14    bge-small    simple       bm25       yes      0.857      0.857      0.771        0.852     
+15    bge-base     simple       bm25       yes      0.857      0.857      0.771        0.852     
+16    bge-large    simple       bm25       yes      0.857      0.857      0.771        0.852     
+17    bge-small    paragraph    bm25       yes      0.857      0.857      0.771        0.844     
+18    bge-base     paragraph    bm25       yes      0.857      0.857      0.771        0.844     
+19    bge-large    paragraph    bm25       yes      0.857      0.857      0.771        0.844     
+20    bge-large    simple       vector     yes      0.857      0.857      0.857        0.841     
+21    bge-base     simple       vector     yes      0.857      0.857      0.857        0.838     
+22    bge-base     simple       hybrid     yes      0.857      0.857      0.829        0.838     
+23    bge-base     paragraph    vector     yes      0.857      0.857      0.857        0.837     
+24    bge-small    simple       hybrid     yes      0.857      0.857      0.800        0.837     
+25    bge-base     paragraph    hybrid     yes      0.857      0.857      0.829        0.834     
+26    bge-small    paragraph    hybrid     yes      0.857      0.857      0.800        0.832     
+27    bge-large    simple       hybrid     yes      0.857      0.857      0.857        0.832     
+28    bge-large    paragraph    vector     no       0.857      0.857      0.800        0.827     
+29    bge-large    paragraph    hybrid     no       0.857      0.762      0.743        0.778     
+30    bge-small    simple       bm25       no       0.857      0.743      0.629        0.730     
+31    bge-base     simple       bm25       no       0.857      0.743      0.629        0.730     
+32    bge-large    simple       bm25       no       0.857      0.743      0.629        0.730     
+33    bge-large    paragraph    vector     yes      0.714      0.714      0.714        0.710     
+34    bge-small    paragraph    bm25       no       0.714      0.714      0.629        0.693     
+35    bge-base     paragraph    bm25       no       0.714      0.714      0.629        0.693     
+36    bge-large    paragraph    bm25       no       0.714      0.714      0.629        0.693     
+----------------------------------------------------------------------------------------------------------------------------------
+
+🏆 Best strategy: bge-base | chunking=simple | search=hybrid | rerank=no
+   NDCG@k=0.994, MRR=1.000, Recall@k=1.000
