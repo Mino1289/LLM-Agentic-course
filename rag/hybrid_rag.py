@@ -11,25 +11,23 @@ from typing import Generator, Literal, Optional
 
 import chromadb
 from dotenv import load_dotenv
-from google import genai
-from google.genai import types
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from rank_bm25 import BM25Okapi
 
+from rag.llm_provider import LLMProvider
 from rag.paths import CHROMA_DB_DIR, ENV_FILE, PROCESSED_DATA_DIR
 
 load_dotenv(ENV_FILE)
 
-SearchMode = Literal["hybrid", "vector", "bm25"]
-ChunkStrategy = Literal["fixed", "recursive", "semantic"]
+ChunkStrategy = Literal["semantic"]
 
 DEFAULT_MAX_CHUNK_SIZE = 1500
 DEFAULT_MIN_CHUNK_SIZE = 80
 
-DEFAULT_RERANKER = "mixedbread-ai/mxbai-rerank-xsmall-v1"
-DEFAULT_LLM_MODEL = "gemma-4-31b-it"
+DEFAULT_RERANKER = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 DEFAULT_DAILY_EMBEDDING_LIMIT = 1000
 DEFAULT_EMBEDDING_RPM = 100
+DEFAULT_EMBEDDING_BATCH_SIZE = 32
+DEFAULT_EMBEDDING_RETRIES = 3
 
 
 @dataclass
@@ -82,6 +80,12 @@ def embedding_sleep_seconds(rpm_limit: int = DEFAULT_EMBEDDING_RPM) -> float:
     return 60.0 / max(rpm_limit, 1)
 
 
+def iter_batches(items: list[int], batch_size: int) -> Generator[list[int], None, None]:
+    size = max(1, batch_size)
+    for start in range(0, len(items), size):
+        yield items[start : start + size]
+
+
 @dataclass
 class RetrievalResult:
     chunks: list[str] = field(default_factory=list)
@@ -89,7 +93,7 @@ class RetrievalResult:
     chunk_indices: list[int] = field(default_factory=list)
     retrieval_latency_ms: float = 0.0
     rerank_latency_ms: float = 0.0
-    search_mode: str = "hybrid"
+    search_mode: str = "vector_rerank"
     reranking_enabled: bool = False
 
 
@@ -312,9 +316,9 @@ def estimate_tokens(text: str) -> int:
 class HybridRAG:
     def __init__(
         self,
-        chunk_strategy: ChunkStrategy = "fixed",
-        search_mode: SearchMode = "hybrid",
-        use_reranking: bool = False,
+        chunk_strategy: ChunkStrategy = "semantic",
+        search_mode: str = "vector",
+        use_reranking: bool = True,
         reranker_model: str = DEFAULT_RERANKER,
         collection_name: Optional[str] = None,
     ):
@@ -323,25 +327,21 @@ class HybridRAG:
         self.use_reranking = use_reranking
         self.reranker_model = reranker_model
 
-        self.bm25 = None
         self.documents: list[str] = []
         self.doc_metadata: list[dict] = []
         self.chunk_ids: list[str] = []
         self._reranker = None
 
-        self.client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+        self.provider = LLMProvider()
         self.chroma_client = chromadb.PersistentClient(path=str(CHROMA_DB_DIR))
-        resolved_collection = collection_name or f"10k_reports_{chunk_strategy}"
+        resolved_collection = collection_name or "finance_rag_semantic_vector"
         self.collection = self.chroma_client.get_or_create_collection(
             name=resolved_collection
         )
 
     def _get_chunker(self):
-        if self.chunk_strategy == "recursive":
-            return chunk_text_recursive
-        if self.chunk_strategy == "semantic":
-            return chunk_text_semantic
-        return chunk_text_fixed
+        # Single strategy for this project: semantic chunking.
+        return chunk_text_semantic
 
     def _build_metadata(self, source: str, section: str, chunk_index: int) -> dict:
         return {
@@ -388,6 +388,7 @@ class HybridRAG:
         daily_quota_limit: int = DEFAULT_DAILY_EMBEDDING_LIMIT,
         max_new_embeddings: Optional[int] = None,
         rpm_limit: int = DEFAULT_EMBEDDING_RPM,
+        embedding_batch_size: int = DEFAULT_EMBEDDING_BATCH_SIZE,
     ) -> EmbeddingPlan:
         all_chunks, _, all_ids, section_files = self._build_corpus(max_files=max_files)
         total_chunks = len(all_chunks)
@@ -402,6 +403,7 @@ class HybridRAG:
         embeddable_now = min(missing_count, budget)
         deferred = max(0, missing_count - embeddable_now)
 
+        estimated_requests = embeddable_now / max(1, embedding_batch_size)
         return EmbeddingPlan(
             chunk_strategy=self.chunk_strategy,
             collection_name=self.collection.name,
@@ -414,7 +416,7 @@ class HybridRAG:
             daily_remaining=daily_remaining,
             embeddable_now=embeddable_now,
             deferred_chunks=deferred,
-            estimated_minutes=embeddable_now / max(rpm_limit, 1),
+            estimated_minutes=estimated_requests / max(rpm_limit, 1),
             rpm_limit=rpm_limit,
         )
 
@@ -425,6 +427,8 @@ class HybridRAG:
         daily_quota_used: int = 0,
         daily_quota_limit: int = DEFAULT_DAILY_EMBEDDING_LIMIT,
         rpm_limit: int = DEFAULT_EMBEDDING_RPM,
+        embedding_batch_size: int = DEFAULT_EMBEDDING_BATCH_SIZE,
+        max_embedding_retries: int = DEFAULT_EMBEDDING_RETRIES,
         dry_run: bool = False,
     ) -> EmbeddingPlan:
         print(f"Loading and indexing data (chunk_strategy={self.chunk_strategy})...")
@@ -440,16 +444,13 @@ class HybridRAG:
             daily_quota_limit=daily_quota_limit,
             max_new_embeddings=max_new_embeddings,
             rpm_limit=rpm_limit,
+            embedding_batch_size=embedding_batch_size,
         )
         print(plan.summary())
 
         if not self.documents:
             print("No documents to index.")
             return plan
-
-        tokenized_corpus = [doc.lower().split() for doc in self.documents]
-        self.bm25 = BM25Okapi(tokenized_corpus)
-        print("BM25 indexing complete.")
 
         if dry_run:
             print("\nMode --plan : aucun embedding lancé.")
@@ -469,33 +470,58 @@ class HybridRAG:
         missing_indices = [i for i, cid in enumerate(all_ids) if cid not in existing_ids]
         indices_to_embed = missing_indices[: plan.embeddable_now]
 
+        print(f"\nEmbedding {len(indices_to_embed)} / {plan.missing_chunks} chunks manquants...")
         print(
-            f"\nEmbedding {len(indices_to_embed)} / {plan.missing_chunks} chunks manquants..."
+            f"Batch size={embedding_batch_size}, target rate={rpm_limit} req/min, "
+            f"retries={max_embedding_retries}"
         )
 
         sleep_sec = embedding_sleep_seconds(rpm_limit)
-        for n, idx in enumerate(indices_to_embed, start=1):
-            chunk = self.documents[idx]
-            metadata = self.doc_metadata[idx]
-            chunk_id = all_ids[idx]
+        embedded = 0
+        for batch_num, batch_indices in enumerate(
+            iter_batches(indices_to_embed, embedding_batch_size), start=1
+        ):
+            texts = [self.documents[idx] for idx in batch_indices]
+            metadatas = [self.doc_metadata[idx] for idx in batch_indices]
+            ids = [all_ids[idx] for idx in batch_indices]
+
+            embeddings: list[list[float]] | None = None
+            for attempt in range(1, max_embedding_retries + 1):
+                try:
+                    embeddings = self.provider.embed(texts)
+                    if len(embeddings) != len(texts):
+                        raise ValueError(
+                            f"Embedding response size mismatch: {len(embeddings)} vs {len(texts)}"
+                        )
+                    break
+                except Exception as e:
+                    if attempt >= max_embedding_retries:
+                        print(f"Error embedding batch {batch_num} after {attempt} tries: {e}")
+                        embeddings = None
+                        break
+                    backoff = min(8.0, 2 ** (attempt - 1))
+                    print(
+                        f"Embedding batch {batch_num} failed (attempt {attempt}/{max_embedding_retries}): {e}. "
+                        f"Retry in {backoff:.1f}s..."
+                    )
+                    time.sleep(backoff)
+
+            if embeddings is None:
+                break
 
             try:
-                response = self.client.models.embed_content(
-                    model="gemini-embedding-2", contents=chunk
-                )
-                embedding = response.embeddings[0].values
-
                 self.collection.add(
-                    documents=[chunk],
-                    embeddings=[embedding],
-                    metadatas=[metadata],
-                    ids=[chunk_id],
+                    documents=texts,
+                    embeddings=embeddings,
+                    metadatas=metadatas,
+                    ids=ids,
                 )
-                if n % 25 == 0 or n == len(indices_to_embed):
-                    print(f"  Progression : {n}/{len(indices_to_embed)}")
+                embedded += len(batch_indices)
+                if batch_num % 5 == 0 or embedded == len(indices_to_embed):
+                    print(f"  Progression : {embedded}/{len(indices_to_embed)}")
                 time.sleep(sleep_sec)
             except Exception as e:
-                print(f"Error embedding chunk {chunk_id}: {e}")
+                print(f"Error writing batch {batch_num} to ChromaDB: {e}")
                 break
 
         print(f"Vector indexing complete. Total in DB: {self.collection.count()}")
@@ -513,24 +539,9 @@ class HybridRAG:
             self._reranker = CrossEncoder(self.reranker_model, device="cpu")
         return self._reranker
 
-    def _bm25_search(self, query: str, top_k: int = 50) -> list[int]:
-        if self.bm25 is None:
-            return []
-        tokenized_query = query.lower().split()
-        doc_scores = self.bm25.get_scores(tokenized_query)
-        return sorted(
-            range(len(doc_scores)), key=lambda i: doc_scores[i], reverse=True
-        )[:top_k]
-
     def _vector_search(self, query: str, top_k: int = 10) -> list[int]:
         try:
-            query_embedding = (
-                self.client.models.embed_content(
-                    model="gemini-embedding-2", contents=query
-                )
-                .embeddings[0]
-                .values
-            )
+            query_embedding = self.provider.embed([query])[0]
 
             results = self.collection.query(
                 query_embeddings=[query_embedding], n_results=top_k
@@ -568,33 +579,33 @@ class HybridRAG:
     def _rerank(self, query: str, indices: list[int], top_k: int = 10) -> list[int]:
         if not indices:
             return []
-
-        pairs = [(query, self.documents[idx]) for idx in indices]
-        scores = self._get_reranker().predict(pairs)
-        ranked = sorted(
-            zip(indices, scores), key=lambda item: item[1], reverse=True
-        )
-        return [idx for idx, _ in ranked[:top_k]]
+        try:
+            pairs = [(query, self.documents[idx]) for idx in indices]
+            scores = self._get_reranker().predict(pairs)
+            ranked = sorted(
+                zip(indices, scores), key=lambda item: item[1], reverse=True
+            )
+            return [idx for idx, _ in ranked[:top_k]]
+        except Exception as e:
+            print(f"Reranker warning/error: {e}")
+            return indices[:top_k]
 
     def retrieve(
         self,
         query: str,
-        search_mode: Optional[SearchMode] = None,
+        search_mode: Optional[str] = None,
         use_reranking: Optional[bool] = None,
         metadata_filter: Optional[dict] = None,
         top_k: int = 10,
         candidate_pool: int = 50,
     ) -> RetrievalResult:
-        mode = search_mode or self.search_mode
+        mode = "vector_rerank"
         rerank_enabled = self.use_reranking if use_reranking is None else use_reranking
 
         start = time.perf_counter()
         candidate_indices: list[int] = []
 
-        if mode in ("hybrid", "bm25"):
-            candidate_indices.extend(self._bm25_search(query, top_k=candidate_pool))
-        if mode in ("hybrid", "vector"):
-            candidate_indices.extend(self._vector_search(query, top_k=min(candidate_pool, 20)))
+        candidate_indices.extend(self._vector_search(query, top_k=min(candidate_pool, 30)))
 
         candidate_indices = self._deduplicate_indices(candidate_indices)
         candidate_indices = self._apply_metadata_filter(candidate_indices, metadata_filter)
@@ -621,29 +632,29 @@ class HybridRAG:
 
     def count_context_tokens(self, chunks: list[str]) -> int:
         context = "\n\n---\n\n".join(chunks)
-        try:
-            response = self.client.models.count_tokens(
-                model=DEFAULT_LLM_MODEL,
-                contents=context,
-            )
-            return response.total_tokens
-        except Exception:
-            return estimate_tokens(context)
+        return self.provider.estimate_tokens(context)
 
     def build_prompt(self, query: str, chunks: list[str]) -> str:
         context = "\n\n---\n\n".join(chunks)
-        return f"""En te basant uniquement sur les extraits du rapport 10-K suivants, quels sont les signaux positifs ou négatifs concernant la trajectoire financière de l'entreprise ?
+        return f"""Tu es un analyste buy-side spécialisé actions.
+En te basant uniquement sur les extraits suivants, fais une synthèse financière structurée.
 
 Extraits:
 {context}
 
 Question: {query}
+
+Format attendu:
+1) Résumé exécutif (3-5 lignes)
+2) Signaux positifs
+3) Signaux de risque
+4) Conclusion orientée décision (surveiller/renforcer/réduire) avec justification
 """
 
     def answer_question(
         self,
         query: str,
-        search_mode: Optional[SearchMode] = None,
+        search_mode: Optional[str] = None,
         use_reranking: Optional[bool] = None,
         metadata_filter: Optional[dict] = None,
     ) -> tuple[str, RetrievalResult]:
@@ -655,17 +666,13 @@ Question: {query}
         )
         prompt = self.build_prompt(query, retrieval.chunks)
 
-        response = self.client.models.generate_content(
-            model=DEFAULT_LLM_MODEL,
-            contents=prompt,
-        )
-
-        return response.text, retrieval
+        response = self.provider.generate(prompt)
+        return response, retrieval
 
     def answer_question_stream(
         self,
         query: str,
-        search_mode: Optional[SearchMode] = None,
+        search_mode: Optional[str] = None,
         use_reranking: Optional[bool] = None,
         metadata_filter: Optional[dict] = None,
     ) -> Generator[str, None, RetrievalResult]:
@@ -677,14 +684,8 @@ Question: {query}
         )
         prompt = self.build_prompt(query, retrieval.chunks)
 
-        stream = self.client.models.generate_content_stream(
-            model=DEFAULT_LLM_MODEL,
-            contents=prompt,
-        )
-
-        for chunk in stream:
-            if chunk.text:
-                yield chunk.text
+        for chunk in self.provider.generate_stream(prompt):
+            yield chunk
 
         return retrieval
 
@@ -707,8 +708,8 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--strategy",
-        choices=["fixed", "recursive", "semantic"],
-        default=os.getenv("CHUNK_STRATEGY", "semantic"),
+        choices=["semantic"],
+        default="semantic",
     )
     parser.add_argument(
         "--quota-used",
@@ -732,6 +733,18 @@ if __name__ == "__main__":
         type=int,
         default=int(os.getenv("EMBEDDING_RPM", str(DEFAULT_EMBEDDING_RPM))),
     )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=int(os.getenv("EMBEDDING_BATCH_SIZE", str(DEFAULT_EMBEDDING_BATCH_SIZE))),
+        help="Nombre de chunks embeddes par requete API.",
+    )
+    parser.add_argument(
+        "--retries",
+        type=int,
+        default=int(os.getenv("EMBEDDING_MAX_RETRIES", str(DEFAULT_EMBEDDING_RETRIES))),
+        help="Nombre max de tentatives par batch en cas d'erreur API.",
+    )
     parser.add_argument("--max-files", type=int, default=None)
     args = parser.parse_args()
 
@@ -745,6 +758,8 @@ if __name__ == "__main__":
         daily_quota_used=args.quota_used,
         daily_quota_limit=args.quota_limit,
         rpm_limit=args.rpm,
+        embedding_batch_size=args.batch_size,
+        max_embedding_retries=args.retries,
         dry_run=args.plan and not args.embed,
     )
 

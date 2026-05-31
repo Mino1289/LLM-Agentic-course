@@ -9,69 +9,60 @@ import os
 from rag.hybrid_rag import (
     DEFAULT_DAILY_EMBEDDING_LIMIT,
     HybridRAG,
-    chunk_text_fixed,
-    chunk_text_recursive,
     chunk_text_semantic,
-    parse_processed_filename,
 )
 from rag.paths import PROCESSED_DATA_DIR
 
-CHUNKERS = {
-    "semantic": chunk_text_semantic,
-    "fixed": chunk_text_fixed,
-    "recursive": chunk_text_recursive,
-}
+CHUNKER = chunk_text_semantic
 
 
-def analyze_chunk_counts():
+def analyze_chunk_counts() -> int:
     files = sorted(PROCESSED_DATA_DIR.glob("*.txt"))
     print(f"Fichiers .txt dans {PROCESSED_DATA_DIR} : {len(files)}\n")
+    total_chunks = 0
+    total_chars = 0
+    file_stats = []
 
-    for strategy_name, chunker in CHUNKERS.items():
-        total_chunks = 0
-        total_chars = 0
-        file_stats = []
+    for file_path in files:
+        text = file_path.read_text(encoding="utf-8")
+        if not text:
+            continue
 
-        for file_path in files:
-            text = file_path.read_text(encoding="utf-8")
-            if not text:
-                continue
+        file_chars = len(text)
+        file_chunks = len(CHUNKER(text))
+        total_chars += file_chars
+        total_chunks += file_chunks
+        file_stats.append(
+            {
+                "filename": file_path.name,
+                "chars": file_chars,
+                "chunks": file_chunks,
+            }
+        )
 
-            file_chars = len(text)
-            file_chunks = len(chunker(text))
-            total_chars += file_chars
-            total_chunks += file_chunks
-            file_stats.append(
-                {
-                    "filename": file_path.name,
-                    "chars": file_chars,
-                    "chunks": file_chunks,
-                }
-            )
-
-        print(f"--- Découpage {strategy_name} ---")
-        print(f"  Chunks totaux : {total_chunks:,}")
-        print(f"  Caractères    : {total_chars:,}")
-        print(f"  Appels API    : {total_chunks:,} (si indexation complète)")
-        print("  Top 3 fichiers les plus chunkés :")
-        for stat in sorted(file_stats, key=lambda x: x["chunks"], reverse=True)[:3]:
-            print(
-                f"    - {stat['filename']}: {stat['chunks']} chunks "
-                f"({stat['chars']:,} chars)"
-            )
-        print()
+    print("--- Découpage unique: semantic ---")
+    print(f"  Chunks totaux : {total_chunks:,}")
+    print(f"  Caractères    : {total_chars:,}")
+    print(f"  Appels embedding estimés : {total_chunks:,}")
+    print("  Top 3 fichiers les plus chunkés :")
+    for stat in sorted(file_stats, key=lambda x: x["chunks"], reverse=True)[:3]:
+        print(
+            f"    - {stat['filename']}: {stat['chunks']} chunks "
+            f"({stat['chars']:,} chars)"
+        )
+    print()
+    return total_chunks
 
 
 def analyze_embedding_plans(quota_used: int, quota_limit: int):
-    print(f"=== Plans d'embedding (quota {quota_used}/{quota_limit}) ===\n")
-    for strategy in CHUNKERS:
-        rag = HybridRAG(chunk_strategy=strategy)
-        plan = rag.get_embedding_plan(
-            daily_quota_used=quota_used,
-            daily_quota_limit=quota_limit,
-        )
-        print(plan.summary())
-        print()
+    print(f"=== Plan d'embedding (quota {quota_used}/{quota_limit}) ===\n")
+    rag = HybridRAG(chunk_strategy="semantic")
+    plan = rag.get_embedding_plan(
+        daily_quota_used=quota_used,
+        daily_quota_limit=quota_limit,
+    )
+    print(plan.summary())
+    print()
 
 
 def main():

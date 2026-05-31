@@ -5,16 +5,24 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import time
 import json
+import os
 import requests
 from datetime import datetime
+from dotenv import load_dotenv
 
-from rag.paths import DATA_DIR, SEC_FILINGS_METADATA, ensure_dir
+from rag.paths import DATA_DIR, ENV_FILE, SEC_FILINGS_METADATA, ensure_dir
+
+load_dotenv(ENV_FILE)
 
 # ---------------------------------------------------------------------------
 # CONFIGURATION OBLIGATOIRE (Règle SEC)
 # Changez ces valeurs avec vos propres informations pour éviter le blocage IP.
 # ---------------------------------------------------------------------------
-USER_AGENT = "MonProjetRAGFinancier vkretz@etu.uqac.ca"
+USER_AGENT = os.getenv("SEC_USER_AGENT", "").strip()
+if not USER_AGENT:
+    raise ValueError(
+        "SEC_USER_AGENT is required in .env (example: MyFinanceRAG your-email@example.com)"
+    )
 HEADERS = {
     "User-Agent": USER_AGENT,
     "Accept-Encoding": "gzip, deflate"
