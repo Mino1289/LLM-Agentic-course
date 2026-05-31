@@ -4,6 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: finance-rag-bootstrap
+    user: "${UID:-1000}:${GID:-1000}"
     env_file:
       - .env
     command: ["/bin/bash", "scripts/bootstrap.sh"]
@@ -18,6 +19,7 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: finance-rag-ui
+    user: "${UID:-1000}:${GID:-1000}"
     depends_on:
       bootstrap:
         condition: service_completed_successfully

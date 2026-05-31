@@ -24,7 +24,7 @@ DEFAULT_MAX_CHUNK_SIZE = 1500
 DEFAULT_MIN_CHUNK_SIZE = 80
 
 DEFAULT_RERANKER = "cross-encoder/ms-marco-MiniLM-L-6-v2"
-DEFAULT_DAILY_EMBEDDING_LIMIT = 1000
+DEFAULT_DAILY_EMBEDDING_LIMIT = 0
 DEFAULT_EMBEDDING_RPM = 100
 DEFAULT_EMBEDDING_BATCH_SIZE = 32
 DEFAULT_EMBEDDING_RETRIES = 3
@@ -45,8 +45,19 @@ class EmbeddingPlan:
     deferred_chunks: int
     estimated_minutes: float
     rpm_limit: int
+    unlimited_quota: bool = False
 
     def summary(self) -> str:
+        quota_line = (
+            f"Quota journalier      : {self.daily_used:,} / {self.daily_limit:,} utilisés"
+            if not self.unlimited_quota
+            else "Quota journalier      : illimite (desactive)"
+        )
+        remaining_line = (
+            f"Quota restant aujourd'hui : {self.daily_remaining:,}"
+            if not self.unlimited_quota
+            else "Quota restant aujourd'hui : illimite"
+        )
         lines = [
             f"=== Plan d'embedding ({self.chunk_strategy}) ===",
             f"Collection ChromaDB : {self.collection_name}",
@@ -55,14 +66,14 @@ class EmbeddingPlan:
             f"Déjà indexés          : {self.already_indexed:,}",
             f"Manquants             : {self.missing_chunks:,}",
             "",
-            f"Quota journalier      : {self.daily_used:,} / {self.daily_limit:,} utilisés",
-            f"Quota restant aujourd'hui : {self.daily_remaining:,}",
+            quota_line,
+            remaining_line,
             f"Embeddings prévus now : {self.embeddable_now:,}",
             f"Reportés (quota)      : {self.deferred_chunks:,}",
             f"Durée estimée         : ~{self.estimated_minutes:.1f} min "
             f"({self.rpm_limit} req/min)",
         ]
-        if self.missing_chunks > self.daily_remaining:
+        if not self.unlimited_quota and self.missing_chunks > self.daily_remaining:
             days = (self.deferred_chunks // max(self.daily_remaining, 1)) + (
                 1 if self.deferred_chunks % max(self.daily_remaining, 1) else 0
             )
@@ -397,9 +408,15 @@ class HybridRAG:
         missing_count = sum(1 for cid in all_ids if cid not in existing_ids)
         already_indexed = total_chunks - missing_count
 
-        daily_remaining = max(0, daily_quota_limit - daily_quota_used)
-        budget = daily_remaining if max_new_embeddings is None else max_new_embeddings
-        budget = max(0, min(budget, daily_remaining))
+        unlimited_quota = daily_quota_limit <= 0
+        if unlimited_quota:
+            daily_remaining = missing_count
+            budget = missing_count if max_new_embeddings is None else max_new_embeddings
+            budget = max(0, budget)
+        else:
+            daily_remaining = max(0, daily_quota_limit - daily_quota_used)
+            budget = daily_remaining if max_new_embeddings is None else max_new_embeddings
+            budget = max(0, min(budget, daily_remaining))
         embeddable_now = min(missing_count, budget)
         deferred = max(0, missing_count - embeddable_now)
 
@@ -418,6 +435,7 @@ class HybridRAG:
             deferred_chunks=deferred,
             estimated_minutes=estimated_requests / max(rpm_limit, 1),
             rpm_limit=rpm_limit,
+            unlimited_quota=unlimited_quota,
         )
 
     def load_and_index_data(
@@ -461,9 +479,20 @@ class HybridRAG:
             return plan
 
         if plan.embeddable_now == 0:
-            print(
-                "\n⛔ Quota journalier épuisé — relance demain ou augmentez le quota restant."
-            )
+            if max_new_embeddings == 0:
+                print(
+                    "\nℹ️ Indexation vectorielle désactivée pour ce run "
+                    "(max_new_embeddings=0, mode lecture seule)."
+                )
+            elif plan.unlimited_quota:
+                print(
+                    "\nℹ️ Aucun embedding prévu avec la configuration actuelle "
+                    "(vérifiez --max-new ou les paramètres de run)."
+                )
+            else:
+                print(
+                    "\n⛔ Quota journalier épuisé — relance demain ou augmentez le quota restant."
+                )
             return plan
 
         existing_ids = set(self.collection.get()["ids"])

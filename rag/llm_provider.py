@@ -9,6 +9,7 @@ from openai import OpenAI
 
 SUPPORTED_PROVIDERS = {"openai", "github_models"}
 GITHUB_MODELS_BASE_URL = "https://models.inference.ai.azure.com"
+OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1"
 
 
 @dataclass
@@ -36,12 +37,14 @@ def build_llm_config_from_env() -> LLMConfig:
 
     if provider == "openai":
         api_key = _require_env("OPENAI_API_KEY")
+        raw_base_url = os.getenv("OPENAI_BASE_URL", "").strip()
         return LLMConfig(
             provider=provider,
             chat_model=os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini"),
             embedding_model=os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"),
             api_key=api_key,
-            base_url=os.getenv("OPENAI_BASE_URL", "").strip() or None,
+            # Always provide an explicit default URL to avoid SDK/env ambiguity.
+            base_url=raw_base_url or OPENAI_DEFAULT_BASE_URL,
         )
 
     api_key = _require_env("GITHUB_MODELS_API_KEY")
