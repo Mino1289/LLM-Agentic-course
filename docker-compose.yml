@@ -1,0 +1,32 @@
+services:
+  bootstrap:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: finance-rag-bootstrap
+    env_file:
+      - .env
+    command: ["/bin/bash", "scripts/bootstrap.sh"]
+    volumes:
+      - ./data:/app/data
+      - ./rag/processed_data:/app/rag/processed_data
+      - ./rag/chroma_db:/app/rag/chroma_db
+    restart: "no"
+
+  finance-rag-ui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: finance-rag-ui
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./rag/processed_data:/app/rag/processed_data
+      - ./rag/chroma_db:/app/rag/chroma_db
+    restart: unless-stopped
