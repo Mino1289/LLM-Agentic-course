@@ -1,0 +1,7 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "finance_rag_chatbot": "rag.langgraph_studio:graph"
+  },
+  "env": ".env"
+}
