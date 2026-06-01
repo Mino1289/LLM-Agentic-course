@@ -37,13 +37,13 @@ L'interface se comporte comme un chatbot:
 
 - `10-K` (rapport annuel)
 - `8-K` limites a l'item `2.02` (publication de resultats)
+- transcripts d'earnings calls en `.txt` (si le nom contient `earnings_call`, `conference_call` ou `transcript`)
 - sections extraites au preprocess (par defaut): `Item 1A` et `Item 7`
 - section optionnelle: `Item 8` (si activee via `--sections 1a,7,8`)
 
 ### Documents non ingeres dans cette version
 
 - `10-Q` (trimestriel)
-- transcripts d'earnings calls
 - investor presentations / communiques hors SEC
 
 ### Consequence sur la pertinence
@@ -126,7 +126,7 @@ streamlit run ui/app_rag.py
 
 ```bash
 docker compose run --rm bootstrap
-docker compose up --build finance-rag-ui
+docker compose up finance-rag-ui
 ```
 
 L'UI est disponible sur `http://localhost:8501`.
@@ -148,6 +148,12 @@ Flags `.env` utiles:
 - `EMBEDDING_MAX_RETRIES=3`
 - `EMBEDDING_RPM=120`
 - `QUERY_DECOMPOSE_COUNT=4` (nombre de sous-requêtes générées par LangGraph)
+- `PRICE_TOOL_ENABLED=true`
+- `PRICE_MAX_DAYS=180`
+- `PRICE_MAX_POINTS=40`
+- `PRICE_MAX_TICKERS=3`
+- `PRICE_DEFAULT_DAYS=90`
+- `PRICE_MAX_ATTEMPTS=2`
 
 ## Architecture LangGraph
 
@@ -160,13 +166,15 @@ Le graphe exécute les tâches dans cet ordre:
 1. `prepare_query_node`
 2. `intent_scope_node`
 3. `clarify_node` (si ambigu) ou `memory_read_node`
-4. `decompose_query_node`
-5. `multi_retrieve_node`
-6. `rerank_node`
-7. `answer_generate_node`
-8. `synthesis_node`
-9. `memory_write_node`
-10. `gc_node`
+4. `tool_orchestrator_node` (décide si l'outil prix doit être appelé)
+5. `price_data_node` (outil prix, contextuel, avec tentatives limitées)
+6. retour `tool_orchestrator_node` puis `decompose_query_node`
+7. `multi_retrieve_node`
+8. `rerank_node`
+9. `answer_generate_node`
+10. `synthesis_node`
+11. `memory_write_node`
+12. `gc_node`
 
 Le `gc_node` compresse l'historique pour limiter le coût token/API et maintient une fenêtre glissante de conversation.
 
