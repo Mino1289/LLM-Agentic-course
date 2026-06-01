@@ -1,5 +1,6 @@
 services:
   bootstrap:
+    image: finance-rag:latest
     build:
       context: .
       dockerfile: Dockerfile
@@ -15,9 +16,7 @@ services:
     restart: "no"
 
   finance-rag-ui:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: finance-rag:latest
     container_name: finance-rag-ui
     user: "${UID:-1000}:${GID:-1000}"
     depends_on:
