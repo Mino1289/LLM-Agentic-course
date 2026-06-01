@@ -8,6 +8,16 @@ Projet RAG financier cohérent de bout en bout pour analyser des rapports SEC (1
 - double backend LLM: **OpenAI API** ou **GitHub Models**
 - UI Streamlit et packaging Docker
 
+## Mode conversationnel
+
+L'interface se comporte comme un chatbot:
+
+- historique multi-tours visible dans la session (style ChatGPT/Gemini)
+- mémoire courte + résumé interne du contexte
+- affichage des sources et métriques par réponse
+- si la question est trop ambiguë (sans entreprise/période), le bot pose une clarification
+- sinon il lance une recherche multi-entreprises et fait une synthèse globale
+
 ## Structure
 
 - `rag/download_SEC_reports.py`: téléchargement SEC dans `data/`
@@ -137,19 +147,28 @@ Flags `.env` utiles:
 - `EMBEDDING_BATCH_SIZE=32`
 - `EMBEDDING_MAX_RETRIES=3`
 - `EMBEDDING_RPM=120`
+- `QUERY_DECOMPOSE_COUNT=4` (nombre de sous-requêtes générées par LangGraph)
 
 ## Architecture LangGraph
+
+![Architecture LangGraph](./pics/graph.png)
+
+<p align="center">
+  <img src="./pics/graph.png" alt="Architecture LangGraph" width="520" />
+</p>
 
 Le graphe exécute les tâches dans cet ordre:
 
 1. `prepare_query_node`
-2. `memory_read_node`
-3. `retrieve_node`
-4. `rerank_node`
-5. `answer_generate_node`
-6. `synthesis_node`
-7. `memory_write_node`
-8. `gc_node`
+2. `intent_scope_node`
+3. `clarify_node` (si ambigu) ou `memory_read_node`
+4. `decompose_query_node`
+5. `multi_retrieve_node`
+6. `rerank_node`
+7. `answer_generate_node`
+8. `synthesis_node`
+9. `memory_write_node`
+10. `gc_node`
 
 Le `gc_node` compresse l'historique pour limiter le coût token/API et maintient une fenêtre glissante de conversation.
 
@@ -157,3 +176,21 @@ Le `gc_node` compresse l'historique pour limiter le coût token/API et maintient
 
 Les noeuds du graphe sont instrumentés via `@traceable`.  
 Une fois `LANGSMITH_TRACING=true` et `LANGSMITH_API_KEY` définis, chaque run est visible dans le projet `LANGSMITH_PROJECT`.
+
+### Lancer et visualiser
+
+1. Activer les variables dans `.env`:
+   - `LANGSMITH_TRACING=true`
+   - `LANGSMITH_API_KEY=...`
+   - `LANGSMITH_PROJECT=finance-rag-langgraph`
+2. Lancer l'app Streamlit et poser des questions.
+3. Ouvrir [https://smith.langchain.com](https://smith.langchain.com), puis le projet `LANGSMITH_PROJECT`.
+
+### LangGraph Studio (optionnel)
+
+Pour visualiser localement le graphe en mode dev:
+
+```bash
+pip install langgraph-cli
+langgraph dev --config langgraph.json
+```
