@@ -1,302 +1,159 @@
-# RAG Semi-conducteurs
+# Finance RAG LangGraph
 
-Projet RAG sur des entreprises de semi-conducteurs: NVIDIA, AMD, Intel, TSMC et ASML.
+Projet RAG financier cohérent de bout en bout pour analyser des rapports SEC (10-K/8-K) avec:
 
-Le corpus peut contenir plusieurs types de documents:
+- stratégie unique: **semantic chunking + vector retrieval + reranking**
+- pipeline **LangGraph** à noeuds séparés
+- mémoire conversationnelle avec **garbage collector** de contexte
+- double backend LLM: **OpenAI API** ou **GitHub Models**
+- UI Streamlit et packaging Docker
 
-- rapports annuels / 10-K en PDF
-- transcripts d'earnings calls en TXT/PDF
-- tableaux extraits de PDF
-- CSV financiers structurés issus de SEC Company Facts
-- CSV de prix journaliers issus de Yahoo Finance via yfinance
-- fichiers `.txt`, `.md`, `.csv`, `.tsv` ajoutés manuellement dans `data/raw`
+## Structure
 
-## Installation
+- `rag/download_SEC_reports.py`: téléchargement SEC dans `data/`
+- `rag/preprocess.py`: extraction sections (Item 1A/7/8) vers `rag/processed_data/`
+- `rag/hybrid_rag.py`: indexation vectorielle Chroma + retrieval/reranking
+- `rag/langgraph_flow.py`: graphe nodal (prepare, memory, retrieve, rerank, generate, synthesis, memory write, gc)
+- `rag/llm_provider.py`: couche provider OpenAI/GitHub Models
+- `ui/app_rag.py`: chatbot Streamlit branché sur LangGraph
 
-```bash
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-```
+## Univers suivi et documents utilises
 
-Configuration des clés API:
+### Entreprises suivies (tickers)
+
+`NVDA`, `INTC`, `AMD`, `PLTR`, `GOOGL`, `META`, `AMZN`, `MSFT`, `AVGO`, `ORCL`
+
+### Documents ingeres actuellement
+
+- `10-K` (rapport annuel)
+- `8-K` limites a l'item `2.02` (publication de resultats)
+- sections extraites au preprocess (par defaut): `Item 1A` et `Item 7`
+- section optionnelle: `Item 8` (si activee via `--sections 1a,7,8`)
+
+### Documents non ingeres dans cette version
+
+- `10-Q` (trimestriel)
+- transcripts d'earnings calls
+- investor presentations / communiques hors SEC
+
+### Consequence sur la pertinence
+
+Le chatbot est coherent sur l'analyse fondamentale long-terme, mais il est moins complet pour le suivi court-terme tant que `10-Q` et transcripts ne sont pas ajoutes.
+
+## Configuration
+
+1. Copier le template:
 
 ```bash
 cp .env.example .env
 ```
 
-Ensuite renseigner dans `.env`:
+2. Renseigner les variables nécessaires dans `.env`:
+
+- `LLM_PROVIDER=openai` ou `LLM_PROVIDER=github_models`
+- OpenAI:
+  - `OPENAI_API_KEY`
+  - `OPENAI_CHAT_MODEL` (défaut: `gpt-4o-mini`)
+  - `OPENAI_EMBEDDING_MODEL` (défaut: `text-embedding-3-small`)
+- GitHub Models:
+  - `GITHUB_MODELS_API_KEY`
+  - `GITHUB_CHAT_MODEL` (défaut: `openai/gpt-4o-mini`)
+  - `GITHUB_EMBEDDING_MODEL` (défaut: `text-embedding-3-small`)
+- LangSmith (visualisation):
+  - `LANGSMITH_TRACING=true`
+  - `LANGSMITH_API_KEY`
+  - `LANGSMITH_PROJECT`
+- SEC:
+  - `SEC_USER_AGENT` (obligatoire pour crawler SEC)
+
+## Lancement local
+
+### 1) Installer les dépendances
 
 ```bash
-OPENAI_API_KEY="YOUR_OPENAI_KEY"
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
-## Télécharger les données
-
-Rapports annuels et 10-K:
+### 2) Ingestion SEC (optionnel si vous avez déjà des fichiers dans `data/`)
 
 ```bash
-.venv/bin/python src/download_reports.py
+python3 rag/download_SEC_reports.py
 ```
 
-Earnings calls:
+### 3) Pré-traitement
 
 ```bash
-.venv/bin/python src/download_earnings_calls.py
+python3 rag/preprocess.py --sections 1a,7 --min-year 2021
 ```
 
-CSV financiers SEC:
+### 4) Planifier l'indexation
 
 ```bash
-.venv/bin/python src/download_financial_csvs.py --start-year 2021
+python3 rag/hybrid_rag.py --plan --strategy semantic
 ```
 
-Prix journaliers des actions:
+### 5) Indexer les embeddings
 
 ```bash
-.venv/bin/python src/download_stock_prices.py --days 23
+python3 rag/hybrid_rag.py --embed --strategy semantic --quota-used 0
 ```
 
-Les CSV déjà présents par entreprise sont ignorés au prochain lancement. Pour retélécharger volontairement tous les fichiers:
+Pour un temps d'indexation raisonnable, utilisez les embeddings en batch:
 
 ```bash
-.venv/bin/python src/download_stock_prices.py --days 23 --force
+python3 rag/hybrid_rag.py --embed --strategy semantic --quota-used 0 --batch-size 32 --rpm 120
 ```
 
-Les fichiers sont sauvegardés dans `data/raw`.
-
-## Construire l'index vectoriel
-
-Build simple avec le modèle par défaut:
+### 6) Lancer l'UI
 
 ```bash
-.venv/bin/python src/build_index.py --rebuild
+streamlit run ui/app_rag.py
 ```
 
-Build avec chunking par paragraphes:
+## Lancement Docker (recommandé)
 
 ```bash
-.venv/bin/python src/build_index.py --rebuild --chunking paragraph
+docker compose run --rm bootstrap
+docker compose up --build finance-rag-ui
 ```
 
-Build avec extraction des tableaux dans les PDF:
+L'UI est disponible sur `http://localhost:8501`.
 
-```bash
-.venv/bin/python src/build_index.py --rebuild --include-tables
-```
+Le service `bootstrap` exécute:
 
-Build complet recommandé pour tester plusieurs formats:
+1. téléchargement SEC (optionnel selon flags)
+2. preprocess
+3. embedding
 
-```bash
-.venv/bin/python src/build_index.py --rebuild --chunking paragraph --include-tables
-```
+Flags `.env` utiles:
 
-## Options d'indexation à comparer
+- `SKIP_DOWNLOAD_IF_EXISTS=true`
+- `SKIP_PREPROCESS_IF_EXISTS=false`
+- `BOOTSTRAP_MIN_YEAR=2021`
+- `BOOTSTRAP_SECTIONS=1a,7`
+- `EMBEDDING_DAILY_LIMIT=0` (`0` = quota illimite)
+- `EMBEDDING_BATCH_SIZE=32`
+- `EMBEDDING_MAX_RETRIES=3`
+- `EMBEDDING_RPM=120`
 
-### Chunking
+## Architecture LangGraph
 
-Méthode simple, par taille fixe:
+Le graphe exécute les tâches dans cet ordre:
 
-```bash
-.venv/bin/python src/build_index.py --rebuild --chunking simple
-```
+1. `prepare_query_node`
+2. `memory_read_node`
+3. `retrieve_node`
+4. `rerank_node`
+5. `answer_generate_node`
+6. `synthesis_node`
+7. `memory_write_node`
+8. `gc_node`
 
-Méthode par paragraphes:
+Le `gc_node` compresse l'historique pour limiter le coût token/API et maintient une fenêtre glissante de conversation.
 
-```bash
-.venv/bin/python src/build_index.py --rebuild --chunking paragraph
-```
+## Visualisation LangSmith
 
-Changer la taille et l'overlap:
-
-```bash
-.venv/bin/python src/build_index.py --rebuild --chunking paragraph --chunk-size 1200 --overlap 200
-```
-
-### Embeddings
-
-Modèle léger:
-
-```bash
-.venv/bin/python src/build_index.py --rebuild --embedding-model bge-small
-```
-
-Modèle plus gros:
-
-```bash
-.venv/bin/python src/build_index.py --rebuild --embedding-model bge-base
-```
-
-Modèle encore plus gros:
-
-```bash
-.venv/bin/python src/build_index.py --rebuild --embedding-model bge-large
-```
-
-Les collections Chroma sont séparées automatiquement:
-
-- `bge-small` -> `semiconductor_reports`
-- `bge-base` -> `semiconductor_reports_bge_base`
-- `bge-large` -> `semiconductor_reports_bge_large`
-
-Il faut interroger avec le même modèle que celui utilisé au build.
-
-## Interroger le RAG
-
-Question simple avec vector search + reranking:
-
-```bash
-.venv/bin/python src/query_rag.py "What did NVIDIA say about Blackwell demand?"
-```
-
-Utiliser un index construit avec `bge-base`:
-
-```bash
-.venv/bin/python src/query_rag.py --embedding-model bge-base "Compare NVIDIA and AMD revenue growth"
-```
-
-Limiter le nombre de résultats:
-
-```bash
-.venv/bin/python src/query_rag.py --top-k 5 "Which company had the highest revenue?"
-```
-
-Décomposer une question large en plusieurs requêtes ciblées avec un LLM:
-
-```bash
-.venv/bin/python src/query_rag.py --decompose --search-mode hybrid --rerank "Which company is best positioned for AI infrastructure growth?"
-```
-
-Contrôler le nombre maximum de sous-requêtes:
-
-```bash
-.venv/bin/python src/query_rag.py --decompose --query-count 7 --search-mode hybrid "Compare NVIDIA, AMD, TSMC and ASML exposure to AI demand."
-```
-
-Le LLM ne génère pas la réponse finale dans ce mode. Il produit seulement des requêtes de recherche plus ciblées, puis le RAG récupère et rerank les passages depuis ChromaDB.
-
-## Méthodes de recherche à comparer
-
-Vectoriel seul:
-
-```bash
-.venv/bin/python src/query_rag.py --search-mode vector --no-rerank "What did NVIDIA say about Blackwell demand?"
-```
-
-BM25 seul:
-
-```bash
-.venv/bin/python src/query_rag.py --search-mode bm25 --no-rerank "What did NVIDIA say about Blackwell demand?"
-```
-
-Hybride vectoriel + BM25:
-
-```bash
-.venv/bin/python src/query_rag.py --search-mode hybrid --no-rerank "What did NVIDIA say about Blackwell demand?"
-```
-
-Hybride + reranking:
-
-```bash
-.venv/bin/python src/query_rag.py --search-mode hybrid --rerank "What did NVIDIA say about Blackwell demand?"
-```
-
-Comparer automatiquement les stratégies:
-
-```bash
-.venv/bin/python src/query_rag.py --compare --top-k 5 "What did NVIDIA say about Blackwell demand?"
-```
-
-Comparer les stratégies avec décomposition de requête:
-
-```bash
-.venv/bin/python src/query_rag.py --compare --decompose "Which company seems best positioned for AI infrastructure growth?"
-```
-
-Le mode `--compare` écrit aussi les passages sélectionnés dans `comparison.txt`.
-Pour choisir un autre fichier:
-
-```bash
-.venv/bin/python src/query_rag.py --compare --comparison-output results/blackwell_comparison.txt "What did NVIDIA say about Blackwell demand?"
-```
-
-Le mode `--compare` affiche:
-
-- vector only
-- BM25 only
-- hybrid vector + BM25
-- hybrid + reranking
-
-## Questions utiles pour les tests
-
-Earnings calls:
-
-```bash
-.venv/bin/python src/query_rag.py --compare "What did NVIDIA management say about demand for Blackwell during the Q4 2025 earnings call?"
-```
-
-Risques dans les rapports:
-
-```bash
-.venv/bin/python src/query_rag.py --compare "What are the main supply chain risks mentioned by NVIDIA and AMD?"
-```
-
-Tableaux et CSV financiers:
-
-```bash
-.venv/bin/python src/query_rag.py --compare "Which semiconductor company reported the highest revenue?"
-```
-
-Comparaison R&D:
-
-```bash
-.venv/bin/python src/query_rag.py --compare "Compare research and development expenses for NVIDIA, AMD, Intel, TSMC and ASML."
-```
-
-Capex:
-
-```bash
-.venv/bin/python src/query_rag.py --compare "Which company reported the highest capital expenditures?"
-```
-
-Termes exacts:
-
-```bash
-.venv/bin/python src/query_rag.py --compare "What do the documents say about export controls?"
-```
-
-## Ce qui est mesuré ou observable
-
-Pour comparer les stratégies, regarder:
-
-- documents remontés dans le top-k
-- entreprise / fichier source / page
-- type de contenu: `text` ou `table`
-- source type: `pdf`, `txt`, `csv`, etc.
-- score vectoriel
-- score BM25
-- score hybride
-- score multi-query si `--decompose` est activé
-- score de reranking
-
-## Structure des scripts
-
-- `src/download_reports.py`: télécharge les rapports PDF
-- `src/download_earnings_calls.py`: télécharge les earnings calls
-- `src/download_financial_csvs.py`: génère les CSV financiers SEC
-- `src/download_stock_prices.py`: génère les CSV de prix journaliers via yfinance
-- `src/chunking.py`: chunking `simple` et `paragraph`
-- `src/ingest.py`: lit PDF/TXT/MD/CSV/TSV et produit les documents à indexer
-- `src/build_index.py`: calcule les embeddings et remplit ChromaDB
-- `src/retrieval.py`: recherche vectorielle, BM25, hybride et reranking
-- `src/query_rag.py`: CLI de requête et comparaison des méthodes
-- `src/query_planner.py`: décomposition LLM des questions en requêtes ciblées
-- `src/env_config.py`: chargement local du fichier `.env`
-- `src/embedding_models.py`: configuration des modèles d'embedding
-
-## Notes
-
-Après un changement de chunking, d'embedding, ou d'extraction de tableaux, utiliser `--rebuild`.
-
-Le premier lancement d'un nouveau modèle peut télécharger des poids Hugging Face et prendre du temps.
-
-BM25 est construit à la volée depuis les chunks stockés dans ChromaDB. Il ne nécessite pas de rebuild séparé.
+Les noeuds du graphe sont instrumentés via `@traceable`.  
+Une fois `LANGSMITH_TRACING=true` et `LANGSMITH_API_KEY` définis, chaque run est visible dans le projet `LANGSMITH_PROJECT`.
