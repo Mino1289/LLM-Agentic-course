@@ -47,6 +47,11 @@ def build_agent(
     max_context_chunks: int,
     max_context_tokens: int,
     decompose_query_count: int,
+    price_max_days: int,
+    price_max_points: int,
+    price_max_tickers: int,
+    price_default_days: int,
+    price_max_attempts: int,
 ):
     rag = HybridRAG(chunk_strategy="semantic", search_mode="vector", use_reranking=True)
     rag.load_and_index_data(max_new_embeddings=0)
@@ -57,6 +62,11 @@ def build_agent(
         max_context_chunks=max_context_chunks,
         max_context_tokens=max_context_tokens,
         decompose_query_count=decompose_query_count,
+        price_max_days=price_max_days,
+        price_max_points=price_max_points,
+        price_max_tickers=price_max_tickers,
+        price_default_days=price_default_days,
+        price_max_attempts=price_max_attempts,
     )
 
 
@@ -67,6 +77,11 @@ summarize_every_n_turns_default = int(os.getenv("SUMMARIZE_EVERY_N_TURNS", "6"))
 max_context_chunks_default = int(os.getenv("MAX_CONTEXT_CHUNKS", "8"))
 max_context_tokens_default = int(os.getenv("MAX_CONTEXT_TOKENS", "3500"))
 decompose_query_count_default = int(os.getenv("QUERY_DECOMPOSE_COUNT", "4"))
+price_max_days_default = int(os.getenv("PRICE_MAX_DAYS", "180"))
+price_max_points_default = int(os.getenv("PRICE_MAX_POINTS", "40"))
+price_max_tickers_default = int(os.getenv("PRICE_MAX_TICKERS", "3"))
+price_default_days_default = int(os.getenv("PRICE_DEFAULT_DAYS", "90"))
+price_max_attempts_default = int(os.getenv("PRICE_MAX_ATTEMPTS", "2"))
 
 memory_window_size = st.sidebar.slider("Fenêtre mémoire", min_value=4, max_value=12, value=memory_window_default)
 summarize_every_n_turns = st.sidebar.slider(
@@ -78,6 +93,21 @@ max_context_tokens = st.sidebar.slider(
 )
 decompose_query_count = st.sidebar.slider(
     "Nb sous-requêtes", min_value=3, max_value=8, value=decompose_query_count_default
+)
+price_max_days = st.sidebar.slider(
+    "Prix max jours", min_value=30, max_value=365, value=price_max_days_default
+)
+price_max_points = st.sidebar.slider(
+    "Prix max points", min_value=10, max_value=120, value=price_max_points_default
+)
+price_max_tickers = st.sidebar.slider(
+    "Prix max tickers", min_value=1, max_value=5, value=price_max_tickers_default
+)
+price_default_days = st.sidebar.slider(
+    "Prix fenêtre défaut (jours)", min_value=15, max_value=180, value=price_default_days_default
+)
+price_max_attempts = st.sidebar.slider(
+    "Prix max tentatives outil", min_value=1, max_value=4, value=price_max_attempts_default
 )
 
 provider_name = os.getenv("LLM_PROVIDER", "openai")
@@ -94,13 +124,18 @@ try:
         max_context_chunks,
         max_context_tokens,
         decompose_query_count,
+        price_max_days,
+        price_max_points,
+        price_max_tickers,
+        price_default_days,
+        price_max_attempts,
     )
     st.sidebar.success("Système prêt")
 except Exception as e:
     st.sidebar.error(f"Erreur d'initialisation: {e}")
     st.stop()
 
-for idx, message in enumerate(st.session_state.messages):
+for message in st.session_state.messages:
     with st.chat_message(message.get("role", "assistant")):
         st.markdown(message.get("content", ""))
         if message.get("role") == "assistant":
@@ -110,7 +145,9 @@ for idx, message in enumerate(st.session_state.messages):
                     f"Chunks utilisés: {stats.get('chunks_used', 0)} | "
                     f"Tokens contexte estimés: {stats.get('estimated_context_tokens', 0)} | "
                     f"GC appliqué: {'oui' if stats.get('gc_applied') else 'non'} | "
-                    f"Sous-requêtes: {stats.get('decomposed_query_count', 0)}"
+                    f"Sous-requêtes: {stats.get('decomposed_query_count', 0)} | "
+                    f"Outil prix: {'oui' if stats.get('price_tool_used') else 'non'} | "
+                    f"Tentatives prix: {stats.get('price_tool_attempts', 0)}"
                 )
             sources = message.get("sources", [])
             if sources:
@@ -123,6 +160,10 @@ for idx, message in enumerate(st.session_state.messages):
                         )
                         st.text(source.get("chunk", ""))
                         st.divider()
+            price_context = message.get("price_context", "")
+            if price_context:
+                with st.expander("Contexte prix utilisé"):
+                    st.text(price_context)
 
 query = st.chat_input("Question finance (ex: Quels risques majeurs sur les semiconducteurs en 2024 ?)")
 if query:
@@ -149,11 +190,14 @@ if query:
                     f"Chunks utilisés: {stats.get('chunks_used', 0)} | "
                     f"Tokens contexte estimés: {stats.get('estimated_context_tokens', 0)} | "
                     f"GC appliqué: {'oui' if stats.get('gc_applied') else 'non'} | "
-                    f"Sous-requêtes: {stats.get('decomposed_query_count', 0)}"
+                    f"Sous-requêtes: {stats.get('decomposed_query_count', 0)} | "
+                    f"Outil prix: {'oui' if stats.get('price_tool_used') else 'non'} | "
+                    f"Tentatives prix: {stats.get('price_tool_attempts', 0)}"
                 )
 
                 chunks = result.get("final_chunks", [])
                 metadatas = result.get("final_metadatas", [])
+                price_context = result.get("price_context", "")
                 sources = []
                 for i, chunk in enumerate(chunks):
                     meta = metadatas[i] if i < len(metadatas) else {}
@@ -175,6 +219,9 @@ if query:
                             )
                             st.text(source.get("chunk", ""))
                             st.divider()
+                if price_context:
+                    with st.expander("Contexte prix utilisé"):
+                        st.text(price_context)
 
                 st.session_state.messages.append(
                     {
@@ -182,6 +229,7 @@ if query:
                         "content": assistant_text,
                         "stats": stats,
                         "sources": sources,
+                        "price_context": price_context,
                     }
                 )
             except Exception as e:

@@ -327,6 +327,17 @@ def is_10k_filename(filename: str) -> bool:
     return bool(re.search(r"10[-_]?k", filename, re.I))
 
 
+def is_earnings_call_filename(filename: str) -> bool:
+    stem = os.path.splitext(filename)[0].lower()
+    patterns = [
+        r"earnings[_\- ]?call",
+        r"conference[_\- ]?call",
+        r"transcript",
+        r"results[_\- ]?call",
+    ]
+    return any(re.search(pattern, stem, re.I) for pattern in patterns)
+
+
 def _extract_between(text: str, start_patterns: list[str], end_patterns: list[str]) -> str:
     best = ""
     for start_pat in start_patterns:
@@ -455,6 +466,7 @@ def main():
         "sections_written": 0,
         "skipped": 0,
         "skipped_8k": 0,
+        "earnings_calls_written": 0,
         "no_sections_10k": 0,
         "skipped_year": 0,
         "skipped_csv": 0,
@@ -506,6 +518,16 @@ def main():
                 out_path.write_text(excerpt, encoding="utf-8")
                 stats["sections_written"] += 1
                 print(f"  8-K → extrait earnings ({len(excerpt):,} car.)")
+            elif ext == "txt" and is_earnings_call_filename(filename):
+                if len(text) < 200:
+                    print("  Skip: transcript earnings trop court.")
+                    stats["skipped"] += 1
+                    continue
+                out_path = PROCESSED_DATA_DIR / output_filename(filename, "earnings_call")
+                out_path.write_text(text, encoding="utf-8")
+                stats["sections_written"] += 1
+                stats["earnings_calls_written"] += 1
+                print(f"  Earnings call TXT ingéré ({len(text):,} car.)")
             else:
                 sections = extract_sections(text, enabled=enabled_sections)
                 if sections:
@@ -534,6 +556,7 @@ def main():
         f"\nDone. Processed={stats['processed']}, "
         f"sections_written={stats['sections_written']}, "
         f"skipped_8k={stats['skipped_8k']}, "
+        f"earnings_calls_written={stats['earnings_calls_written']}, "
         f"skipped_year={stats['skipped_year']}, "
         f"skipped_csv={stats['skipped_csv']}, "
         f"no_sections_10k={stats['no_sections_10k']}, "
