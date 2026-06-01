@@ -151,8 +151,6 @@ Flags `.env` utiles:
 
 ## Architecture LangGraph
 
-![Architecture LangGraph](./pics/graph.png)
-
 <p align="center">
   <img src="./pics/graph.png" alt="Architecture LangGraph" width="520" />
 </p>
