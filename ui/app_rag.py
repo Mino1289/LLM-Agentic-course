@@ -4,6 +4,16 @@ import uuid
 
 import streamlit as st
 
+# Reduce noisy transformers warnings triggered by Streamlit module introspection.
+os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+try:
+    from transformers.utils import logging as transformers_logging
+
+    transformers_logging.set_verbosity_error()
+except Exception:
+    # transformers is an optional transitive dependency in this UI path.
+    pass
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from rag.hybrid_rag import HybridRAG
