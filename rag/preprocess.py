@@ -327,6 +327,10 @@ def is_10k_filename(filename: str) -> bool:
     return bool(re.search(r"10[-_]?k", filename, re.I))
 
 
+def is_10q_filename(filename: str) -> bool:
+    return bool(re.search(r"10[-_]?q", filename, re.I))
+
+
 def is_earnings_call_filename(filename: str) -> bool:
     stem = os.path.splitext(filename)[0].lower()
     patterns = [
@@ -429,9 +433,9 @@ def collect_input_files() -> list[str]:
 def main():
     parser = argparse.ArgumentParser(description="Prétraiter les rapports SEC pour le RAG.")
     parser.add_argument(
-        "--include-8k",
+        "--exclude-8k",
         action="store_true",
-        help="Inclure les 8-K (extrait limité). Par défaut: ignorés.",
+        help="Exclure les 8-K (item 2.02). Par défaut: inclus.",
     )
     parser.add_argument(
         "--sections",
@@ -483,8 +487,8 @@ def main():
                     stats["skipped_year"] += 1
                     continue
 
-            if is_8k_filename(filename) and not args.include_8k:
-                print(f"  Skip: 8-K ignoré (utilisez --include-8k pour un extrait court).")
+            if is_8k_filename(filename) and args.exclude_8k:
+                print("  Skip: 8-K ignoré (--exclude-8k).")
                 stats["skipped_8k"] += 1
                 continue
 
@@ -543,6 +547,11 @@ def main():
                 elif is_10k_filename(filename):
                     print(f"  Skip: aucune section Item 1A/7/8 trouvée dans ce 10-K.")
                     stats["no_sections_10k"] += 1
+                elif is_10q_filename(filename):
+                    out_path = PROCESSED_DATA_DIR / output_filename(filename, "quarterly_report")
+                    out_path.write_text(text, encoding="utf-8")
+                    stats["sections_written"] += 1
+                    print("  10-Q -> fallback texte integral (aucune section SEC reconnue).")
                 else:
                     print(f"  Skip: document sans sections SEC reconnues.")
 
