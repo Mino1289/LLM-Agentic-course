@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from rag.nodes.prompt_context import format_universe_hint
 from rag.nodes.state import GraphState
 from rag.nodes.tracing import traceable
 
@@ -22,8 +23,10 @@ def parse_query_list(raw: str) -> list[str]:
 
 
 def decompose_query(agent: Any, query: str) -> list[str]:
+    universe_hint = format_universe_hint(agent)
     prompt = (
         "Decompose la requete finance suivante en sous-requetes ciblees pour retrieval RAG.\n"
+        f"Univers couvert (tickers disponibles): {universe_hint}\n"
         f"Requete: {query}\n\n"
         f"Rends STRICTEMENT un JSON array de {agent.decompose_query_count} a "
         f"{agent.decompose_query_count + 2} chaines courtes, sans autre texte."

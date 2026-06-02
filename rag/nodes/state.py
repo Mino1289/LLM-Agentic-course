@@ -9,7 +9,10 @@ class GraphState(TypedDict, total=False):
     messages: list[dict[str, str]]
     normalized_query: str
     metadata_filter: dict[str, str]
+    intent_route: str
     ambiguous_query: bool
+    general_chat: bool
+    off_topic_blocked: bool
     clarification_question: str
     decomposed_queries: list[str]
     price_context: str

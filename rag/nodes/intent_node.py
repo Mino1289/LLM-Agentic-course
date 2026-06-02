@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
+import re
 from typing import Any
 
+from rag.nodes.prompt_context import format_universe_hint
 from rag.nodes.state import GraphState
 from rag.nodes.tracing import traceable
 
@@ -30,24 +33,225 @@ def is_ambiguous_general_query(query: str, metadata_filter: dict[str, str]) -> b
     return len(q) < 20 or not has_domain_signal
 
 
+def _is_general_chat_query(query: str) -> bool:
+    q = query.lower().strip()
+    if not q:
+        return False
+    greetings = [
+        "bonjour",
+        "salut",
+        "hello",
+        "hey",
+        "bonsoir",
+        "coucou",
+        "comment vas",
+        "ca va",
+        "ça va",
+        "merci",
+    ]
+    finance_terms = [
+        "action",
+        "stock",
+        "prix",
+        "cours",
+        "earnings",
+        "10-k",
+        "8-k",
+        "sec",
+        "guidance",
+        "marge",
+        "risque",
+        "catalyseur",
+        "ticker",
+        "valorisation",
+        "revenu",
+    ]
+    has_greeting = any(token in q for token in greetings)
+    has_finance_signal = any(token in q for token in finance_terms)
+    return has_greeting and not has_finance_signal
+
+
+def _is_obviously_off_topic_request(query: str) -> bool:
+    q = query.lower().strip()
+    if not q:
+        return False
+    off_topic_patterns = [
+        "code python",
+        "python",
+        "javascript",
+        "java",
+        "c++",
+        "factorielle",
+        "algo",
+        "recette",
+        "cuisine",
+        "poeme",
+        "poème",
+        "traduis",
+        "traduction",
+        "blague",
+        "devine",
+    ]
+    finance_terms = [
+        "action",
+        "stock",
+        "prix",
+        "cours",
+        "earnings",
+        "10-k",
+        "8-k",
+        "sec",
+        "guidance",
+        "marge",
+        "risque",
+        "catalyseur",
+        "ticker",
+        "valorisation",
+        "revenu",
+        "entreprise",
+    ]
+    has_off_topic = any(token in q for token in off_topic_patterns)
+    has_finance_signal = any(token in q for token in finance_terms)
+    return has_off_topic and not has_finance_signal
+
+
+def _is_coverage_question(query: str) -> bool:
+    q = query.lower().strip()
+    if not q:
+        return False
+    patterns = [
+        "quelles entreprises",
+        "quelle entreprise",
+        "entreprises couvert",
+        "entreprises disponibles",
+        "univers couvert",
+        "tu connais quelles entreprises",
+        "sur quelles entreprises",
+        "which companies",
+        "covered companies",
+    ]
+    return any(p in q for p in patterns)
+
+
+def _extract_first_json_object(raw: str) -> dict[str, Any] | None:
+    text = (raw or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = json.loads(text)
+        return parsed if isinstance(parsed, dict) else None
+    except Exception:
+        pass
+    match = re.search(r"\{.*\}", text, flags=re.DOTALL)
+    if not match:
+        return None
+    try:
+        parsed = json.loads(match.group(0))
+        return parsed if isinstance(parsed, dict) else None
+    except Exception:
+        return None
+
+
+def llm_intent_scope_decision(agent: Any, state: GraphState) -> tuple[str, str, str]:
+    query = state.get("normalized_query", "")
+    metadata_filter = state.get("metadata_filter", {})
+    messages = state.get("messages", [])
+
+    if not query.strip():
+        return "clarify", "empty_query", "rule"
+
+    heuristic_route = "continue"
+    if _is_coverage_question(query):
+        heuristic_route = "coverage_info"
+    elif _is_obviously_off_topic_request(query):
+        heuristic_route = "reject_offtopic"
+    elif _is_general_chat_query(query):
+        heuristic_route = "general_chat"
+    elif is_ambiguous_general_query(query, metadata_filter):
+        heuristic_route = "clarify"
+
+    recent_user_turns = [
+        m.get("content", "").strip()
+        for m in messages[-4:]
+        if m.get("role") == "user" and m.get("content", "").strip()
+    ]
+    universe_hint = format_universe_hint(agent)
+
+    prompt = (
+        "Tu es un routeur d'intention pour un agent RAG finance.\n"
+        "Choisis la route la plus adaptee pour cette requete.\n"
+        "Retourne STRICTEMENT un objet JSON, sans texte autour.\n"
+        'Schema: {"route": "continue|clarify|general_chat|reject_offtopic|coverage_info", "reason": string}\n'
+        "- continue: question finance exploitable avec retrieval/reponse finance.\n"
+        "- clarify: question finance mais scope insuffisant (entreprise/periode/angle manquant).\n"
+        "- coverage_info: question sur les entreprises/tickers couverts par la base.\n"
+        "- general_chat: question hors finance mais repondable en conversation generale "
+        "(salutation, small talk, question generale).\n\n"
+        "- reject_offtopic: demande hors perimetre finance a bloquer poliment "
+        "(ex: generation de code, recette, tache dev generale).\n\n"
+        f"Univers couvert (tickers disponibles): {universe_hint}\n"
+        f"Question: {query}\n"
+        f"Metadata detectee: {metadata_filter}\n"
+        f"Derniers tours utilisateur: {recent_user_turns}\n"
+    )
+    raw = ""
+    try:
+        raw = agent.rag.provider.generate(prompt, temperature=0.0, max_tokens=120)
+        parsed = _extract_first_json_object(raw)
+        route = str(parsed.get("route", "")).strip().lower() if parsed is not None else ""
+        if route in {"continue", "clarify", "general_chat", "reject_offtopic", "coverage_info"}:
+            reason = str(parsed.get("reason", "llm_decision")).strip() or "llm_decision"
+            return route, reason, "llm"
+    except Exception:
+        pass
+
+    fallback_reason = "fallback_heuristic_invalid_llm_output"
+    if raw.strip():
+        fallback_reason = "fallback_heuristic_parse_error"
+    return heuristic_route, fallback_reason, "heuristic"
+
+
 def route_after_intent_node(state: GraphState) -> str:
+    route = state.get("intent_route", "")
+    if route in {"continue", "clarify", "general_chat", "reject_offtopic", "coverage_info"}:
+        return route
     return "clarify" if state.get("ambiguous_query", False) else "continue"
 
 
 @traceable(name="intent_scope_node")
 def intent_scope_node(_agent: Any, state: GraphState) -> GraphState:
-    normalized_query = state.get("normalized_query", "")
-    metadata_filter = state.get("metadata_filter", {})
-    ambiguous_query = is_ambiguous_general_query(normalized_query, metadata_filter)
-    return {"ambiguous_query": ambiguous_query}
+    intent_route, reason, source = llm_intent_scope_decision(_agent, state)
+    ambiguous_query = intent_route == "clarify"
+    general_chat = intent_route == "general_chat"
+    off_topic_blocked = intent_route == "reject_offtopic"
+    stats = state.get("stats", {})
+    stats.update(
+        {
+            "intent_scope_source": source,
+            "intent_scope_reason": reason,
+            "intent_route": intent_route,
+            "ambiguous_query": ambiguous_query,
+            "general_chat": general_chat,
+            "off_topic_blocked": off_topic_blocked,
+        }
+    )
+    return {
+        "intent_route": intent_route,
+        "ambiguous_query": ambiguous_query,
+        "general_chat": general_chat,
+        "off_topic_blocked": off_topic_blocked,
+        "stats": stats,
+    }
 
 
 @traceable(name="clarify_node")
 def clarify_node(_agent: Any, state: GraphState) -> GraphState:
     query = state.get("normalized_query", "")
+    universe_hint = format_universe_hint(_agent, max_items=10)
     clarification_question = (
         "Ta question est encore large. Tu veux une analyse sur quelle entreprise "
-        "ou groupe d'entreprises, et sur quelle periode (ex: 2024, 2023-2025) ?\n\n"
+        "ou groupe d'entreprises, et sur quelle periode (ex: 2024, 2023-2025) ?\n"
+        f"Exemples disponibles dans la base: {universe_hint}\n\n"
         f"Question recue: {query}"
     )
     stats = state.get("stats", {})

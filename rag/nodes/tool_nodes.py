@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 from datetime import datetime, timedelta
@@ -7,8 +8,47 @@ from typing import Any
 
 import yfinance as yf
 
+from rag.nodes.prompt_context import format_universe_hint
 from rag.nodes.state import GraphState
 from rag.nodes.tracing import traceable
+
+
+TRACKED_TICKERS = ["NVDA", "INTC", "AMD", "PLTR", "GOOGL", "META", "AMZN", "MSFT", "AVGO", "ORCL"]
+
+
+def _extract_first_json_object(raw: str) -> dict[str, Any] | None:
+    text = (raw or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = json.loads(text)
+        return parsed if isinstance(parsed, dict) else None
+    except Exception:
+        pass
+    match = re.search(r"\{.*\}", text, flags=re.DOTALL)
+    if not match:
+        return None
+    try:
+        parsed = json.loads(match.group(0))
+        return parsed if isinstance(parsed, dict) else None
+    except Exception:
+        return None
+
+
+def _normalize_tickers(raw_tickers: Any, max_items: int) -> list[str]:
+    if isinstance(raw_tickers, str):
+        candidates = re.split(r"[,\s]+", raw_tickers.strip())
+    elif isinstance(raw_tickers, list):
+        candidates = [str(t).strip() for t in raw_tickers]
+    else:
+        candidates = []
+
+    deduped: list[str] = []
+    for token in candidates:
+        t = token.upper()
+        if t in TRACKED_TICKERS and t not in deduped:
+            deduped.append(t)
+    return deduped[:max_items]
 
 
 def has_sufficient_price_context(price_context: str) -> bool:
@@ -72,14 +112,13 @@ def should_fetch_price_context(
 
 
 def extract_tickers_for_price_tool(agent: Any, query: str, metadata_filter: dict[str, str]) -> list[str]:
-    tracked = ["NVDA", "INTC", "AMD", "PLTR", "GOOGL", "META", "AMZN", "MSFT", "AVGO", "ORCL"]
     found = []
     if metadata_filter.get("ticker"):
         found.append(metadata_filter["ticker"].upper())
 
     for ticker in re.findall(r"\b[A-Z]{2,5}\b", query):
         candidate = ticker.upper()
-        if candidate in tracked and candidate not in found:
+        if candidate in TRACKED_TICKERS and candidate not in found:
             found.append(candidate)
 
     if not found:
@@ -88,6 +127,60 @@ def extract_tickers_for_price_tool(agent: Any, query: str, metadata_filter: dict
             found = ["NVDA", "AMD", "INTC"]
 
     return found[: agent.price_max_tickers]
+
+
+def llm_tool_decision(
+    agent: Any,
+    query: str,
+    metadata_filter: dict[str, str],
+    messages: list[dict[str, str]],
+    enough_price_context: bool,
+    attempts: int,
+    fallback_tickers: list[str],
+) -> tuple[bool, str, list[str], str]:
+    heuristic_decision = should_fetch_price_context(query, metadata_filter, messages)
+    if enough_price_context:
+        return False, "price_context_ready", fallback_tickers, "rule"
+
+    recent_user_turns = [
+        m.get("content", "").strip()
+        for m in messages[-4:]
+        if m.get("role") == "user" and m.get("content", "").strip()
+    ]
+    universe_hint = format_universe_hint(agent, max_items=14)
+    prompt = (
+        "Tu es un routeur d'outil pour assistant finance.\n"
+        "Decide si l'outil prix de marche (series de prix) doit etre appele AVANT la reponse.\n"
+        "Retourne STRICTEMENT un JSON object, sans texte autour.\n"
+        'Schema: {"use_price_tool": bool, "reason": string, "tickers": string[]}\n'
+        "Mets use_price_tool=true si les prix/perf/volatilite/momentum/comparaison peuvent materially "
+        "ameliorer la reponse. Sinon false.\n"
+        f"Question: {query}\n"
+        f"Metadata detectee: {metadata_filter}\n"
+        f"Derniers tours utilisateur: {recent_user_turns}\n"
+        f"Contexte prix deja present: {enough_price_context}\n"
+        f"Tentatives outil deja faites: {attempts}\n"
+        f"Tickers candidats heuristiques: {fallback_tickers}\n"
+        f"Tickers disponibles dans la base: {universe_hint}\n"
+        f"Univers suivi: {TRACKED_TICKERS}\n"
+    )
+    raw = ""
+    try:
+        raw = agent.rag.provider.generate(prompt, temperature=0.0, max_tokens=180)
+        parsed = _extract_first_json_object(raw)
+        if parsed is not None and isinstance(parsed.get("use_price_tool"), bool):
+            llm_tickers = _normalize_tickers(parsed.get("tickers"), agent.price_max_tickers)
+            if not llm_tickers:
+                llm_tickers = fallback_tickers
+            reason = str(parsed.get("reason", "llm_decision")).strip() or "llm_decision"
+            return parsed["use_price_tool"], reason, llm_tickers, "llm"
+    except Exception:
+        pass
+
+    fallback_reason = "fallback_heuristic_invalid_llm_output"
+    if raw.strip():
+        fallback_reason = "fallback_heuristic_parse_error"
+    return heuristic_decision, fallback_reason, fallback_tickers, "heuristic"
 
 
 def extract_price_date_window(agent: Any, query: str) -> tuple[str, str]:
@@ -208,15 +301,24 @@ def tool_orchestrator_node(agent: Any, state: GraphState) -> GraphState:
     attempts = state.get("price_tool_attempts", 0)
     current_price_context = state.get("price_context", "")
 
-    should_try_price = should_fetch_price_context(query, metadata_filter, messages)
     enough_price_context = has_sufficient_price_context(current_price_context)
     tickers = extract_tickers_for_price_tool(agent, query, metadata_filter)
+    should_try_price, decision_reason, llm_tickers, decision_source = llm_tool_decision(
+        agent=agent,
+        query=query,
+        metadata_filter=metadata_filter,
+        messages=messages,
+        enough_price_context=enough_price_context,
+        attempts=attempts,
+        fallback_tickers=tickers,
+    )
+    tickers = llm_tickers
     start_date, end_date = extract_price_date_window(agent, query)
     if attempts > 0 and not enough_price_context:
         start_date, end_date = widen_price_window(agent, start_date, end_date)
 
     decision = "continue"
-    reason = "not_needed"
+    reason = decision_reason if decision_reason else "not_needed"
 
     if should_try_price and not enough_price_context:
         if not tickers:
@@ -234,6 +336,7 @@ def tool_orchestrator_node(agent: Any, state: GraphState) -> GraphState:
         {
             "price_tool_attempts": attempts,
             "price_tool_decision": reason,
+            "price_tool_decision_source": decision_source,
             "price_context_ready": enough_price_context,
             "price_tickers": tickers,
             "price_window_start": start_date,

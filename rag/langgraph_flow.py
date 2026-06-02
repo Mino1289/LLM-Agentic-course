@@ -7,7 +7,13 @@ from langgraph.graph import END, StateGraph
 
 from rag.hybrid_rag import HybridRAG
 from rag.nodes.decompose_node import decompose_query_node
-from rag.nodes.generation_node import answer_generate_node, synthesis_node
+from rag.nodes.generation_node import (
+    answer_generate_node,
+    coverage_info_node,
+    general_chat_node,
+    off_topic_block_node,
+    synthesis_node,
+)
 from rag.nodes.intent_node import clarify_node, intent_scope_node, route_after_intent_node
 from rag.nodes.memory_nodes import gc_node, memory_read_node, memory_write_node
 from rag.nodes.memory_store import MemoryStore
@@ -63,6 +69,9 @@ class FinanceLangGraphAgent:
         graph.add_node("multi_retrieve_node", partial(multi_retrieve_node, self))
         graph.add_node("rerank_node", partial(rerank_node, self))
         graph.add_node("answer_generate_node", partial(answer_generate_node, self))
+        graph.add_node("general_chat_node", partial(general_chat_node, self))
+        graph.add_node("off_topic_block_node", partial(off_topic_block_node, self))
+        graph.add_node("coverage_info_node", partial(coverage_info_node, self))
         graph.add_node("synthesis_node", partial(synthesis_node, self))
         graph.add_node("memory_write_node", partial(memory_write_node, self))
         graph.add_node("gc_node", partial(gc_node, self))
@@ -75,9 +84,15 @@ class FinanceLangGraphAgent:
             {
                 "clarify": "clarify_node",
                 "continue": "memory_read_node",
+                "general_chat": "general_chat_node",
+                "reject_offtopic": "off_topic_block_node",
+                "coverage_info": "coverage_info_node",
             },
         )
         graph.add_edge("clarify_node", END)
+        graph.add_edge("off_topic_block_node", END)
+        graph.add_edge("coverage_info_node", END)
+        graph.add_edge("general_chat_node", "memory_write_node")
         graph.add_edge("memory_read_node", "tool_orchestrator_node")
         graph.add_conditional_edges(
             "tool_orchestrator_node",
