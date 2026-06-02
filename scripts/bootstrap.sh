@@ -7,6 +7,7 @@ SKIP_DOWNLOAD_IF_EXISTS="${SKIP_DOWNLOAD_IF_EXISTS:-true}"
 SKIP_PREPROCESS_IF_EXISTS="${SKIP_PREPROCESS_IF_EXISTS:-false}"
 BOOTSTRAP_MIN_YEAR="${BOOTSTRAP_MIN_YEAR:-2021}"
 BOOTSTRAP_SECTIONS="${BOOTSTRAP_SECTIONS:-1a,7}"
+BOOTSTRAP_EXCLUDE_8K="${BOOTSTRAP_EXCLUDE_8K:-false}"
 EMBEDDING_DAILY_USED="${EMBEDDING_DAILY_USED:-0}"
 EMBEDDING_DAILY_LIMIT="${EMBEDDING_DAILY_LIMIT:-0}"
 EMBEDDING_RPM="${EMBEDDING_RPM:-100}"
@@ -28,7 +29,11 @@ if [[ "${processed_count}" -gt 0 && "${SKIP_PREPROCESS_IF_EXISTS}" == "true" ]];
   echo "Skip preprocess: rag/processed_data already contains files (${processed_count})."
 else
   echo "Preprocessing source files..."
-  python3 rag/preprocess.py --sections "${BOOTSTRAP_SECTIONS}" --min-year "${BOOTSTRAP_MIN_YEAR}"
+  PREPROCESS_ARGS=(--sections "${BOOTSTRAP_SECTIONS}" --min-year "${BOOTSTRAP_MIN_YEAR}")
+  if [[ "${BOOTSTRAP_EXCLUDE_8K}" == "true" ]]; then
+    PREPROCESS_ARGS+=(--exclude-8k)
+  fi
+  python3 rag/preprocess.py "${PREPROCESS_ARGS[@]}"
 fi
 
 echo "Embedding missing chunks (semantic strategy)..."

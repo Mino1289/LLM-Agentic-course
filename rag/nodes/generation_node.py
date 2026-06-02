@@ -133,6 +133,11 @@ def coverage_info_node(agent: Any, state: GraphState) -> GraphState:
 
 @traceable(name="synthesis_node")
 def synthesis_node(agent: Any, state: GraphState) -> GraphState:
+    disclaimer = (
+        "\n\n---\n"
+        "Avertissement: cette reponse est informative et basee sur les sources disponibles du RAG. "
+        "Elle ne constitue pas un conseil financier personnalise. Investir comporte un risque de perte en capital."
+    )
     chunk_count = len(state.get("final_chunks", []))
     if chunk_count < 2:
         return {
@@ -141,6 +146,7 @@ def synthesis_node(agent: Any, state: GraphState) -> GraphState:
                 "Je peux donner une vue generale, mais elle reste incertaine. "
                 "Si tu veux une reponse fiable, precise entreprise et periode."
             )
+            + disclaimer
         }
 
     prompt = (
@@ -159,4 +165,4 @@ def synthesis_node(agent: Any, state: GraphState) -> GraphState:
         f"Texte brouillon a synthetiser:\n{state.get('draft_answer', '')}"
     )
     final_answer = agent.rag.provider.generate(prompt, temperature=0.0, max_tokens=520)
-    return {"answer": final_answer}
+    return {"answer": (final_answer or "").strip() + disclaimer}

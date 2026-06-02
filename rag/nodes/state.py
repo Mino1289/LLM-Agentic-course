@@ -9,6 +9,8 @@ class GraphState(TypedDict, total=False):
     messages: list[dict[str, str]]
     normalized_query: str
     metadata_filter: dict[str, str]
+    target_tickers: list[str]
+    doc_type_priority: list[str]
     intent_route: str
     ambiguous_query: bool
     general_chat: bool

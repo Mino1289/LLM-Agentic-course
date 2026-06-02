@@ -20,6 +20,7 @@ from rag.nodes.memory_store import MemoryStore
 from rag.nodes.prepare_node import prepare_query_node
 from rag.nodes.retrieval_node import multi_retrieve_node
 from rag.nodes.rerank_node import rerank_node
+from rag.nodes.scope_node import query_scope_node
 from rag.nodes.state import GraphState
 from rag.nodes.tool_nodes import (
     price_data_node,
@@ -63,6 +64,7 @@ class FinanceLangGraphAgent:
         graph.add_node("intent_scope_node", partial(intent_scope_node, self))
         graph.add_node("clarify_node", partial(clarify_node, self))
         graph.add_node("memory_read_node", partial(memory_read_node, self))
+        graph.add_node("query_scope_node", partial(query_scope_node, self))
         graph.add_node("tool_orchestrator_node", partial(tool_orchestrator_node, self))
         graph.add_node("price_data_node", partial(price_data_node, self))
         graph.add_node("decompose_query_node", partial(decompose_query_node, self))
@@ -93,7 +95,8 @@ class FinanceLangGraphAgent:
         graph.add_edge("off_topic_block_node", END)
         graph.add_edge("coverage_info_node", END)
         graph.add_edge("general_chat_node", "memory_write_node")
-        graph.add_edge("memory_read_node", "tool_orchestrator_node")
+        graph.add_edge("memory_read_node", "query_scope_node")
+        graph.add_edge("query_scope_node", "tool_orchestrator_node")
         graph.add_conditional_edges(
             "tool_orchestrator_node",
             route_after_tool_orchestrator_node,

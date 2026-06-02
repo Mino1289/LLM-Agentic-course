@@ -53,7 +53,7 @@ def get_cik_mapping():
     return mapping
 
 def get_filings(ticker, cik):
-    """Cherche les formulaires 8-K (Item 2.02) et 10-K (Annual Reports) des 5 dernières années"""
+    """Cherche les formulaires 8-K (Item 2.02), 10-K et 10-Q des 5 dernières années."""
     print(f"\nRecherche des rapports pour {ticker} (CIK: {cik})...")
     url = f"https://data.sec.gov/submissions/CIK{cik}.json"
     
@@ -93,7 +93,7 @@ def get_filings(ticker, cik):
             # 2.02 = Communiqué de presse sur les résultats financiers
             if "2.02" in items:
                 is_wanted = True
-        elif form == "10-K":
+        elif form in {"10-K", "10-Q"}:
             is_wanted = True
             
         if is_wanted:
@@ -141,6 +141,8 @@ def download_filing(ticker, form, date, url):
 def main():
     # 1. Obtenir les identifiants SEC (CIK) des entreprises
     cik_map = get_cik_mapping()
+    current_year = datetime.now().year
+    limit_year = current_year - 5
     
     results = {}
     
@@ -150,7 +152,10 @@ def main():
             cik = cik_map[ticker]
             filings = get_filings(ticker, cik)
             results[ticker] = filings
-            print(f"-> {len(filings)} documents trouvés (8-K 2.02 & 10-K) pour {ticker} entre 2021 et 2026.")
+            print(
+                f"-> {len(filings)} documents trouvés (8-K 2.02, 10-K, 10-Q) "
+                f"pour {ticker} entre {limit_year} et {current_year}."
+            )
             
             # 3. Téléchargement effectif des fichiers
             for f in filings:
