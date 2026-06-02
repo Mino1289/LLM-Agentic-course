@@ -1,6 +1,6 @@
 # Finance RAG LangGraph
 
-Projet RAG financier cohérent de bout en bout pour analyser des rapports SEC (10-K/8-K) avec:
+Projet RAG financier cohérent de bout en bout pour analyser des rapports SEC (10-K/10-Q/8-K) avec:
 
 - stratégie unique: **semantic chunking + vector retrieval + reranking**
 - pipeline **LangGraph** à noeuds séparés
@@ -36,6 +36,7 @@ L'interface se comporte comme un chatbot:
 ### Documents ingeres actuellement
 
 - `10-K` (rapport annuel)
+- `10-Q` (rapport trimestriel)
 - `8-K` limites a l'item `2.02` (publication de resultats)
 - transcripts d'earnings calls en `.txt` (si le nom contient `earnings_call`, `conference_call` ou `transcript`)
 - sections extraites au preprocess (par defaut): `Item 1A` et `Item 7`
@@ -43,12 +44,11 @@ L'interface se comporte comme un chatbot:
 
 ### Documents non ingeres dans cette version
 
-- `10-Q` (trimestriel)
 - investor presentations / communiques hors SEC
 
 ### Consequence sur la pertinence
 
-Le chatbot est coherent sur l'analyse fondamentale long-terme, mais il est moins complet pour le suivi court-terme tant que `10-Q` et transcripts ne sont pas ajoutes.
+Le chatbot est coherent sur l'analyse fondamentale long-terme et intermediaire (10-K/10-Q/8-K), mais reste limite au perimetre des documents SEC + transcripts disponibles.
 
 ## Configuration
 
@@ -98,6 +98,13 @@ python3 rag/download_SEC_reports.py
 python3 rag/preprocess.py --sections 1a,7 --min-year 2021
 ```
 
+Par defaut, les `8-K` (item `2.02`) sont inclus.  
+Pour les exclure explicitement:
+
+```bash
+python3 rag/preprocess.py --sections 1a,7 --min-year 2021 --exclude-8k
+```
+
 ### 4) Planifier l'indexation
 
 ```bash
@@ -143,6 +150,7 @@ Flags `.env` utiles:
 - `SKIP_PREPROCESS_IF_EXISTS=false`
 - `BOOTSTRAP_MIN_YEAR=2021`
 - `BOOTSTRAP_SECTIONS=1a,7`
+- `BOOTSTRAP_EXCLUDE_8K=false` (par defaut les 8-K sont inclus)
 - `EMBEDDING_DAILY_LIMIT=0` (`0` = quota illimite)
 - `EMBEDDING_BATCH_SIZE=32`
 - `EMBEDDING_MAX_RETRIES=3`
