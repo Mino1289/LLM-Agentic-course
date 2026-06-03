@@ -3,6 +3,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import argparse
 import time
 import json
 import os
@@ -10,7 +11,8 @@ import requests
 from datetime import datetime
 from dotenv import load_dotenv
 
-from rag.paths import DATA_DIR, ENV_FILE, SEC_FILINGS_METADATA, ensure_dir
+from rag.config import TRACKED_TICKERS
+from rag.paths import DATA_DIR, ENV_FILE, PROJECT_ROOT, SEC_FILINGS_METADATA, ensure_dir
 
 load_dotenv(ENV_FILE)
 
@@ -28,8 +30,8 @@ HEADERS = {
     "Accept-Encoding": "gzip, deflate"
 }
 
-# Liste des tickers ciblés
-TICKERS = ["NVDA", "INTC", "AMD", "PLTR", "GOOGL", "META", "AMZN", "MSFT", "AVGO", "ORCL"]
+# Liste des tickers ciblés (univers debug volontairement limité).
+TICKERS = list(TRACKED_TICKERS)
 
 def rate_limit_sleep():
     """Garantit le respect de la limite de la SEC (max 10 req/sec)"""
@@ -52,8 +54,8 @@ def get_cik_mapping():
             mapping[ticker] = str(entry["cik_str"]).zfill(10)
     return mapping
 
-def get_filings(ticker, cik):
-    """Cherche les formulaires 8-K (Item 2.02), 10-K et 10-Q des 5 dernières années."""
+def get_filings(ticker, cik, min_year, max_year):
+    """Cherche les formulaires 8-K (Item 2.02), 10-K et 10-Q de la plage demandée."""
     print(f"\nRecherche des rapports pour {ticker} (CIK: {cik})...")
     url = f"https://data.sec.gov/submissions/CIK{cik}.json"
     
@@ -70,23 +72,20 @@ def get_filings(ticker, cik):
         return []
     
     filings_found = []
-    current_year = datetime.now().year # 2026
-    limit_year = current_year - 5 # 2021
-    
     # Parcourt les documents soumis
     for i in range(len(recent_filings["form"])):
         form = recent_filings["form"][i]
         filing_date_str = recent_filings["filingDate"][i]
         filing_year = int(filing_date_str.split("-")[0])
         
-        # Filtre sur la plage d'années 2021-2026
-        if not (limit_year <= filing_year <= current_year):
+        if not (min_year <= filing_year <= max_year):
             continue
 
         is_wanted = False
         if form == "8-K":
             # Récupère la liste des items associés au 8-K (ex: "2.02", "9.01")
-            items_raw = recent_filings.get("items", [[]])[i]
+            filing_items = recent_filings.get("items", [])
+            items_raw = filing_items[i] if i < len(filing_items) else ""
             items = items_raw if isinstance(items_raw, list) else str(items_raw).split(",")
             items = [item.strip() for item in items]
             
@@ -124,25 +123,44 @@ def download_filing(ticker, form, date, url):
 
     ext = url.split(".")[-1]
     filename = DATA_DIR / f"{ticker.lower()}-{form.lower()}_{date}.{ext}"
+    portable_path = filename.relative_to(PROJECT_ROOT).as_posix()
 
     if filename.exists():
-        return str(filename)
+        return portable_path
 
     try:
         response = requests.get(url, headers=HEADERS)
         response.raise_for_status()
         filename.write_bytes(response.content)
         rate_limit_sleep()
-        return str(filename)
+        return portable_path
     except Exception as e:
         print(f"  [Erreur] Impossible de télécharger {url} : {e}")
         return None
 
+def parse_args():
+    current_year = datetime.now().year
+    parser = argparse.ArgumentParser(description="Télécharger les rapports SEC de l'univers debug.")
+    parser.add_argument(
+        "--min-year",
+        type=int,
+        default=int(os.getenv("BOOTSTRAP_MIN_YEAR", str(current_year - 2))),
+    )
+    parser.add_argument(
+        "--max-year",
+        type=int,
+        default=int(os.getenv("BOOTSTRAP_MAX_YEAR", str(current_year))),
+    )
+    args = parser.parse_args()
+    if args.min_year > args.max_year:
+        parser.error("--min-year doit être inférieur ou égal à --max-year")
+    return args
+
+
 def main():
+    args = parse_args()
     # 1. Obtenir les identifiants SEC (CIK) des entreprises
     cik_map = get_cik_mapping()
-    current_year = datetime.now().year
-    limit_year = current_year - 5
     
     results = {}
     
@@ -150,11 +168,11 @@ def main():
     for ticker in TICKERS:
         if ticker in cik_map:
             cik = cik_map[ticker]
-            filings = get_filings(ticker, cik)
+            filings = get_filings(ticker, cik, args.min_year, args.max_year)
             results[ticker] = filings
             print(
                 f"-> {len(filings)} documents trouvés (8-K 2.02, 10-K, 10-Q) "
-                f"pour {ticker} entre {limit_year} et {current_year}."
+                f"pour {ticker} entre {args.min_year} et {args.max_year}."
             )
             
             # 3. Téléchargement effectif des fichiers

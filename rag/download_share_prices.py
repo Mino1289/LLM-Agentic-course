@@ -3,28 +3,30 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from datetime import datetime
+import os
+from datetime import date, datetime
 
 import yfinance as yf
 
+from rag.config import TRACKED_TICKERS
 from rag.paths import DATA_DIR, ensure_dir
 
 # Liste des entreprises demandées avec leurs tickers officiels du NASDAQ / NYSE
-entreprises = {
+supported_companies = {
     "nvidia": "NVDA",
-    "intel": "INTC",
     "amd": "AMD",
-    "palantir": "PLTR",
-    "google": "GOOGL",
-    "meta": "META",
-    "amazon": "AMZN",
     "microsoft": "MSFT",
-    "broadcom": "AVGO",
-    "oracle": "ORCL",
+}
+entreprises = {
+    name: ticker for name, ticker in supported_companies.items() if ticker in TRACKED_TICKERS
 }
 
-date_debut = "2021-01-01"
-date_fin = datetime.today().strftime("%Y-%m-%d")
+min_year = int(os.getenv("BOOTSTRAP_MIN_YEAR", "2024"))
+max_year = int(os.getenv("BOOTSTRAP_MAX_YEAR", str(datetime.today().year)))
+if min_year > max_year:
+    raise ValueError("BOOTSTRAP_MIN_YEAR doit être inférieur ou égal à BOOTSTRAP_MAX_YEAR")
+date_debut = date(min_year, 1, 1).isoformat()
+date_fin = min(date(max_year + 1, 1, 1), datetime.today().date()).isoformat()
 
 ensure_dir(DATA_DIR)
 
