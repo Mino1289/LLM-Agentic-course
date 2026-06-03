@@ -1,6 +1,8 @@
 import os
 import sys
 import uuid
+from collections import Counter
+from typing import Any
 
 import streamlit as st
 
@@ -70,8 +72,174 @@ def build_agent(
     )
 
 
+def format_counts(counts: dict[str, int] | None) -> str:
+    if not counts:
+        return "aucun"
+    return " | ".join(f"{key}: {value}" for key, value in sorted(counts.items()))
+
+
+def build_sources(chunks: list[str], metadatas: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    sources = []
+    for i, chunk in enumerate(chunks):
+        meta = metadatas[i] if i < len(metadatas) else {}
+        sources.append(
+            {
+                "ticker": meta.get("ticker", "UNKNOWN"),
+                "source": meta.get("source", "unknown"),
+                "section": meta.get("section", "unknown"),
+                "year": meta.get("year", "unknown"),
+                "file_type": meta.get("file_type", "unknown"),
+                "chunk_index": meta.get("chunk_index", i),
+                "source_index": i + 1,
+                "chunk": chunk,
+            }
+        )
+    return sources
+
+
+def render_stats(stats: dict[str, Any]) -> None:
+    if not stats:
+        return
+
+    cols = st.columns(6)
+    cols[0].metric("Chunks", stats.get("chunks_used", 0))
+    cols[1].metric("Tokens", stats.get("estimated_context_tokens", 0))
+    cols[2].metric("Sous-requêtes", stats.get("decomposed_query_count", 0))
+    cols[3].metric("Candidats", stats.get("retrieval_candidate_count", 0))
+    cols[4].metric("Final", stats.get("rerank_final_count", stats.get("chunks_used", 0)))
+    cols[5].metric("Prix", "oui" if stats.get("price_tool_used") else "non")
+
+    retrieval_counts = stats.get("retrieval_candidate_ticker_counts", {})
+    rerank_counts = stats.get("rerank_final_ticker_counts", {})
+    if retrieval_counts or rerank_counts:
+        st.caption(
+            "Répartition tickers - "
+            f"retrieval: {format_counts(retrieval_counts)} | "
+            f"rerank final: {format_counts(rerank_counts)}"
+        )
+    else:
+        st.caption(
+            f"GC: {'oui' if stats.get('gc_applied') else 'non'} | "
+            f"Tentatives prix: {stats.get('price_tool_attempts', 0)}"
+        )
+
+
+def render_sources(sources: list[dict[str, Any]], key_prefix: str) -> None:
+    if not sources:
+        return
+
+    counts = Counter(str(source.get("ticker", "UNKNOWN")) for source in sources)
+    summary = ", ".join(f"{ticker}: {count}" for ticker, count in sorted(counts.items()))
+    with st.expander(f"Sources consultées ({len(sources)} chunks | {summary})"):
+        tickers = ["Tous"] + sorted({str(source.get("ticker", "UNKNOWN")) for source in sources})
+        sections = ["Toutes"] + sorted({str(source.get("section", "unknown")) for source in sources})
+        col1, col2 = st.columns(2)
+        selected_ticker = col1.selectbox("Ticker", tickers, key=f"{key_prefix}_source_ticker")
+        selected_section = col2.selectbox("Section", sections, key=f"{key_prefix}_source_section")
+
+        visible_sources = []
+        for source in sources:
+            if selected_ticker != "Tous" and source.get("ticker") != selected_ticker:
+                continue
+            if selected_section != "Toutes" and source.get("section") != selected_section:
+                continue
+            visible_sources.append(source)
+
+        for source_idx, source in enumerate(visible_sources, start=1):
+            stable_idx = source.get("source_index", source_idx)
+            st.markdown(
+                f"**Source {source_idx}** - "
+                f"`{source.get('ticker', 'UNKNOWN')}` | "
+                f"`{source.get('source', 'unknown')}` | "
+                f"`{source.get('section', 'unknown')}` | "
+                f"`{source.get('year', 'unknown')}` | "
+                f"chunk `{source.get('chunk_index', '?')}`"
+            )
+            st.text_area(
+                "Extrait",
+                source.get("chunk", ""),
+                height=180,
+                disabled=True,
+                key=f"{key_prefix}_source_{stable_idx}",
+                label_visibility="collapsed",
+            )
+            st.divider()
+
+
+def render_debug(message: dict[str, Any], key_prefix: str) -> None:
+    stats = message.get("stats", {})
+    debug_payload = message.get("debug", {})
+    if not stats and not debug_payload:
+        return
+
+    with st.expander("Debug RAG"):
+        tab_pipeline, tab_queries, tab_filters, tab_stats = st.tabs(
+            ["Pipeline", "Sous-requêtes", "Filtres", "Stats brutes"]
+        )
+
+        with tab_pipeline:
+            pipeline_rows = {
+                "intent_route": stats.get("intent_route"),
+                "intent_scope_source": stats.get("intent_scope_source"),
+                "intent_scope_reason": stats.get("intent_scope_reason"),
+                "scope_source": stats.get("scope_source"),
+                "scope_reason": stats.get("scope_reason"),
+                "scope_tickers": stats.get("scope_tickers"),
+                "scope_doc_types": stats.get("scope_doc_types"),
+                "price_tool_decision": stats.get("price_tool_decision"),
+                "price_tool_decision_source": stats.get("price_tool_decision_source"),
+            }
+            st.json({k: v for k, v in pipeline_rows.items() if v not in (None, "", [])})
+
+        with tab_queries:
+            decomposed = debug_payload.get("decomposed_queries", [])
+            if decomposed:
+                for idx, subquery in enumerate(decomposed, start=1):
+                    st.markdown(f"{idx}. `{subquery}`")
+            else:
+                st.caption("Aucune sous-requête enregistrée.")
+
+        with tab_filters:
+            st.json(
+                {
+                    "normalized_query": debug_payload.get("normalized_query", ""),
+                    "metadata_filter": debug_payload.get("metadata_filter", {}),
+                    "target_tickers": debug_payload.get("target_tickers", []),
+                    "doc_type_priority": debug_payload.get("doc_type_priority", []),
+                    "retrieval_scoped_tickers": stats.get("retrieval_scoped_tickers", []),
+                    "retrieval_scoped_doc_types": stats.get("retrieval_scoped_doc_types", []),
+                }
+            )
+
+        with tab_stats:
+            st.json(stats)
+
+
+def render_assistant_artifacts(message: dict[str, Any], key_prefix: str) -> None:
+    render_stats(message.get("stats", {}))
+    render_sources(message.get("sources", []), key_prefix)
+    price_context = message.get("price_context", "")
+    if price_context:
+        with st.expander("Contexte prix utilisé"):
+            st.text(price_context)
+    render_debug(message, key_prefix)
+
+
 st.sidebar.title("Configuration")
 st.sidebar.caption("Stratégie unique: semantic chunking + vector retrieval + reranking")
+if st.sidebar.button("Nouvelle conversation"):
+    st.session_state.conversation_id = str(uuid.uuid4())
+    st.session_state.messages = [
+        {
+            "role": "assistant",
+            "content": (
+                "Bonjour, je peux analyser les filings financiers comme un chatbot conversationnel. "
+                "Pose ta question librement (même sans ticker/année)."
+            ),
+        }
+    ]
+    st.rerun()
+
 memory_window_default = int(os.getenv("MEMORY_WINDOW_SIZE", "6"))
 summarize_every_n_turns_default = int(os.getenv("SUMMARIZE_EVERY_N_TURNS", "6"))
 max_context_chunks_default = int(os.getenv("MAX_CONTEXT_CHUNKS", "8"))
@@ -135,35 +303,11 @@ except Exception as e:
     st.sidebar.error(f"Erreur d'initialisation: {e}")
     st.stop()
 
-for message in st.session_state.messages:
+for message_idx, message in enumerate(st.session_state.messages):
     with st.chat_message(message.get("role", "assistant")):
         st.markdown(message.get("content", ""))
         if message.get("role") == "assistant":
-            stats = message.get("stats", {})
-            if stats:
-                st.caption(
-                    f"Chunks utilisés: {stats.get('chunks_used', 0)} | "
-                    f"Tokens contexte estimés: {stats.get('estimated_context_tokens', 0)} | "
-                    f"GC appliqué: {'oui' if stats.get('gc_applied') else 'non'} | "
-                    f"Sous-requêtes: {stats.get('decomposed_query_count', 0)} | "
-                    f"Outil prix: {'oui' if stats.get('price_tool_used') else 'non'} | "
-                    f"Tentatives prix: {stats.get('price_tool_attempts', 0)}"
-                )
-            sources = message.get("sources", [])
-            if sources:
-                with st.expander("Sources consultées"):
-                    for source_idx, source in enumerate(sources, start=1):
-                        st.markdown(
-                            f"**Source {source_idx}** - "
-                            f"`{source.get('source', 'unknown')}` / "
-                            f"`{source.get('section', 'unknown')}`"
-                        )
-                        st.text(source.get("chunk", ""))
-                        st.divider()
-            price_context = message.get("price_context", "")
-            if price_context:
-                with st.expander("Contexte prix utilisé"):
-                    st.text(price_context)
+            render_assistant_artifacts(message, key_prefix=f"msg_{message_idx}")
 
 query = st.chat_input("Question finance (ex: Quels risques majeurs sur les semiconducteurs en 2024 ?)")
 if query:
@@ -185,52 +329,30 @@ if query:
                 )
                 st.markdown(assistant_text)
 
-                stats = result.get("stats", {})
-                st.caption(
-                    f"Chunks utilisés: {stats.get('chunks_used', 0)} | "
-                    f"Tokens contexte estimés: {stats.get('estimated_context_tokens', 0)} | "
-                    f"GC appliqué: {'oui' if stats.get('gc_applied') else 'non'} | "
-                    f"Sous-requêtes: {stats.get('decomposed_query_count', 0)} | "
-                    f"Outil prix: {'oui' if stats.get('price_tool_used') else 'non'} | "
-                    f"Tentatives prix: {stats.get('price_tool_attempts', 0)}"
-                )
-
                 chunks = result.get("final_chunks", [])
                 metadatas = result.get("final_metadatas", [])
                 price_context = result.get("price_context", "")
-                sources = []
-                for i, chunk in enumerate(chunks):
-                    meta = metadatas[i] if i < len(metadatas) else {}
-                    sources.append(
-                        {
-                            "source": meta.get("source", "unknown"),
-                            "section": meta.get("section", "unknown"),
-                            "chunk": chunk,
-                        }
-                    )
+                sources = build_sources(chunks, metadatas)
+                debug = {
+                    "normalized_query": result.get("normalized_query", ""),
+                    "metadata_filter": result.get("metadata_filter", {}),
+                    "target_tickers": result.get("target_tickers", []),
+                    "doc_type_priority": result.get("doc_type_priority", []),
+                    "decomposed_queries": result.get("decomposed_queries", []),
+                }
 
-                if sources:
-                    with st.expander("Sources consultées"):
-                        for source_idx, source in enumerate(sources, start=1):
-                            st.markdown(
-                                f"**Source {source_idx}** - "
-                                f"`{source.get('source', 'unknown')}` / "
-                                f"`{source.get('section', 'unknown')}`"
-                            )
-                            st.text(source.get("chunk", ""))
-                            st.divider()
-                if price_context:
-                    with st.expander("Contexte prix utilisé"):
-                        st.text(price_context)
+                assistant_message = {
+                    "role": "assistant",
+                    "content": assistant_text,
+                    "stats": result.get("stats", {}),
+                    "sources": sources,
+                    "price_context": price_context,
+                    "debug": debug,
+                }
+                render_assistant_artifacts(assistant_message, key_prefix=f"live_{len(st.session_state.messages)}")
 
                 st.session_state.messages.append(
-                    {
-                        "role": "assistant",
-                        "content": assistant_text,
-                        "stats": stats,
-                        "sources": sources,
-                        "price_context": price_context,
-                    }
+                    assistant_message
                 )
             except Exception as e:
                 error_msg = f"Erreur lors de l'analyse: {e}"
