@@ -140,7 +140,7 @@ def multi_retrieve_node(agent: Any, state: GraphState) -> GraphState:
                 scoped_doc_types=scoped_doc_types,
             )
 
-        if not query_indices:
+        if not query_indices and not scoped_tickers and not scoped_doc_types and not metadata_filter:
             fallback = agent.rag.retrieve(
                 query,
                 search_mode="vector",

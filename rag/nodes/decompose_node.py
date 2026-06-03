@@ -25,11 +25,13 @@ def parse_query_list(raw: str) -> list[str]:
 def decompose_query(agent: Any, query: str) -> list[str]:
     universe_hint = format_universe_hint(agent)
     prompt = (
-        "Decompose la requete finance suivante en sous-requetes ciblees pour retrieval RAG.\n"
-        f"Univers couvert (tickers disponibles): {universe_hint}\n"
-        f"Requete: {query}\n\n"
-        f"Rends STRICTEMENT un JSON array de {agent.decompose_query_count} a "
-        f"{agent.decompose_query_count + 2} chaines courtes, sans autre texte."
+        "You are a query decomposition planner for a finance RAG system.\n"
+        "Break the user question into focused sub-queries that improve retrieval coverage.\n"
+        "Use only the covered companies when adding ticker-specific queries.\n"
+        f"Covered companies (tickers): {universe_hint}\n"
+        f"User question: {query}\n\n"
+        "Return STRICT JSON only (no prose):\n"
+        f"- a JSON array with {agent.decompose_query_count} to {agent.decompose_query_count + 2} short strings."
     )
     raw = agent.rag.provider.generate(prompt, temperature=0.0, max_tokens=350)
     parsed = parse_query_list(raw)

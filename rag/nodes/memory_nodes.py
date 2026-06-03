@@ -23,6 +23,36 @@ def memory_write_node(agent: Any, state: GraphState) -> GraphState:
     return {}
 
 
+@traceable(name="context_prune_node")
+def context_prune_node(agent: Any, state: GraphState) -> GraphState:
+    chunks = state.get("final_chunks", [])
+    metadatas = state.get("final_metadatas", [])
+    kept_pairs = [
+        (chunk, metadatas[index] if index < len(metadatas) else {})
+        for index, chunk in enumerate(chunks)
+        if not agent.memory_store.is_duplicate_chunk(state["conversation_id"], chunk)
+    ]
+
+    while kept_pairs and agent.rag.count_context_tokens([chunk for chunk, _ in kept_pairs]) > agent.max_context_tokens:
+        kept_pairs = kept_pairs[:-1]
+
+    final_chunks = [chunk for chunk, _ in kept_pairs]
+    final_metadatas = [metadata for _, metadata in kept_pairs]
+    stats = state.get("stats", {})
+    stats.update(
+        {
+            "chunks_used": len(final_chunks),
+            "estimated_context_tokens": agent.rag.count_context_tokens(final_chunks),
+            "context_pruned": len(final_chunks) != len(chunks),
+        }
+    )
+    return {
+        "final_chunks": final_chunks,
+        "final_metadatas": final_metadatas,
+        "stats": stats,
+    }
+
+
 @traceable(name="gc_node")
 def gc_node(agent: Any, state: GraphState) -> GraphState:
     conversation_id = state["conversation_id"]
@@ -35,27 +65,15 @@ def gc_node(agent: Any, state: GraphState) -> GraphState:
         )
         if transcript.strip():
             summary_prompt = (
-                "Resume la conversation suivante en 8 lignes max pour memoire long-terme d'un assistant financier.\n"
-                f"Memoire existante: {memory.summary}\n\n"
-                f"Conversation a compresser:\n{transcript}"
+                "Summarize the following conversation in at most 8 lines for long-term memory "
+                "of a finance assistant.\n"
+                f"Existing memory summary: {memory.summary}\n\n"
+                f"Conversation to compress:\n{transcript}"
             )
             new_summary = agent.rag.provider.generate(summary_prompt, temperature=0.0, max_tokens=300)
             agent.memory_store.update_summary(conversation_id, new_summary)
             agent.memory_store.trim_turns(conversation_id, keep_last=agent.memory_store.window_size)
             gc_applied = True
-
-    deduped_chunks = []
-    for chunk in state.get("final_chunks", []):
-        if not agent.memory_store.is_duplicate_chunk(conversation_id, chunk):
-            deduped_chunks.append(chunk)
-    if deduped_chunks:
-        state["final_chunks"] = deduped_chunks
-
-    final_chunks = state.get("final_chunks", [])
-    while final_chunks and agent.rag.count_context_tokens(final_chunks) > agent.max_context_tokens:
-        final_chunks = final_chunks[:-1]
-        gc_applied = True
-    state["final_chunks"] = final_chunks
 
     for chunk in state.get("final_chunks", []):
         agent.memory_store.remember_chunk(conversation_id, chunk)

@@ -3,16 +3,19 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from rag.config import TRACKED_TICKERS
 from rag.nodes.state import GraphState
 from rag.nodes.tracing import traceable
 
 
 def extract_metadata_filter(query: str) -> dict[str, str]:
     filter_payload: dict[str, str] = {}
+    allowed_tickers = set(TRACKED_TICKERS)
 
-    ticker_match = re.search(r"\b([A-Z]{2,5})\b", query)
-    if ticker_match:
-        filter_payload["ticker"] = ticker_match.group(1)
+    for ticker in re.findall(r"\b([A-Z]{2,5})\b", query):
+        if ticker in allowed_tickers:
+            filter_payload["ticker"] = ticker
+            break
 
     year_match = re.search(r"\b(20\d{2})\b", query)
     if year_match:
