@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from rag.nodes.prompt_context import format_universe_hint
@@ -12,14 +13,29 @@ def parse_query_list(raw: str) -> list[str]:
     text = raw.strip()
     if not text:
         return []
+    fence_match = re.match(r"^```(?:json)?\s*(.*?)\s*```$", text, flags=re.DOTALL | re.IGNORECASE)
+    if fence_match:
+        text = fence_match.group(1).strip()
     try:
         data = json.loads(text)
         if isinstance(data, list):
             return [str(item).strip() for item in data if str(item).strip()]
     except Exception:
         pass
+    array_match = re.search(r"\[[\s\S]*\]", text)
+    if array_match:
+        try:
+            data = json.loads(array_match.group(0))
+            if isinstance(data, list):
+                return [str(item).strip() for item in data if str(item).strip()]
+        except Exception:
+            pass
     lines = [ln.strip("-• \t") for ln in text.splitlines()]
-    return [ln for ln in lines if ln]
+    return [
+        ln
+        for ln in lines
+        if ln and ln not in {"```", "```json", "[", "]"} and not ln.startswith("```")
+    ]
 
 
 def decompose_query(agent: Any, query: str) -> list[str]:

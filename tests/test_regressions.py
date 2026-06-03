@@ -10,11 +10,14 @@ import chromadb
 os.environ["LANGSMITH_TRACING"] = "false"
 
 from rag.hybrid_rag import HybridRAG, build_chunk_id, chunk_text_semantic
-from rag.nodes.generation_node import synthesis_node
+from rag.nodes.decompose_node import parse_query_list
+from rag.nodes.generation_node import format_retrieved_excerpts, synthesis_node
 from rag.nodes.memory_nodes import context_prune_node
-from rag.nodes.prepare_node import extract_metadata_filter
+from rag.nodes.prepare_node import extract_metadata_filter, prepare_query_node
 from rag.nodes.prompt_context import get_known_tickers
+from rag.nodes.rerank_node import rerank_node
 from rag.nodes.retrieval_node import multi_retrieve_node
+from rag.nodes.scope_node import query_scope_node
 from rag.nodes.tool_nodes import tool_orchestrator_node
 from rag.preprocess import SECTION_SPECS, _extract_between, is_in_year_range
 
@@ -108,6 +111,83 @@ class RetrievalTests(unittest.TestCase):
 
         self.assertEqual(result["candidate_indices"], [])
 
+    def test_multi_retrieve_uses_explicit_query_tickers_even_if_scope_lost_one(self):
+        class Retrieval:
+            def __init__(self, indices):
+                self.chunk_indices = indices
+
+        class FakeRag:
+            doc_metadata = [
+                {"ticker": "MSFT", "source": "msft-10-q_2026.htm", "section": "Item_7"},
+                {"ticker": "NVDA", "source": "nvda-10-q_2026.htm", "section": "Item_7"},
+            ]
+
+            def __init__(self):
+                self.calls = []
+
+            def retrieve(self, query, **kwargs):
+                ticker = (kwargs.get("metadata_filter") or {}).get("ticker")
+                self.calls.append((query, ticker))
+                if ticker == "MSFT":
+                    return Retrieval([0])
+                if ticker == "NVDA":
+                    return Retrieval([1])
+                return Retrieval([])
+
+            def _deduplicate_indices(self, indices):
+                return list(dict.fromkeys(indices))
+
+        rag = FakeRag()
+        state = {
+            "normalized_query": "Compare MSFT et NVDA sur la croissance recente du chiffre d'affaires.",
+            "decomposed_queries": ["Compare MSFT et NVDA sur la croissance recente du chiffre d'affaires."],
+            "metadata_filter": {},
+            "target_tickers": ["MSFT"],
+            "doc_type_priority": ["10-Q"],
+            "stats": {},
+        }
+
+        result = multi_retrieve_node(SimpleNamespace(rag=rag), state)
+
+        self.assertEqual(result["candidate_indices"], [0, 1])
+        nvda_queries = [query for query, ticker in rag.calls if ticker == "NVDA"]
+        self.assertTrue(nvda_queries)
+        self.assertNotIn("MSFT", nvda_queries[0])
+
+
+class DecomposeTests(unittest.TestCase):
+    def test_parse_query_list_handles_json_code_fence(self):
+        raw = '```json\n["MSFT revenue growth", "NVDA revenue growth"]\n```'
+
+        self.assertEqual(
+            parse_query_list(raw),
+            ["MSFT revenue growth", "NVDA revenue growth"],
+        )
+
+
+class ScopeTests(unittest.TestCase):
+    def test_scope_preserves_explicit_tickers_when_llm_returns_subset(self):
+        class Provider:
+            def generate(self, *_args, **_kwargs):
+                return '{"target_tickers":["MSFT"],"doc_type_priority":["10-Q"],"reason":"subset"}'
+
+        agent = SimpleNamespace(
+            rag=SimpleNamespace(
+                provider=Provider(),
+                doc_metadata=[{"ticker": "MSFT"}, {"ticker": "NVDA"}],
+            )
+        )
+        state = {
+            "normalized_query": "Compare MSFT et NVDA sur la croissance recente du chiffre d'affaires.",
+            "metadata_filter": {},
+            "target_tickers": ["MSFT", "NVDA"],
+            "stats": {},
+        }
+
+        result = query_scope_node(agent, state)
+
+        self.assertEqual(result["target_tickers"], ["MSFT", "NVDA"])
+
 
 class PrepareTests(unittest.TestCase):
     def test_metadata_filter_ignores_uppercase_non_ticker_tokens(self):
@@ -120,8 +200,62 @@ class PrepareTests(unittest.TestCase):
 
         self.assertEqual(result, {"ticker": "AMD", "year": "2024"})
 
+    def test_comparison_query_keeps_all_tickers_without_single_ticker_filter(self):
+        state = prepare_query_node(
+            SimpleNamespace(),
+            {"query": "Compare MSFT et NVDA sur la croissance recente du chiffre d'affaires."},
+        )
+
+        self.assertEqual(state["target_tickers"], ["MSFT", "NVDA"])
+        self.assertNotIn("ticker", state["metadata_filter"])
+
+
+class RerankTests(unittest.TestCase):
+    def test_rerank_balances_chunks_across_target_tickers(self):
+        class Rag:
+            documents = ["msft 1", "msft 2", "msft 3", "nvda 1", "nvda 2", "nvda 3"]
+            doc_metadata = [
+                {"ticker": "MSFT"},
+                {"ticker": "MSFT"},
+                {"ticker": "MSFT"},
+                {"ticker": "NVDA"},
+                {"ticker": "NVDA"},
+                {"ticker": "NVDA"},
+            ]
+
+            def _rerank(self, _query, indices, top_k):
+                return indices[:top_k]
+
+        agent = SimpleNamespace(rag=Rag(), max_context_chunks=4)
+        state = {
+            "normalized_query": "Compare MSFT et NVDA revenue growth",
+            "target_tickers": ["MSFT", "NVDA"],
+            "candidate_indices": [0, 1, 2, 3, 4, 5],
+        }
+
+        result = rerank_node(agent, state)
+
+        self.assertEqual(
+            [meta["ticker"] for meta in result["final_metadatas"]],
+            ["MSFT", "MSFT", "NVDA", "NVDA"],
+        )
+        self.assertEqual(result["stats"]["rerank_final_ticker_counts"], {"MSFT": 2, "NVDA": 2})
+
 
 class GenerationTests(unittest.TestCase):
+    def test_retrieved_excerpts_include_metadata_labels(self):
+        result = format_retrieved_excerpts(
+            ["microsoft excerpt", "nvidia excerpt"],
+            [
+                {"ticker": "MSFT", "source": "msft-10-q_2026.htm", "section": "Item_7", "year": "2026"},
+                {"ticker": "NVDA", "source": "nvda-10-q_2026.htm", "section": "Item_7", "year": "2026"},
+            ],
+        )
+
+        self.assertIn("Ticker: MSFT", result)
+        self.assertIn("Ticker: NVDA", result)
+        self.assertIn("Source: nvda-10-q_2026.htm", result)
+
     def test_single_chunk_synthesis_preserves_grounded_draft(self):
         state = {
             "final_chunks": ["source chunk"],
@@ -132,6 +266,29 @@ class GenerationTests(unittest.TestCase):
 
         self.assertIn("AMD mentionne un risque de demande cyclique.", result["answer"])
         self.assertIn("un seul extrait", result["answer"])
+
+    def test_synthesis_prompt_preserves_target_tickers(self):
+        class Provider:
+            def __init__(self):
+                self.prompt = ""
+
+            def generate(self, prompt, **_kwargs):
+                self.prompt = prompt
+                return "synthese"
+
+        provider = Provider()
+        agent = SimpleNamespace(rag=SimpleNamespace(provider=provider))
+        state = {
+            "normalized_query": "Compare MSFT et NVDA",
+            "target_tickers": ["MSFT", "NVDA"],
+            "final_chunks": ["msft chunk", "nvda chunk"],
+            "draft_answer": "MSFT ... NVDA ...",
+        }
+
+        synthesis_node(agent, state)
+
+        self.assertIn("Target tickers: MSFT, NVDA", provider.prompt)
+        self.assertIn("do not collapse the answer to only one company", provider.prompt)
 
 
 class ContextPruneTests(unittest.TestCase):

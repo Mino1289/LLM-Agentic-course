@@ -18,6 +18,7 @@ def _extract_first_json_object(raw: str) -> dict[str, Any] | None:
         return None
     try:
         parsed = json.loads(text)
+
         return parsed if isinstance(parsed, dict) else None
     except Exception:
         pass
@@ -168,6 +169,14 @@ def _llm_scope_decision(agent: Any, state: GraphState) -> tuple[list[str], list[
 @traceable(name="query_scope_node")
 def query_scope_node(agent: Any, state: GraphState) -> GraphState:
     tickers, doc_types, reason, source = _llm_scope_decision(agent, state)
+    explicit_tickers = [
+        str(t).upper()
+        for t in (state.get("target_tickers") or [])
+        if str(t).strip()
+    ]
+    for ticker in explicit_tickers:
+        if ticker not in tickers:
+            tickers.append(ticker)
     stats = state.get("stats", {})
     stats.update(
         {

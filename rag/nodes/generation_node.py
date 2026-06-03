@@ -8,6 +8,22 @@ from rag.nodes.state import GraphState
 from rag.nodes.tracing import traceable
 
 
+def format_retrieved_excerpts(chunks: list[str], metadatas: list[dict[str, Any]]) -> str:
+    blocks: list[str] = []
+    for index, chunk in enumerate(chunks, start=1):
+        metadata = metadatas[index - 1] if index - 1 < len(metadatas) else {}
+        header = (
+            f"[Excerpt {index}]\n"
+            f"Ticker: {metadata.get('ticker', 'UNKNOWN')}\n"
+            f"Source: {metadata.get('source', 'unknown')}\n"
+            f"Section: {metadata.get('section', 'unknown')}\n"
+            f"Filing year: {metadata.get('year', 'unknown')}\n"
+            "Text:\n"
+        )
+        blocks.append(header + chunk)
+    return "\n\n---\n\n".join(blocks)
+
+
 @traceable(name="answer_generate_node")
 def answer_generate_node(agent: Any, state: GraphState) -> GraphState:
     final_chunks = state.get("final_chunks", [])
@@ -26,9 +42,15 @@ def answer_generate_node(agent: Any, state: GraphState) -> GraphState:
         state.get("memory_window", []),
     )
     message_context = format_chat_context(state.get("messages", []))
-    chunks_context = "\n\n---\n\n".join(final_chunks)
+    chunks_context = format_retrieved_excerpts(final_chunks, state.get("final_metadatas", []))
     price_context = state.get("price_context", "")
     universe_hint = format_universe_hint(agent, max_items=20)
+    target_tickers = [
+        str(ticker).upper()
+        for ticker in (state.get("target_tickers") or [])
+        if str(ticker).strip()
+    ]
+    target_tickers_hint = ", ".join(dict.fromkeys(target_tickers)) or "not specified"
     price_block = f"Market price context:\n{price_context}\n\n" if price_context else ""
     prompt = (
         "You are a financial analysis assistant strictly grounded in provided evidence.\n"
@@ -43,8 +65,11 @@ def answer_generate_node(agent: Any, state: GraphState) -> GraphState:
         "7) Distinguish filing year/date from reporting-period year.\n"
         "   Example: a 2026 filing can report FY2025 metrics.\n"
         "8) Never output a blanket 'no data' claim if excerpts exist; instead state exactly "
-        "which period is evidenced and what is missing.\n\n"
+        "which period is evidenced and what is missing.\n"
+        "9) For comparison questions, address every target ticker explicitly. "
+        "If evidence is present for one ticker but not another, say that ticker-specific gap.\n\n"
         f"Covered companies (tickers): {universe_hint}\n\n"
+        f"Target tickers for this answer: {target_tickers_hint}\n\n"
         "Conversation memory context:\n"
         f"{memory_context}\n\n"
         "Recent chat history:\n"
@@ -165,6 +190,12 @@ def synthesis_node(agent: Any, state: GraphState) -> GraphState:
                 )
             }
 
+    target_tickers = [
+        str(ticker).upper()
+        for ticker in (state.get("target_tickers") or [])
+        if str(ticker).strip()
+    ]
+    target_tickers_hint = ", ".join(dict.fromkeys(target_tickers)) or "not specified"
     prompt = (
         "You are the final synthesis step of a finance assistant.\n"
         "Your task: answer the user clearly, choosing the most appropriate format.\n\n"
@@ -180,7 +211,10 @@ def synthesis_node(agent: Any, state: GraphState) -> GraphState:
         "6) Preserve period accuracy: separate filing year from fiscal-year metrics.\n"
         "   If a filing dated 2026 reports FY2025 values, state that explicitly.\n"
         "7) If requested period is not directly evidenced, provide the closest evidenced period "
-        "and explain the gap.\n\n"
+        "and explain the gap.\n"
+        "8) For comparison questions, preserve coverage for every target ticker listed below; "
+        "do not collapse the answer to only one company.\n\n"
+        f"Target tickers: {target_tickers_hint}\n"
         f"User question: {state.get('normalized_query', '')}\n"
         f"Draft answer to synthesize:\n{state.get('draft_answer', '')}"
     )
