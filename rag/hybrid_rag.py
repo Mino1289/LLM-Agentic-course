@@ -3,6 +3,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import hashlib
 import os
 import re
 import time
@@ -73,15 +74,19 @@ class EmbeddingPlan:
             f"Durée estimée         : ~{self.estimated_minutes:.1f} min "
             f"({self.rpm_limit} req/min)",
         ]
-        if not self.unlimited_quota and self.missing_chunks > self.daily_remaining:
+        if self.missing_chunks == 0:
+            lines.append("\n✅ Rien à embedder — index vectoriel à jour.")
+        elif not self.unlimited_quota and self.missing_chunks > self.daily_remaining:
             days = (self.deferred_chunks // max(self.daily_remaining, 1)) + (
                 1 if self.deferred_chunks % max(self.daily_remaining, 1) else 0
             )
             lines.append(
                 f"\n⚠️  Indexation complète : ~{days} jour(s) supplémentaire(s) au rythme actuel."
             )
-        elif self.missing_chunks == 0:
-            lines.append("\n✅ Rien à embedder — index vectoriel à jour.")
+        elif self.deferred_chunks > 0:
+            lines.append(
+                "\nℹ️ Des chunks restent reportés par la limite configurée pour ce run."
+            )
         else:
             lines.append("\n✅ Tout peut être indexé aujourd'hui avec le quota restant.")
         return "\n".join(lines)
@@ -220,7 +225,7 @@ def split_block_by_sentences(block: str, max_size: int) -> list[str]:
 
     sentences = split_sentences(block)
     if len(sentences) <= 1:
-        return [block]
+        return [block[start : start + max_size] for start in range(0, len(block), max_size)]
 
     chunks: list[str] = []
     current = ""
@@ -231,7 +236,14 @@ def split_block_by_sentences(block: str, max_size: int) -> list[str]:
         else:
             if current:
                 chunks.append(current)
-            current = sentence if len(sentence) <= max_size else sentence[:max_size]
+            if len(sentence) <= max_size:
+                current = sentence
+            else:
+                chunks.extend(
+                    sentence[start : start + max_size]
+                    for start in range(0, len(sentence), max_size)
+                )
+                current = ""
     if current:
         chunks.append(current)
     return chunks
@@ -266,7 +278,7 @@ def merge_semantic_blocks(
 
     merged: list[str] = []
     for chunk in chunks:
-        if merged and len(chunk) < min_size:
+        if merged and len(chunk) < min_size and len(merged[-1]) + 2 + len(chunk) <= max_size:
             merged[-1] = f"{merged[-1]}\n\n{chunk}".strip()
         else:
             merged.append(chunk)
@@ -322,6 +334,11 @@ def extract_file_type_from_source(source: str) -> str:
 
 def estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4)
+
+
+def build_chunk_id(source: str, section: str, strategy: str, chunk_index: int, chunk: str) -> str:
+    digest = hashlib.sha256(chunk.encode("utf-8")).hexdigest()[:16]
+    return f"{source}__{section}__{strategy}__{chunk_index}__{digest}"
 
 
 class HybridRAG:
@@ -385,12 +402,19 @@ class HybridRAG:
                 continue
 
             for i, chunk in enumerate(chunker(text)):
-                chunk_id = f"{source}__{section}__{self.chunk_strategy}__{i}"
+                chunk_id = build_chunk_id(source, section, self.chunk_strategy, i, chunk)
                 all_chunks.append(chunk)
                 all_metadata.append(self._build_metadata(source, section, i))
                 all_ids.append(chunk_id)
 
         return all_chunks, all_metadata, all_ids, len(files)
+
+    def remove_stale_index_entries(self, valid_ids: list[str]) -> int:
+        existing_ids = set(self.collection.get()["ids"])
+        stale_ids = sorted(existing_ids - set(valid_ids))
+        if stale_ids:
+            self.collection.delete(ids=stale_ids)
+        return len(stale_ids)
 
     def get_embedding_plan(
         self,
@@ -455,6 +479,11 @@ class HybridRAG:
         self.documents = all_chunks
         self.doc_metadata = all_metadata
         self.chunk_ids = all_ids
+
+        if not dry_run:
+            removed = self.remove_stale_index_entries(all_ids)
+            if removed:
+                print(f"Removed {removed} stale chunk(s) from ChromaDB.")
 
         plan = self.get_embedding_plan(
             max_files=max_files,
@@ -539,7 +568,7 @@ class HybridRAG:
                 break
 
             try:
-                self.collection.add(
+                self.collection.upsert(
                     documents=texts,
                     embeddings=embeddings,
                     metadatas=metadatas,
@@ -568,13 +597,23 @@ class HybridRAG:
             self._reranker = CrossEncoder(self.reranker_model, device="cpu")
         return self._reranker
 
-    def _vector_search(self, query: str, top_k: int = 10) -> list[int]:
+    def _vector_search(
+        self,
+        query: str,
+        top_k: int = 10,
+        metadata_filter: Optional[dict] = None,
+    ) -> list[int]:
         try:
             query_embedding = self.provider.embed([query])[0]
 
-            results = self.collection.query(
-                query_embeddings=[query_embedding], n_results=top_k
-            )
+            query_kwargs = {
+                "query_embeddings": [query_embedding],
+                "n_results": top_k,
+            }
+            if metadata_filter:
+                filters = [{key: value} for key, value in metadata_filter.items()]
+                query_kwargs["where"] = filters[0] if len(filters) == 1 else {"$and": filters}
+            results = self.collection.query(**query_kwargs)
             if not results["ids"] or not results["ids"][0]:
                 return []
 
@@ -634,7 +673,13 @@ class HybridRAG:
         start = time.perf_counter()
         candidate_indices: list[int] = []
 
-        candidate_indices.extend(self._vector_search(query, top_k=min(candidate_pool, 30)))
+        candidate_indices.extend(
+            self._vector_search(
+                query,
+                top_k=min(candidate_pool, 30),
+                metadata_filter=metadata_filter,
+            )
+        )
 
         candidate_indices = self._deduplicate_indices(candidate_indices)
         candidate_indices = self._apply_metadata_filter(candidate_indices, metadata_filter)

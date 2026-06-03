@@ -8,6 +8,22 @@ from rag.nodes.state import GraphState
 from rag.nodes.tracing import traceable
 
 
+def format_retrieved_excerpts(chunks: list[str], metadatas: list[dict[str, Any]]) -> str:
+    blocks: list[str] = []
+    for index, chunk in enumerate(chunks, start=1):
+        metadata = metadatas[index - 1] if index - 1 < len(metadatas) else {}
+        header = (
+            f"[Excerpt {index}]\n"
+            f"Ticker: {metadata.get('ticker', 'UNKNOWN')}\n"
+            f"Source: {metadata.get('source', 'unknown')}\n"
+            f"Section: {metadata.get('section', 'unknown')}\n"
+            f"Filing year: {metadata.get('year', 'unknown')}\n"
+            "Text:\n"
+        )
+        blocks.append(header + chunk)
+    return "\n\n---\n\n".join(blocks)
+
+
 @traceable(name="answer_generate_node")
 def answer_generate_node(agent: Any, state: GraphState) -> GraphState:
     final_chunks = state.get("final_chunks", [])
@@ -15,10 +31,9 @@ def answer_generate_node(agent: Any, state: GraphState) -> GraphState:
         universe_hint = format_universe_hint(agent, max_items=10)
         return {
             "draft_answer": (
-                "Je ne trouve pas assez de sources fiables pour repondre precisement. "
-                "Peux-tu preciser une entreprise, une periode, ou un angle (risques, "
-                "catalyseurs, marges, guidance) ? "
-                f"Exemples dans la base: {universe_hint}."
+                "I cannot find enough reliable evidence in the retrieved sources to answer precisely. "
+                "Please specify a company, timeframe, or angle (risks, catalysts, margins, guidance). "
+                f"Covered companies include: {universe_hint}."
             )
         }
 
@@ -27,28 +42,43 @@ def answer_generate_node(agent: Any, state: GraphState) -> GraphState:
         state.get("memory_window", []),
     )
     message_context = format_chat_context(state.get("messages", []))
-    chunks_context = "\n\n---\n\n".join(final_chunks)
+    chunks_context = format_retrieved_excerpts(final_chunks, state.get("final_metadatas", []))
     price_context = state.get("price_context", "")
-    price_block = f"Contexte prix de marche:\n{price_context}\n\n" if price_context else ""
+    universe_hint = format_universe_hint(agent, max_items=20)
+    target_tickers = [
+        str(ticker).upper()
+        for ticker in (state.get("target_tickers") or [])
+        if str(ticker).strip()
+    ]
+    target_tickers_hint = ", ".join(dict.fromkeys(target_tickers)) or "not specified"
+    price_block = f"Market price context:\n{price_context}\n\n" if price_context else ""
     prompt = (
-        "Tu es un assistant d'analyse financiere strictement ancre aux sources fournies.\n"
-        "Regles obligatoires anti-hallucination:\n"
-        "1) Utilise uniquement les informations presentes dans 'Extraits financiers recuperes' "
-        "et dans 'Contexte prix de marche' (si present).\n"
-        "2) N'ajoute aucun fait externe, aucune connaissance generale non visible dans ces extraits.\n"
-        "3) Si une information demandee n'est pas dans les extraits, dis-le explicitement "
-        "('information non disponible dans les sources recuperées').\n"
-        "4) N'invente ni chiffres, ni dates, ni citations, ni evenements.\n"
-        "5) Priorise precision et tracabilite sur eloquence.\n\n"
-        "Contexte conversationnel:\n"
+        "You are a financial analysis assistant strictly grounded in provided evidence.\n"
+        "Mandatory anti-hallucination rules:\n"
+        "1) Use only information present in 'Retrieved financial excerpts' and 'Market price context' (if present).\n"
+        "2) Do not add external facts or general knowledge not visible in those inputs.\n"
+        "3) If requested information is missing, explicitly state: "
+        "'information not available in retrieved sources'.\n"
+        "4) Do not invent numbers, dates, quotes, or events.\n"
+        "5) Prioritize precision and traceability over style.\n"
+        "6) Keep the answer focused on covered companies.\n"
+        "7) Distinguish filing year/date from reporting-period year.\n"
+        "   Example: a 2026 filing can report FY2025 metrics.\n"
+        "8) Never output a blanket 'no data' claim if excerpts exist; instead state exactly "
+        "which period is evidenced and what is missing.\n"
+        "9) For comparison questions, address every target ticker explicitly. "
+        "If evidence is present for one ticker but not another, say that ticker-specific gap.\n\n"
+        f"Covered companies (tickers): {universe_hint}\n\n"
+        f"Target tickers for this answer: {target_tickers_hint}\n\n"
+        "Conversation memory context:\n"
         f"{memory_context}\n\n"
-        "Historique de chat recent:\n"
+        "Recent chat history:\n"
         f"{message_context}\n\n"
         f"{price_block}"
-        "Extraits financiers recuperes:\n"
+        "Retrieved financial excerpts:\n"
         f"{chunks_context}\n\n"
-        f"Question utilisateur: {state['normalized_query']}\n\n"
-        "Reponds en francais avec une analyse financiere concise et fidele aux extraits."
+        f"User question: {state['normalized_query']}\n\n"
+        "Respond in French with a concise, evidence-faithful financial analysis."
     )
     draft = agent.rag.provider.generate(prompt, temperature=0.1, max_tokens=900)
     return {"draft_answer": draft}
@@ -59,15 +89,15 @@ def general_chat_node(agent: Any, state: GraphState) -> GraphState:
     message_context = format_chat_context(state.get("messages", []), keep_last=8)
     query = state.get("normalized_query", "")
     system_prompt = (
-        "Tu es un assistant conversationnel utile et concis. "
-        "Si la question est hors finance, reponds normalement. "
-        "Si l'utilisateur bascule vers la finance, invite-le doucement a preciser entreprise/periode si necessaire."
+        "You are a concise and helpful conversational assistant. "
+        "If the question is non-finance small talk, respond naturally. "
+        "If the user switches back to finance, gently ask for company/timeframe when needed."
     )
     prompt = (
-        "Historique recent:\n"
+        "Recent chat history:\n"
         f"{message_context}\n\n"
-        f"Message utilisateur: {query}\n\n"
-        "Reponds en francais, ton naturel, sans inventer d'informations factuelles incertaines."
+        f"User message: {query}\n\n"
+        "Respond in French, naturally, without inventing uncertain factual claims."
     )
     answer = agent.rag.provider.generate(
         prompt,
@@ -139,30 +169,54 @@ def synthesis_node(agent: Any, state: GraphState) -> GraphState:
         "Elle ne constitue pas un conseil financier personnalise. Investir comporte un risque de perte en capital."
     )
     chunk_count = len(state.get("final_chunks", []))
-    if chunk_count < 2:
+    if chunk_count == 0:
         return {
             "answer": (
-                "Le contexte source est limite pour une reponse ferme. "
-                "Je peux donner une vue generale, mais elle reste incertaine. "
+                "Aucun extrait source pertinent n'a ete retrouve pour repondre de facon fiable. "
                 "Si tu veux une reponse fiable, precise entreprise et periode."
             )
             + disclaimer
         }
 
+    if chunk_count == 1:
+        draft = (state.get("draft_answer", "") or "").strip()
+        if draft:
+            return {
+                "answer": (
+                    draft
+                    + "\n\nNote: le contexte source est limite a un seul extrait; "
+                    "la conclusion doit donc rester prudente."
+                    + disclaimer
+                )
+            }
+
+    target_tickers = [
+        str(ticker).upper()
+        for ticker in (state.get("target_tickers") or [])
+        if str(ticker).strip()
+    ]
+    target_tickers_hint = ", ".join(dict.fromkeys(target_tickers)) or "not specified"
     prompt = (
-        "Tu es l'etape de synthese finale d'un assistant finance.\n"
-        "Ta mission: repondre clairement a la question utilisateur en choisissant le format le plus adapte.\n\n"
-        "Regles obligatoires:\n"
-        "1) Priorite: reponds d'abord a la question (pas de blabla).\n"
-        "2) Format adaptatif (ne force PAS 5 sections):\n"
-        "   - question simple / suivi court -> reponse concise en 1-2 paragraphes ou bullets.\n"
-        "   - question comparative / semi-complexe -> structure legere avec 2-3 parties max.\n"
-        "   - question complexe explicite -> structure plus complete (jusqu'a 5 parties si utile).\n"
-        "3) Reste factuel et actionnable; evite les repetitions.\n"
-        "4) Si le contexte est incertain/incomplet, signale-le en 1 phrase.\n"
-        "5) Longueur cible: 120-220 mots (peut depasser legerement si necessaire).\n\n"
-        f"Question utilisateur: {state.get('normalized_query', '')}\n"
-        f"Texte brouillon a synthetiser:\n{state.get('draft_answer', '')}"
+        "You are the final synthesis step of a finance assistant.\n"
+        "Your task: answer the user clearly, choosing the most appropriate format.\n\n"
+        "Mandatory rules:\n"
+        "1) Lead with a direct answer to the question.\n"
+        "2) Use adaptive formatting (do NOT force 5 sections):\n"
+        "   - simple follow-up -> concise paragraphs or short bullets.\n"
+        "   - comparative / medium complexity -> lightweight 2-3 part structure.\n"
+        "   - explicitly complex request -> fuller structure only if useful.\n"
+        "3) Stay factual, actionable, and avoid repetition.\n"
+        "4) If evidence is incomplete, state uncertainty in one sentence.\n"
+        "5) Target length: 120-220 words (slightly longer only if necessary).\n"
+        "6) Preserve period accuracy: separate filing year from fiscal-year metrics.\n"
+        "   If a filing dated 2026 reports FY2025 values, state that explicitly.\n"
+        "7) If requested period is not directly evidenced, provide the closest evidenced period "
+        "and explain the gap.\n"
+        "8) For comparison questions, preserve coverage for every target ticker listed below; "
+        "do not collapse the answer to only one company.\n\n"
+        f"Target tickers: {target_tickers_hint}\n"
+        f"User question: {state.get('normalized_query', '')}\n"
+        f"Draft answer to synthesize:\n{state.get('draft_answer', '')}"
     )
     final_answer = agent.rag.provider.generate(prompt, temperature=0.0, max_tokens=520)
     return {"answer": (final_answer or "").strip() + disclaimer}

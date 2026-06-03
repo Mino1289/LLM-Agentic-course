@@ -22,6 +22,11 @@ def build_graph():
         max_context_chunks=int(os.getenv("MAX_CONTEXT_CHUNKS", "8")),
         max_context_tokens=int(os.getenv("MAX_CONTEXT_TOKENS", "3500")),
         decompose_query_count=int(os.getenv("QUERY_DECOMPOSE_COUNT", "4")),
+        price_max_days=int(os.getenv("PRICE_MAX_DAYS", "180")),
+        price_max_points=int(os.getenv("PRICE_MAX_POINTS", "40")),
+        price_max_tickers=int(os.getenv("PRICE_MAX_TICKERS", "3")),
+        price_default_days=int(os.getenv("PRICE_DEFAULT_DAYS", "90")),
+        price_max_attempts=int(os.getenv("PRICE_MAX_ATTEMPTS", "2")),
     )
     return agent.graph
 

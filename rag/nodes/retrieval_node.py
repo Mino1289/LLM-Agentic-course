@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from rag.nodes.prepare_node import extract_query_tickers
 from rag.nodes.state import GraphState
 from rag.nodes.tracing import traceable
 
@@ -54,6 +55,39 @@ def _apply_scope_filter(
     return filtered
 
 
+def _ticker_counts(agent: Any, indices: list[int]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for idx in indices:
+        if idx >= len(agent.rag.doc_metadata):
+            continue
+        ticker = str(agent.rag.doc_metadata[idx].get("ticker", "UNKNOWN")).upper()
+        counts[ticker] = counts.get(ticker, 0) + 1
+    return counts
+
+
+def _scoped_ticker_list(state: GraphState) -> list[str]:
+    tickers = [
+        str(t).upper()
+        for t in (state.get("target_tickers") or [])
+        if str(t).strip()
+    ]
+    for ticker in extract_query_tickers(state.get("normalized_query", "")):
+        if ticker not in tickers:
+            tickers.append(ticker)
+    return list(dict.fromkeys(tickers))
+
+
+def _ticker_specific_query(query: str, ticker: str, all_tickers: list[str]) -> str:
+    rewritten = query
+    for other in all_tickers:
+        if other != ticker:
+            rewritten = re.sub(rf"\b{re.escape(other)}\b", " ", rewritten)
+    rewritten = re.sub(r"\s+", " ", rewritten).strip()
+    if not re.search(rf"\b{re.escape(ticker)}\b", rewritten):
+        rewritten = f"{ticker} {rewritten}".strip()
+    return rewritten
+
+
 def _retrieve_with_fallbacks(
     agent: Any,
     query: str,
@@ -87,7 +121,8 @@ def _retrieve_with_fallbacks(
 def multi_retrieve_node(agent: Any, state: GraphState) -> GraphState:
     queries = state.get("decomposed_queries") or [state["normalized_query"]]
     metadata_filter = state.get("metadata_filter") or {}
-    scoped_tickers = {str(t).upper() for t in (state.get("target_tickers") or []) if str(t).strip()}
+    scoped_ticker_list = _scoped_ticker_list(state)
+    scoped_tickers = set(scoped_ticker_list)
     scoped_doc_types = {str(dt).upper() for dt in (state.get("doc_type_priority") or []) if str(dt).strip()}
 
     strict_filter: dict[str, str] = {}
@@ -113,7 +148,7 @@ def multi_retrieve_node(agent: Any, state: GraphState) -> GraphState:
 
         # Multi-company balancing: force one retrieval pass per ticker when comparing.
         if len(scoped_tickers) > 1:
-            for ticker in sorted(scoped_tickers):
+            for ticker in scoped_ticker_list:
                 ticker_filters: list[dict[str, str] | None] = []
                 for base_filter in filters_to_try:
                     if base_filter is None:
@@ -122,9 +157,10 @@ def multi_retrieve_node(agent: Any, state: GraphState) -> GraphState:
                         scoped_filter = dict(base_filter)
                         scoped_filter["ticker"] = ticker
                         ticker_filters.append(scoped_filter)
+                ticker_query = _ticker_specific_query(query, ticker, scoped_ticker_list)
                 per_ticker_indices = _retrieve_with_fallbacks(
                     agent,
-                    query,
+                    ticker_query,
                     ticker_filters,
                     scoped_tickers={ticker},
                     scoped_doc_types=scoped_doc_types,
@@ -140,7 +176,7 @@ def multi_retrieve_node(agent: Any, state: GraphState) -> GraphState:
                 scoped_doc_types=scoped_doc_types,
             )
 
-        if not query_indices:
+        if not query_indices and not scoped_tickers and not scoped_doc_types and not metadata_filter:
             fallback = agent.rag.retrieve(
                 query,
                 search_mode="vector",
@@ -159,6 +195,7 @@ def multi_retrieve_node(agent: Any, state: GraphState) -> GraphState:
         {
             "decomposed_query_count": len(queries),
             "retrieval_candidate_count": len(dedup_indices),
+            "retrieval_candidate_ticker_counts": _ticker_counts(agent, dedup_indices),
             "retrieval_scoped_tickers": sorted(scoped_tickers),
             "retrieval_scoped_doc_types": sorted(scoped_doc_types),
         }

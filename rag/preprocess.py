@@ -25,11 +25,12 @@ MIN_SECTION_CHARS = 500
 MAX_8K_CHARS = 12_000
 MAX_TABLE_ROWS = 12
 
-# Limites par section pour rester dans le quota d'embeddings (narratif > tableaux).
+# Limites par section.
+# None => pas de troncature (sections conservees integralement dans les .txt preprocesses).
 SECTION_MAX_CHARS = {
-    "Item_1A": 45_000,
-    "Item_7": 55_000,
-    "Item_8": 20_000,
+    "Item_1A": None,
+    "Item_7": None,
+    "Item_8": None,
 }
 
 DEFAULT_SECTIONS = ("Item_1A", "Item_7")
@@ -311,6 +312,20 @@ def extract_year_from_filename(filename: str) -> str:
     return ""
 
 
+def is_in_year_range(filename: str, min_year: int | None, max_year: int | None) -> bool:
+    if min_year is None and max_year is None:
+        return True
+    raw_year = extract_year_from_filename(filename)
+    if not raw_year:
+        return False
+    year = int(raw_year)
+    if min_year is not None and year < min_year:
+        return False
+    if max_year is not None and year > max_year:
+        return False
+    return True
+
+
 def extract_ticker_from_filename(filename: str) -> str:
     stem = os.path.splitext(filename)[0].lower()
     match = re.match(r"^([a-z]{1,5})[-_]", stem)
@@ -343,19 +358,37 @@ def is_earnings_call_filename(filename: str) -> bool:
 
 
 def _extract_between(text: str, start_patterns: list[str], end_patterns: list[str]) -> str:
+    start_positions = sorted(
+        {
+            match.start()
+            for pattern in start_patterns
+            for match in re.finditer(pattern, text, re.IGNORECASE | re.DOTALL)
+        }
+    )
+    # Several regexes can match the same heading. Collapse nearby matches while
+    # preserving separate table-of-contents and body occurrences.
+    distinct_starts: list[int] = []
+    for position in start_positions:
+        if not distinct_starts or position - distinct_starts[-1] > 200:
+            distinct_starts.append(position)
+
     best = ""
-    for start_pat in start_patterns:
-        for start_match in re.finditer(start_pat, text, re.IGNORECASE | re.DOTALL):
-            start = start_match.start()
-            search_from = start + MIN_SECTION_CHARS
-            end = len(text)
-            for end_pat in end_patterns:
-                end_match = re.search(end_pat, text[search_from:], re.IGNORECASE | re.DOTALL)
-                if end_match:
-                    end = min(end, search_from + end_match.start())
-            candidate = clean_text(text[start:end])
-            if len(candidate) >= MIN_SECTION_CHARS and len(candidate) > len(best):
-                best = candidate
+    for start in distinct_starts:
+        search_from = start + MIN_SECTION_CHARS
+        end = len(text)
+        for end_pat in end_patterns:
+            end_match = re.search(end_pat, text[search_from:], re.IGNORECASE | re.DOTALL)
+            if end_match:
+                end = min(end, search_from + end_match.start())
+
+        # A candidate containing a later copy of its own heading almost always
+        # starts in the table of contents. Keep the body occurrence instead.
+        if any(start < later_start < end for later_start in distinct_starts):
+            continue
+
+        candidate = clean_text(text[start:end])
+        if len(candidate) >= MIN_SECTION_CHARS and len(candidate) > len(best):
+            best = candidate
     return best
 
 
@@ -430,6 +463,14 @@ def collect_input_files() -> list[str]:
     return sorted(set(files))
 
 
+def clean_processed_output() -> int:
+    removed = 0
+    for out_path in PROCESSED_DATA_DIR.glob("*.txt"):
+        out_path.unlink()
+        removed += 1
+    return removed
+
+
 def main():
     parser = argparse.ArgumentParser(description="Prétraiter les rapports SEC pour le RAG.")
     parser.add_argument(
@@ -449,14 +490,30 @@ def main():
         help="Ignorer les rapports antérieurs à cette année (ex: 2023).",
     )
     parser.add_argument(
+        "--max-year",
+        type=int,
+        default=None,
+        help="Ignorer les rapports postérieurs à cette année (ex: 2026).",
+    )
+    parser.add_argument(
+        "--no-clean-output",
+        action="store_true",
+        help="Conserver les anciens .txt preprocessés (déconseillé hors debug ciblé).",
+    )
+    parser.add_argument(
         "--include-csv",
         action="store_true",
         help="Inclure les CSV de prix (désactivé par défaut).",
     )
     args = parser.parse_args()
+    if args.min_year is not None and args.max_year is not None and args.min_year > args.max_year:
+        parser.error("--min-year doit être inférieur ou égal à --max-year")
     enabled_sections = parse_sections_arg(args.sections)
 
     ensure_dir(PROCESSED_DATA_DIR)
+    if not args.no_clean_output:
+        removed = clean_processed_output()
+        print(f"Nettoyage sorties preprocess: {removed} fichier(s) supprimé(s).")
 
     files = collect_input_files()
     input_dirs = ", ".join(str(d) for d in raw_input_dirs())
@@ -464,6 +521,8 @@ def main():
     print(f"Sections actives: {', '.join(enabled_sections)}")
     if args.min_year:
         print(f"Filtre année: >= {args.min_year}")
+    if args.max_year:
+        print(f"Filtre année: <= {args.max_year}")
 
     stats = {
         "processed": 0,
@@ -473,6 +532,7 @@ def main():
         "earnings_calls_written": 0,
         "no_sections_10k": 0,
         "skipped_year": 0,
+        "skipped_unknown_year": 0,
         "skipped_csv": 0,
     }
 
@@ -480,12 +540,15 @@ def main():
         filename = os.path.basename(file_path)
         print(f"Processing {filename}...")
         try:
-            if args.min_year and is_10k_filename(filename):
+            if not is_in_year_range(filename, args.min_year, args.max_year):
                 year = extract_year_from_filename(filename)
-                if year and int(year) < args.min_year:
-                    print(f"  Skip: année {year} < {args.min_year}.")
+                if year:
+                    print(f"  Skip: année {year} hors plage demandée.")
                     stats["skipped_year"] += 1
-                    continue
+                else:
+                    print("  Skip: année absente du nom de fichier.")
+                    stats["skipped_unknown_year"] += 1
+                continue
 
             if is_8k_filename(filename) and args.exclude_8k:
                 print("  Skip: 8-K ignoré (--exclude-8k).")
@@ -567,6 +630,7 @@ def main():
         f"skipped_8k={stats['skipped_8k']}, "
         f"earnings_calls_written={stats['earnings_calls_written']}, "
         f"skipped_year={stats['skipped_year']}, "
+        f"skipped_unknown_year={stats['skipped_unknown_year']}, "
         f"skipped_csv={stats['skipped_csv']}, "
         f"no_sections_10k={stats['no_sections_10k']}, "
         f"skipped={stats['skipped']}"

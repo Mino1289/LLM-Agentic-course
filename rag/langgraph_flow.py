@@ -15,7 +15,7 @@ from rag.nodes.generation_node import (
     synthesis_node,
 )
 from rag.nodes.intent_node import clarify_node, intent_scope_node, route_after_intent_node
-from rag.nodes.memory_nodes import gc_node, memory_read_node, memory_write_node
+from rag.nodes.memory_nodes import context_prune_node, gc_node, memory_read_node, memory_write_node
 from rag.nodes.memory_store import MemoryStore
 from rag.nodes.prepare_node import prepare_query_node
 from rag.nodes.retrieval_node import multi_retrieve_node
@@ -70,6 +70,7 @@ class FinanceLangGraphAgent:
         graph.add_node("decompose_query_node", partial(decompose_query_node, self))
         graph.add_node("multi_retrieve_node", partial(multi_retrieve_node, self))
         graph.add_node("rerank_node", partial(rerank_node, self))
+        graph.add_node("context_prune_node", partial(context_prune_node, self))
         graph.add_node("answer_generate_node", partial(answer_generate_node, self))
         graph.add_node("general_chat_node", partial(general_chat_node, self))
         graph.add_node("off_topic_block_node", partial(off_topic_block_node, self))
@@ -108,7 +109,8 @@ class FinanceLangGraphAgent:
         graph.add_edge("price_data_node", "tool_orchestrator_node")
         graph.add_edge("decompose_query_node", "multi_retrieve_node")
         graph.add_edge("multi_retrieve_node", "rerank_node")
-        graph.add_edge("rerank_node", "answer_generate_node")
+        graph.add_edge("rerank_node", "context_prune_node")
+        graph.add_edge("context_prune_node", "answer_generate_node")
         graph.add_edge("answer_generate_node", "synthesis_node")
         graph.add_edge("synthesis_node", "memory_write_node")
         graph.add_edge("memory_write_node", "gc_node")

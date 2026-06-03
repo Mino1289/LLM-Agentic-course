@@ -10,20 +10,6 @@ from rag.nodes.tracing import traceable
 
 
 ALLOWED_DOC_TYPES = ["10-K", "10-Q", "8-K", "EARNINGS_CALL"]
-COMPANY_ALIASES = {
-    "nvidia": "NVDA",
-    "advanced micro devices": "AMD",
-    "amd": "AMD",
-    "intel": "INTC",
-    "palantir": "PLTR",
-    "alphabet": "GOOGL",
-    "google": "GOOGL",
-    "meta": "META",
-    "amazon": "AMZN",
-    "microsoft": "MSFT",
-    "broadcom": "AVGO",
-    "oracle": "ORCL",
-}
 
 
 def _extract_first_json_object(raw: str) -> dict[str, Any] | None:
@@ -32,6 +18,7 @@ def _extract_first_json_object(raw: str) -> dict[str, Any] | None:
         return None
     try:
         parsed = json.loads(text)
+
         return parsed if isinstance(parsed, dict) else None
     except Exception:
         pass
@@ -90,26 +77,6 @@ def _normalize_tickers(raw: Any, known_tickers: list[str], max_items: int = 4) -
     return normalized
 
 
-def _extract_company_mentions(query: str, known_tickers: list[str], max_items: int = 4) -> list[str]:
-    q = query.lower()
-    known_set = set(known_tickers)
-    mentions: list[str] = []
-
-    for token in re.findall(r"\b[A-Za-z]{2,5}\b", query):
-        up = token.upper()
-        if up in known_set and up not in mentions:
-            mentions.append(up)
-        if len(mentions) >= max_items:
-            return mentions
-
-    for alias, ticker in COMPANY_ALIASES.items():
-        if alias in q and ticker in known_set and ticker not in mentions:
-            mentions.append(ticker)
-        if len(mentions) >= max_items:
-            break
-    return mentions
-
-
 def _heuristic_scope(agent: Any, state: GraphState) -> tuple[list[str], list[str], str]:
     query = state.get("normalized_query", "")
     metadata_filter = state.get("metadata_filter", {})
@@ -118,9 +85,13 @@ def _heuristic_scope(agent: Any, state: GraphState) -> tuple[list[str], list[str
     tickers: list[str] = []
     if metadata_filter.get("ticker"):
         tickers.append(metadata_filter["ticker"].upper())
-    for up in _extract_company_mentions(query, known_tickers, max_items=4):
-        if up not in tickers:
+    for up in re.findall(r"\b[A-Z]{2,5}\b", query):
+        if up in known_tickers and up not in tickers:
             tickers.append(up)
+    for up in re.findall(r"\b[A-Za-z]{2,5}\b", query):
+        token = up.upper()
+        if token in known_tickers and token not in tickers:
+            tickers.append(token)
     tickers = tickers[:4]
 
     q = query.lower()
@@ -135,7 +106,7 @@ def _heuristic_scope(agent: Any, state: GraphState) -> tuple[list[str], list[str
         doc_scope = ["10-K", "10-Q", "8-K", "EARNINGS_CALL"]
 
     if not tickers and "semi" in q:
-        for fallback in ["NVDA", "AMD", "INTC"]:
+        for fallback in ["NVDA", "AMD"]:
             if fallback in known_tickers and fallback not in tickers:
                 tickers.append(fallback)
 
@@ -152,15 +123,20 @@ def _llm_scope_decision(agent: Any, state: GraphState) -> tuple[list[str], list[
         return heuristic_tickers, heuristic_docs, "empty_query", "rule"
 
     prompt = (
-        "Tu es un routeur de scope pour un agent RAG finance.\n"
-        "Choisis les entreprises et types de documents SEC/transcripts a prioriser pour le retrieval.\n"
-        "Retourne STRICTEMENT un objet JSON sans texte autour.\n"
-        'Schema: {"target_tickers": string[], "doc_type_priority": string[], "reason": string}\n'
-        "Doc types autorises: 10-K, 10-Q, 8-K, EARNINGS_CALL.\n"
-        "N'utilise QUE des tickers presents dans l'univers fourni.\n\n"
-        f"Question: {query}\n"
-        f"Metadata detectee: {metadata_filter}\n"
-        f"Univers tickers disponible: {known_tickers}\n"
+        "You are a scope router for a finance RAG assistant.\n"
+        "Choose which companies and document types should be prioritized for retrieval.\n"
+        "Return STRICT JSON only, with no surrounding text.\n"
+        'Schema: {"target_tickers": string[]|["ALL"], "doc_type_priority": string[], "reason": string}\n'
+        "Allowed doc types: 10-K, 10-Q, 8-K, EARNINGS_CALL.\n"
+        "Use ONLY tickers from the provided covered universe.\n\n"
+        "Rules:\n"
+        "1) If the user explicitly asks about all companies, return target_tickers=['ALL'].\n"
+        "2) If comparison is requested, include all relevant companies from question/context.\n"
+        "3) Set doc_type_priority from intent (short-term/event: 8-K/10-Q, structural/fundamental: 10-K).\n"
+        "4) Keep output focused and practical for retrieval.\n\n"
+        f"User question: {query}\n"
+        f"Detected metadata: {metadata_filter}\n"
+        f"Covered universe tickers: {known_tickers}\n"
     )
 
     raw = ""
@@ -168,16 +144,18 @@ def _llm_scope_decision(agent: Any, state: GraphState) -> tuple[list[str], list[
         raw = agent.rag.provider.generate(prompt, temperature=0.0, max_tokens=180)
         parsed = _extract_first_json_object(raw)
         if parsed is not None:
-            tickers = _normalize_tickers(parsed.get("target_tickers"), known_tickers, max_items=4)
+            raw_tickers = parsed.get("target_tickers")
+            if isinstance(raw_tickers, list) and any(str(item).strip().upper() == "ALL" for item in raw_tickers):
+                tickers = known_tickers[:12]
+            elif isinstance(raw_tickers, str) and raw_tickers.strip().upper() == "ALL":
+                tickers = known_tickers[:12]
+            else:
+                tickers = _normalize_tickers(raw_tickers, known_tickers, max_items=12)
             doc_types = _normalize_doc_types(parsed.get("doc_type_priority"))
             if not doc_types:
                 doc_types = heuristic_docs
             reason = str(parsed.get("reason", "llm_scope")).strip() or "llm_scope"
-            explicit_mentions = _extract_company_mentions(query, known_tickers, max_items=4)
-            for ticker in explicit_mentions:
-                if ticker not in tickers:
-                    tickers.append(ticker)
-            tickers = tickers[:4]
+            tickers = tickers[:12]
             return tickers, doc_types, reason, "llm"
     except Exception:
         pass
@@ -191,6 +169,14 @@ def _llm_scope_decision(agent: Any, state: GraphState) -> tuple[list[str], list[
 @traceable(name="query_scope_node")
 def query_scope_node(agent: Any, state: GraphState) -> GraphState:
     tickers, doc_types, reason, source = _llm_scope_decision(agent, state)
+    explicit_tickers = [
+        str(t).upper()
+        for t in (state.get("target_tickers") or [])
+        if str(t).strip()
+    ]
+    for ticker in explicit_tickers:
+        if ticker not in tickers:
+            tickers.append(ticker)
     stats = state.get("stats", {})
     stats.update(
         {
