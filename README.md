@@ -31,7 +31,7 @@ L'interface se comporte comme un chatbot:
 
 ### Entreprises suivies (tickers)
 
-`NVDA`, `INTC`, `AMD`, `PLTR`, `GOOGL`, `META`, `AMZN`, `MSFT`, `AVGO`, `ORCL`
+Univers temporairement limité au mode test/debug: `NVDA`, `AMD`, `MSFT`.
 
 ### Documents ingeres actuellement
 
@@ -95,14 +95,18 @@ python3 rag/download_SEC_reports.py
 ### 3) Pré-traitement
 
 ```bash
-python3 rag/preprocess.py --sections 1a,7 --min-year 2021
+python3 rag/preprocess.py --sections 1a,7 --min-year 2024 --max-year 2026
 ```
+
+Le preprocess reconstruit `rag/processed_data/` à chaque exécution afin de ne conserver
+que les sections et années demandées. Utilisez `--no-clean-output` uniquement pour un
+debug incrémental volontaire.
 
 Par defaut, les `8-K` (item `2.02`) sont inclus.  
 Pour les exclure explicitement:
 
 ```bash
-python3 rag/preprocess.py --sections 1a,7 --min-year 2021 --exclude-8k
+python3 rag/preprocess.py --sections 1a,7 --min-year 2024 --max-year 2026 --exclude-8k
 ```
 
 ### 4) Planifier l'indexation
@@ -146,9 +150,10 @@ Le service `bootstrap` exécute:
 
 Flags `.env` utiles:
 
-- `SKIP_DOWNLOAD_IF_EXISTS=true`
+- `SKIP_DOWNLOAD_IF_EXISTS=false` (le crawler ignore déjà les fichiers téléchargés)
 - `SKIP_PREPROCESS_IF_EXISTS=false`
-- `BOOTSTRAP_MIN_YEAR=2021`
+- `BOOTSTRAP_MIN_YEAR=2024`
+- `BOOTSTRAP_MAX_YEAR=2026`
 - `BOOTSTRAP_SECTIONS=1a,7`
 - `BOOTSTRAP_EXCLUDE_8K=false` (par defaut les 8-K sont inclus)
 - `EMBEDDING_DAILY_LIMIT=0` (`0` = quota illimite)
