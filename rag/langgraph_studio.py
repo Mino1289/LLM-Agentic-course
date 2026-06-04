@@ -2,13 +2,11 @@ from __future__ import annotations
 
 import os
 
-from dotenv import load_dotenv
-
+from rag.langsmith_env import ensure_langsmith_env
 from rag.hybrid_rag import HybridRAG
 from rag.langgraph_flow import FinanceLangGraphAgent
-from rag.paths import ENV_FILE
 
-load_dotenv(ENV_FILE)
+ensure_langsmith_env()
 
 
 def build_graph():
@@ -27,6 +25,7 @@ def build_graph():
         price_max_tickers=int(os.getenv("PRICE_MAX_TICKERS", "3")),
         price_default_days=int(os.getenv("PRICE_DEFAULT_DAYS", "90")),
         price_max_attempts=int(os.getenv("PRICE_MAX_ATTEMPTS", "2")),
+        max_tool_iterations=int(os.getenv("MAX_TOOL_ITERATIONS", "6")),
     )
     return agent.graph
 

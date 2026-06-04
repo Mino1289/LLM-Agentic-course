@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import os
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import chromadb
 
@@ -18,7 +19,21 @@ from rag.nodes.prompt_context import get_known_tickers
 from rag.nodes.rerank_node import rerank_node
 from rag.nodes.retrieval_node import multi_retrieve_node
 from rag.nodes.scope_node import query_scope_node
-from rag.nodes.tool_nodes import tool_orchestrator_node
+from rag.llm_provider import (
+    LLMConfig,
+    LLMProvider,
+    LLMToolResponse,
+    ToolCall,
+    _normalize_github_model_id,
+    _parse_openai_tool_calls,
+)
+from rag.nodes.agent_nodes import agent_node, tools_node
+from rag.tools import (
+    _normalize_doc_types,
+    run_export_investment_report,
+    run_simulate_portfolio,
+    run_validate_claims,
+)
 from rag.preprocess import SECTION_SPECS, _extract_between, is_in_year_range
 
 
@@ -325,19 +340,59 @@ class ConfigurationTests(unittest.TestCase):
 
         self.assertEqual(get_known_tickers(SimpleNamespace(rag=rag), max_items=20), ["AMD", "NVDA", "MSFT"])
 
-    def test_price_tool_can_be_disabled(self):
-        agent = SimpleNamespace()
-        state = {
-            "normalized_query": "prix AMD",
-            "price_tool_attempts": 0,
-            "stats": {},
-        }
+    def test_normalize_doc_types_includes_earnings_call(self):
+        normalized = _normalize_doc_types(["earnings call", "10-K", "EARNINGS_CALL"])
+        self.assertEqual(normalized, ["EARNINGS_CALL", "10-K"])
 
-        with patch.dict("os.environ", {"PRICE_TOOL_ENABLED": "false"}):
-            result = tool_orchestrator_node(agent, state)
+    def test_export_report_writes_markdown_file(self):
+        with patch("rag.tools.REPORTS_DIR", Path(os.getenv("TMPDIR", "/tmp")) / "finance_rag_test_reports"):
+            from rag import tools as tools_module
 
-        self.assertEqual(result["price_tool_decision"], "continue")
-        self.assertEqual(result["stats"]["price_tool_decision"], "disabled_by_config")
+            tools_module.REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+            result = run_export_investment_report("Test Report", "## Section\nContent", fmt="md")
+            path = Path(result["path"])
+            self.assertTrue(path.is_file())
+            self.assertIn("# Test Report", path.read_text(encoding="utf-8"))
+            path.unlink(missing_ok=True)
+
+    def test_normalize_github_model_id_strips_openai_prefix(self):
+        self.assertEqual(_normalize_github_model_id("openai/gpt-4o-mini"), "gpt-4o-mini")
+        self.assertEqual(_normalize_github_model_id("gpt-4.1-mini"), "gpt-4.1-mini")
+
+    def test_gemini_config_uses_separate_embedding_provider(self):
+        with patch.dict(
+            os.environ,
+            {
+                "LLM_PROVIDER": "gemini",
+                "GEMINI_API_KEY": "test-gemini",
+                "OPENAI_API_KEY": "test-openai",
+                "EMBEDDING_PROVIDER": "openai",
+            },
+            clear=False,
+        ):
+            from rag.llm_provider import build_llm_config_from_env
+
+            config = build_llm_config_from_env()
+            self.assertEqual(config.provider, "gemini")
+            self.assertEqual(config.embedding_provider, "openai")
+            self.assertEqual(config.embedding_api_key, "test-openai")
+
+    def test_tool_definitions_count(self):
+        from rag.tools import get_tool_definitions
+
+        self.assertEqual(len(get_tool_definitions()), 5)
+
+    def test_parse_openai_tool_calls(self):
+        raw = [
+            {
+                "id": "call_1",
+                "function": {"name": "market_price_tool", "arguments": '{"tickers":["MSFT"]}'},
+            }
+        ]
+        parsed = _parse_openai_tool_calls(raw)
+        self.assertEqual(len(parsed), 1)
+        self.assertEqual(parsed[0].name, "market_price_tool")
+        self.assertIn("MSFT", parsed[0].arguments)
 
 
 class IndexSynchronizationTests(unittest.TestCase):
@@ -359,6 +414,91 @@ class IndexSynchronizationTests(unittest.TestCase):
 
         self.assertEqual(removed, 1)
         self.assertEqual(rag.collection.deleted, ["stale"])
+
+
+class AgentToolsTests(unittest.TestCase):
+    def test_validate_claims_supported_and_unsupported(self):
+        chunks = [
+            "Item 1A risk factors include supply chain concentration and regulatory scrutiny.",
+            "Revenue growth accelerated in data center segment year over year.",
+        ]
+        metadatas = [
+            {"ticker": "MSFT", "year": "2024", "file_type": "10-K"},
+            {"ticker": "NVDA", "year": "2024", "file_type": "10-K"},
+        ]
+        result = run_validate_claims(
+            claims=[
+                "MSFT faces supply chain risk factors",
+                "The company operates a nuclear fusion reactor on Mars",
+            ],
+            chunks=chunks,
+            metadatas=metadatas,
+        )
+        statuses = {v["status"] for v in result["validations"]}
+        self.assertIn("supported", statuses)
+        self.assertIn("unsupported", statuses)
+
+    def test_validate_claims_requires_rag_chunks(self):
+        result = run_validate_claims(claims=["test claim"], chunks=[], metadatas=[])
+        self.assertIn("sec_filings_rag_tool", result["text"])
+
+    def test_simulate_portfolio_rejects_invalid_weights(self):
+        bad_sum = run_simulate_portfolio({"MSFT": 40, "NVDA": 40})
+        self.assertEqual(bad_sum.get("error"), "invalid_weights")
+
+        bad_ticker = run_simulate_portfolio({"AAPL": 100})
+        self.assertEqual(bad_ticker.get("error"), "invalid_tickers")
+
+    def test_simulate_portfolio_valid_allocation(self):
+        result = run_simulate_portfolio({"MSFT": 50, "NVDA": 50}, notional_usd=10_000)
+        self.assertEqual(len(result["positions"]), 2)
+        self.assertAlmostEqual(sum(p["notional_usd"] for p in result["positions"]), 10_000, places=0)
+
+    def test_agent_tool_loop_mocked(self):
+        agent = SimpleNamespace(max_tool_iterations=6, rag=SimpleNamespace(provider=MagicMock()))
+
+        first_response = LLMToolResponse(
+            content=None,
+            tool_calls=[
+                ToolCall(
+                    id="call_rag",
+                    name="sec_filings_rag_tool",
+                    arguments='{"query":"MSFT risk factors 2024","tickers":["MSFT"]}',
+                )
+            ],
+        )
+        second_response = LLMToolResponse(content="Synthèse mock basée sur les outils.", tool_calls=[])
+
+        agent.rag.provider.invoke_with_tools.side_effect = [first_response, second_response]
+
+        state = {
+            "normalized_query": "Risques MSFT 2024",
+            "query": "Risques MSFT 2024",
+            "messages": [],
+            "agent_iterations": 0,
+            "tool_events": [],
+            "stats": {},
+        }
+
+        with patch("rag.nodes.agent_nodes.execute_tool") as mock_execute:
+            mock_execute.return_value = {
+                "text": "[1] ticker=MSFT excerpt",
+                "final_chunks": ["risk factors supply chain"],
+                "final_metadatas": [{"ticker": "MSFT", "year": "2024", "file_type": "10-K"}],
+                "stats": {"chunks_used": 1},
+            }
+            after_agent = agent_node(agent, state)
+            self.assertTrue(after_agent.get("tool_calls_pending"))
+
+            merged = {**state, **after_agent}
+            after_tools = tools_node(agent, merged)
+            self.assertFalse(after_tools.get("tool_calls_pending"))
+            self.assertTrue(after_tools.get("stats", {}).get("rag_tool_used"))
+
+            final = agent_node(agent, {**merged, **after_tools})
+            self.assertEqual(final.get("answer"), "Synthèse mock basée sur les outils.")
+            self.assertGreaterEqual(len(final.get("tool_events", [])), 1)
+            self.assertGreaterEqual(final.get("stats", {}).get("agent_iterations", 0), 2)
 
 
 if __name__ == "__main__":

@@ -6,27 +6,16 @@ from functools import partial
 from langgraph.graph import END, StateGraph
 
 from rag.hybrid_rag import HybridRAG
-from rag.nodes.decompose_node import decompose_query_node
-from rag.nodes.generation_node import (
-    answer_generate_node,
-    coverage_info_node,
-    general_chat_node,
-    off_topic_block_node,
-    synthesis_node,
+from rag.nodes.agent_nodes import (
+    agent_node,
+    finalize_from_agent_state,
+    route_after_agent,
+    tools_node,
 )
-from rag.nodes.intent_node import clarify_node, intent_scope_node, route_after_intent_node
-from rag.nodes.memory_nodes import context_prune_node, gc_node, memory_read_node, memory_write_node
+from rag.nodes.memory_nodes import gc_node, memory_read_node, memory_write_node
 from rag.nodes.memory_store import MemoryStore
 from rag.nodes.prepare_node import prepare_query_node
-from rag.nodes.retrieval_node import multi_retrieve_node
-from rag.nodes.rerank_node import rerank_node
-from rag.nodes.scope_node import query_scope_node
 from rag.nodes.state import GraphState
-from rag.nodes.tool_nodes import (
-    price_data_node,
-    route_after_tool_orchestrator_node,
-    tool_orchestrator_node,
-)
 from rag.nodes.tracing import traceable
 
 
@@ -44,6 +33,7 @@ class FinanceLangGraphAgent:
         price_max_tickers: int = 3,
         price_default_days: int = 90,
         price_max_attempts: int = 2,
+        max_tool_iterations: int = 6,
     ):
         self.rag = rag
         self.memory_store = MemoryStore(window_size=memory_window_size)
@@ -56,63 +46,32 @@ class FinanceLangGraphAgent:
         self.price_max_tickers = max(1, price_max_tickers)
         self.price_default_days = max(15, min(price_default_days, self.price_max_days))
         self.price_max_attempts = max(1, price_max_attempts)
+        self.max_tool_iterations = max(2, max_tool_iterations)
         self.graph = self._build_graph()
 
     def _build_graph(self):
         graph = StateGraph(GraphState)
         graph.add_node("prepare_query_node", partial(prepare_query_node, self))
-        graph.add_node("intent_scope_node", partial(intent_scope_node, self))
-        graph.add_node("clarify_node", partial(clarify_node, self))
         graph.add_node("memory_read_node", partial(memory_read_node, self))
-        graph.add_node("query_scope_node", partial(query_scope_node, self))
-        graph.add_node("tool_orchestrator_node", partial(tool_orchestrator_node, self))
-        graph.add_node("price_data_node", partial(price_data_node, self))
-        graph.add_node("decompose_query_node", partial(decompose_query_node, self))
-        graph.add_node("multi_retrieve_node", partial(multi_retrieve_node, self))
-        graph.add_node("rerank_node", partial(rerank_node, self))
-        graph.add_node("context_prune_node", partial(context_prune_node, self))
-        graph.add_node("answer_generate_node", partial(answer_generate_node, self))
-        graph.add_node("general_chat_node", partial(general_chat_node, self))
-        graph.add_node("off_topic_block_node", partial(off_topic_block_node, self))
-        graph.add_node("coverage_info_node", partial(coverage_info_node, self))
-        graph.add_node("synthesis_node", partial(synthesis_node, self))
+        graph.add_node("agent_node", partial(agent_node, self))
+        graph.add_node("tools_node", partial(tools_node, self))
+        graph.add_node("finalize_node", finalize_from_agent_state)
         graph.add_node("memory_write_node", partial(memory_write_node, self))
         graph.add_node("gc_node", partial(gc_node, self))
 
         graph.set_entry_point("prepare_query_node")
-        graph.add_edge("prepare_query_node", "intent_scope_node")
+        graph.add_edge("prepare_query_node", "memory_read_node")
+        graph.add_edge("memory_read_node", "agent_node")
         graph.add_conditional_edges(
-            "intent_scope_node",
-            route_after_intent_node,
+            "agent_node",
+            route_after_agent,
             {
-                "clarify": "clarify_node",
-                "continue": "memory_read_node",
-                "general_chat": "general_chat_node",
-                "reject_offtopic": "off_topic_block_node",
-                "coverage_info": "coverage_info_node",
+                "tools": "tools_node",
+                "finalize": "finalize_node",
             },
         )
-        graph.add_edge("clarify_node", END)
-        graph.add_edge("off_topic_block_node", END)
-        graph.add_edge("coverage_info_node", END)
-        graph.add_edge("general_chat_node", "memory_write_node")
-        graph.add_edge("memory_read_node", "query_scope_node")
-        graph.add_edge("query_scope_node", "tool_orchestrator_node")
-        graph.add_conditional_edges(
-            "tool_orchestrator_node",
-            route_after_tool_orchestrator_node,
-            {
-                "call_price_tool": "price_data_node",
-                "continue": "decompose_query_node",
-            },
-        )
-        graph.add_edge("price_data_node", "tool_orchestrator_node")
-        graph.add_edge("decompose_query_node", "multi_retrieve_node")
-        graph.add_edge("multi_retrieve_node", "rerank_node")
-        graph.add_edge("rerank_node", "context_prune_node")
-        graph.add_edge("context_prune_node", "answer_generate_node")
-        graph.add_edge("answer_generate_node", "synthesis_node")
-        graph.add_edge("synthesis_node", "memory_write_node")
+        graph.add_edge("tools_node", "agent_node")
+        graph.add_edge("finalize_node", "memory_write_node")
         graph.add_edge("memory_write_node", "gc_node")
         graph.add_edge("gc_node", END)
         return graph.compile()
@@ -129,5 +88,8 @@ class FinanceLangGraphAgent:
             "conversation_id": convo_id,
             "query": query,
             "messages": messages or [],
+            "agent_iterations": 0,
+            "tool_events": [],
+            "report_artifacts": [],
         }
         return self.graph.invoke(initial_state)

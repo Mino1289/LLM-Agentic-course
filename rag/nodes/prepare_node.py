@@ -40,5 +40,8 @@ def prepare_query_node(_agent: Any, state: GraphState) -> GraphState:
         "normalized_query": normalized,
         "metadata_filter": extract_metadata_filter(normalized),
         "target_tickers": tickers,
-        "stats": {"pipeline": "langgraph_finance_v1"},
+        "stats": {"pipeline": "langgraph_finance_v2_agent"},
+        "agent_iterations": 0,
+        "tool_events": [],
+        "report_artifacts": [],
     }

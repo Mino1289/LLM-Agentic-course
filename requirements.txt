@@ -4,6 +4,7 @@ langchain-text-splitters
 langgraph
 langsmith
 openai
+google-genai
 pdfplumber
 python-dotenv
 rank_bm25

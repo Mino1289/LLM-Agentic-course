@@ -9,6 +9,7 @@ BOOTSTRAP_MIN_YEAR="${BOOTSTRAP_MIN_YEAR:-2024}"
 BOOTSTRAP_MAX_YEAR="${BOOTSTRAP_MAX_YEAR:-$(date +%Y)}"
 BOOTSTRAP_SECTIONS="${BOOTSTRAP_SECTIONS:-1a,7}"
 BOOTSTRAP_EXCLUDE_8K="${BOOTSTRAP_EXCLUDE_8K:-false}"
+BOOTSTRAP_EARNINGS="${BOOTSTRAP_EARNINGS:-false}"
 EMBEDDING_DAILY_USED="${EMBEDDING_DAILY_USED:-0}"
 EMBEDDING_DAILY_LIMIT="${EMBEDDING_DAILY_LIMIT:-0}"
 EMBEDDING_RPM="${EMBEDDING_RPM:-100}"
@@ -25,6 +26,10 @@ else
   python3 rag/download_SEC_reports.py \
     --min-year "${BOOTSTRAP_MIN_YEAR}" \
     --max-year "${BOOTSTRAP_MAX_YEAR}"
+  if [[ "${BOOTSTRAP_EARNINGS}" == "true" && -f fetch/download_earnings_calls.py ]]; then
+    echo "Downloading earnings call transcripts..."
+    python3 fetch/download_earnings_calls.py || echo "Earnings download skipped (non-fatal)."
+  fi
 fi
 
 processed_count="$(ls -1 rag/processed_data/*.txt 2>/dev/null | wc -l || true)"

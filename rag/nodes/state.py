@@ -2,11 +2,19 @@ from __future__ import annotations
 
 from typing import Any, TypedDict
 
+from rag.llm_provider import ToolCall
+
 
 class GraphState(TypedDict, total=False):
     conversation_id: str
     query: str
     messages: list[dict[str, str]]
+    lc_messages: list[dict[str, Any]]
+    tool_events: list[dict[str, Any]]
+    report_artifacts: list[dict[str, Any]]
+    tool_calls_pending: bool
+    pending_tool_calls: list[ToolCall]
+    agent_iterations: int
     normalized_query: str
     metadata_filter: dict[str, str]
     target_tickers: list[str]

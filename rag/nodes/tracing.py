@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from rag.langsmith_env import ensure_langsmith_env
+
+ensure_langsmith_env()
 
 try:
     from langsmith import traceable

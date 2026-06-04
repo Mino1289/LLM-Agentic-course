@@ -3,10 +3,10 @@
 Projet RAG financier cohérent de bout en bout pour analyser des rapports SEC (10-K/10-Q/8-K) avec:
 
 - stratégie unique: **semantic chunking + vector retrieval + reranking**
-- pipeline **LangGraph** à noeuds séparés
+- agent **LangGraph v2** (boucle Agent ↔ Outils, style MCP)
 - mémoire conversationnelle avec **garbage collector** de contexte
-- double backend LLM: **OpenAI API** ou **GitHub Models**
-- UI Streamlit et packaging Docker
+- backends LLM: **OpenAI**, **GitHub Models**, **Gemini** (chat ; embeddings séparés)
+- export de rapports dans `reports/` + UI Streamlit
 
 ## Mode conversationnel
 
@@ -14,18 +14,22 @@ L'interface se comporte comme un chatbot:
 
 - historique multi-tours visible dans la session (style ChatGPT/Gemini)
 - mémoire courte + résumé interne du contexte
+- trace des outils utilisés (« Réflexion de l'agent »)
 - affichage des sources et métriques par réponse
-- si la question est trop ambiguë (sans entreprise/période), le bot pose une clarification
-- sinon il lance une recherche multi-entreprises et fait une synthèse globale
+- bouton de téléchargement si un rapport est exporté
+- l'agent choisit dynamiquement RAG SEC, prix yfinance et export de rapport
 
 ## Structure
 
 - `rag/download_SEC_reports.py`: téléchargement SEC dans `data/`
 - `rag/preprocess.py`: extraction sections (Item 1A/7/8) vers `rag/processed_data/`
 - `rag/hybrid_rag.py`: indexation vectorielle Chroma + retrieval/reranking
-- `rag/langgraph_flow.py`: graphe nodal (prepare, memory, retrieve, rerank, generate, synthesis, memory write, gc)
-- `rag/llm_provider.py`: couche provider OpenAI/GitHub Models
+- `rag/langgraph_flow.py`: graphe agent v2 (prepare → memory → agent ⇄ tools → gc)
+- `rag/tools.py`: 5 outils agent (`sec_filings_rag_tool`, `market_price_tool`, `validate_claims_tool`, `simulate_portfolio_tool`, `export_investment_report_tool`)
+- `PHASE2.md`: démo, bilan phase 2, approche type MCP
+- `rag/llm_provider.py`: providers OpenAI / GitHub Models / Gemini (tool calling)
 - `ui/app_rag.py`: chatbot Streamlit branché sur LangGraph
+- `ARCHITECTURE_REVIEW.md`: revue académique V1 vs V2
 
 ## Univers suivi et documents utilises
 
@@ -60,19 +64,24 @@ cp .env.example .env
 
 2. Renseigner les variables nécessaires dans `.env`:
 
-- `LLM_PROVIDER=openai` ou `LLM_PROVIDER=github_models`
+- `LLM_PROVIDER=openai`, `github_models`, ou `gemini`
 - OpenAI:
   - `OPENAI_API_KEY`
   - `OPENAI_CHAT_MODEL` (défaut: `gpt-4o-mini`)
   - `OPENAI_EMBEDDING_MODEL` (défaut: `text-embedding-3-small`)
 - GitHub Models:
   - `GITHUB_MODELS_API_KEY`
-  - `GITHUB_CHAT_MODEL` (défaut: `openai/gpt-4o-mini`)
+  - `GITHUB_CHAT_MODEL` (défaut: `gpt-4.1-mini` — sans préfixe `openai/`)
   - `GITHUB_EMBEDDING_MODEL` (défaut: `text-embedding-3-small`)
+- Gemini (chat uniquement ; embeddings via `EMBEDDING_PROVIDER`, défaut `openai`):
+  - `GEMINI_API_KEY`
+  - `GEMINI_CHAT_MODEL` (défaut: `gemini-2.0-flash`)
+  - `EMBEDDING_PROVIDER=openai` + `OPENAI_API_KEY` pour Chroma
 - LangSmith (visualisation):
   - `LANGSMITH_TRACING=true`
   - `LANGSMITH_API_KEY`
   - `LANGSMITH_PROJECT`
+  - `LANGSMITH_REGION=eu` et `LANGSMITH_ENDPOINT=https://eu.api.smith.langchain.com` si compte sur [eu.smith.langchain.com](https://eu.smith.langchain.com)
 - SEC:
   - `SEC_USER_AGENT` (obligatoire pour crawler SEC)
 
@@ -90,6 +99,8 @@ pip install -r requirements.txt
 
 ```bash
 python3 rag/download_SEC_reports.py
+# Transcripts earnings (optionnel)
+python3 fetch/download_earnings_calls.py
 ```
 
 ### 3) Pré-traitement
@@ -156,6 +167,8 @@ Flags `.env` utiles:
 - `BOOTSTRAP_MAX_YEAR=2026`
 - `BOOTSTRAP_SECTIONS=1a,7`
 - `BOOTSTRAP_EXCLUDE_8K=false` (par defaut les 8-K sont inclus)
+- `BOOTSTRAP_EARNINGS=false` (télécharge les transcripts si `true`)
+- `MAX_TOOL_ITERATIONS=6`
 - `EMBEDDING_DAILY_LIMIT=0` (`0` = quota illimite)
 - `EMBEDDING_BATCH_SIZE=32`
 - `EMBEDDING_MAX_RETRIES=3`
@@ -168,28 +181,33 @@ Flags `.env` utiles:
 - `PRICE_DEFAULT_DAYS=90`
 - `PRICE_MAX_ATTEMPTS=2`
 
-## Architecture LangGraph
+## Architecture LangGraph v2 (Agent ↔ Tools)
 
-<p align="center">
-  <img src="./pics/graph.png" alt="Architecture LangGraph" width="520" />
-</p>
+Le graphe exécute:
 
-Le graphe exécute les tâches dans cet ordre:
+1. `prepare_query_node` — normalisation requête / tickers / années
+2. `memory_read_node` — résumé conversationnel
+3. `agent_node` — LLM avec tool calling (boucle)
+4. `tools_node` — 5 outils (RAG, prix, validation, simulation, export)
+5. `finalize_node` → `memory_write_node` → `gc_node`
 
-1. `prepare_query_node`
-2. `intent_scope_node`
-3. `clarify_node` (si ambigu) ou `memory_read_node`
-4. `tool_orchestrator_node` (décide si l'outil prix doit être appelé)
-5. `price_data_node` (outil prix, contextuel, avec tentatives limitées)
-6. retour `tool_orchestrator_node` puis `decompose_query_node`
-7. `multi_retrieve_node`
-8. `rerank_node`
-9. `answer_generate_node`
-10. `synthesis_node`
-11. `memory_write_node`
-12. `gc_node`
+Exemple de requête complexe (démo phase 2) :
 
-Le `gc_node` compresse l'historique pour limiter le coût token/API et maintient une fenêtre glissante de conversation.
+> Compare MSFT et NVDA (risques SEC 2024 + performance 6 mois), valide les affirmations clés, propose une allocation fictive 50/50, puis sauvegarde le rapport.
+
+```bash
+streamlit run ui/app_rag.py
+```
+
+Le `gc_node` compresse l'historique pour limiter le coût token/API.
+
+Documentation phase 2 : [`PHASE2.md`](PHASE2.md). Revue architecture : [`ARCHITECTURE_REVIEW.md`](ARCHITECTURE_REVIEW.md).
+
+Tests agent (sans API) :
+
+```bash
+python -m unittest tests.test_regressions.AgentToolsTests -v
+```
 
 ## Visualisation LangSmith
 
@@ -203,7 +221,7 @@ Une fois `LANGSMITH_TRACING=true` et `LANGSMITH_API_KEY` définis, chaque run es
    - `LANGSMITH_API_KEY=...`
    - `LANGSMITH_PROJECT=finance-rag-langgraph`
 2. Lancer l'app Streamlit et poser des questions.
-3. Ouvrir [https://smith.langchain.com](https://smith.langchain.com), puis le projet `LANGSMITH_PROJECT`.
+3. Ouvrir [https://eu.smith.langchain.com](https://eu.smith.langchain.com) (EU) ou [smith.langchain.com](https://smith.langchain.com) (US), puis le projet `LANGSMITH_PROJECT`.
 
 ### LangGraph Studio (optionnel)
 

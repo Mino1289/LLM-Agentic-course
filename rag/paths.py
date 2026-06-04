@@ -32,6 +32,7 @@ LEGACY_TEMP_DIR = PROJECT_ROOT / "temp"
 PROCESSED_DATA_DIR = RAG_DIR / "processed_data"
 CHROMA_DB_DIR = RAG_DIR / "chroma_db"
 SEC_FILINGS_METADATA = RAG_DIR / "sec_filings_metadata.json"
+REPORTS_DIR = PROJECT_ROOT / "reports"
 ENV_FILE = PROJECT_ROOT / ".env"
 
 

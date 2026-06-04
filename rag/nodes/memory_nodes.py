@@ -18,8 +18,14 @@ def memory_read_node(agent: Any, state: GraphState) -> GraphState:
 @traceable(name="memory_write_node")
 def memory_write_node(agent: Any, state: GraphState) -> GraphState:
     conversation_id = state["conversation_id"]
+    answer = state.get("answer", "")
+    if not answer:
+        for msg in reversed(state.get("lc_messages") or []):
+            if msg.get("role") == "assistant" and msg.get("content") and not msg.get("tool_calls"):
+                answer = str(msg["content"])
+                break
     agent.memory_store.append_turn(conversation_id, "user", state.get("normalized_query", ""))
-    agent.memory_store.append_turn(conversation_id, "assistant", state.get("answer", ""))
+    agent.memory_store.append_turn(conversation_id, "assistant", answer)
     return {}
 
 
