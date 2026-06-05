@@ -542,8 +542,12 @@ class ValidateClaimsNLITests(unittest.TestCase):
 
         agent.rag.provider.generate.assert_called_once()
         call_args = agent.rag.provider.generate.call_args
-        prompt_arg = call_args.kwargs.get("prompt", call_args.args[0] if call_args.args else "")
-        self.assertIn("NLI", prompt_arg)
+        call_kwargs = call_args.kwargs
+        system_prompt = call_kwargs.get("system_prompt", "")
+        prompt = call_kwargs.get("prompt", call_args.args[0] if call_args.args else "")
+        self.assertIn("NLI", system_prompt)
+        self.assertEqual(call_kwargs.get("temperature"), 0.0)
+        self.assertIn("supported", prompt)
         self.assertEqual(result["stats"]["validate_nli_used"], True)
         self.assertEqual(result["stats"]["validate_nli_claims"], 2)
         statuses = {v["status"] for v in result["validations"]}
