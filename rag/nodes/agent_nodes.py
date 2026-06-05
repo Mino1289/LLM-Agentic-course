@@ -98,22 +98,20 @@ def pre_agent_guard(state: GraphState) -> GraphState | None:
     if not query:
         return {
             "answer": "Peux-tu préciser ta question finance (entreprise, période, ou type de document) ?",
-            "intent_route": "clarify",
+            "tool_calls_pending": False,
             "stats": {**(state.get("stats") or {}), "intent_route": "clarify"},
         }
     lower = query.lower()
     if any(token in lower for token in ["factorielle", "javascript", "python code", "écrire du code"]):
         return {
             "answer": "Je suis spécialisé en analyse financière (SEC, prix, rapports). Pose une question sur NVDA, AMD ou MSFT.",
-            "intent_route": "reject_offtopic",
+            "tool_calls_pending": False,
             "stats": {**(state.get("stats") or {}), "intent_route": "reject_offtopic"},
         }
     return None
 
 
 def route_after_agent(state: GraphState) -> str:
-    if state.get("intent_route") in {"clarify", "reject_offtopic"}:
-        return "finalize"
     if state.get("tool_calls_pending"):
         return "tools"
     return "finalize"
