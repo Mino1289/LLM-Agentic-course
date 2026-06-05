@@ -41,45 +41,6 @@ SIMULATE_PORTFOLIO_DESCRIPTION = (
     "Weights must sum to 100% across NVDA, AMD, MSFT only. Max 3 positions."
 )
 
-_STOPWORDS = frozenset(
-    {
-        "a",
-        "an",
-        "the",
-        "and",
-        "or",
-        "of",
-        "in",
-        "on",
-        "to",
-        "for",
-        "is",
-        "are",
-        "was",
-        "were",
-        "le",
-        "la",
-        "les",
-        "un",
-        "une",
-        "des",
-        "du",
-        "de",
-        "et",
-        "ou",
-        "en",
-        "sur",
-        "pour",
-        "est",
-        "sont",
-        "que",
-        "qui",
-        "avec",
-        "dans",
-        "par",
-    }
-)
-
 _MAX_NOTIONAL_USD = 1_000_000
 _WEIGHT_TOLERANCE = 0.01
 
@@ -233,29 +194,6 @@ def run_market_price_tool(
             "price_context": "",
         }
     return {"text": summary, "price_context": summary}
-
-
-def _tokenize_for_overlap(text: str) -> set[str]:
-    tokens = re.findall(r"[a-z0-9]{3,}", text.lower())
-    return {t for t in tokens if t not in _STOPWORDS}
-
-
-def _overlap_score(claim_tokens: set[str], chunk_text: str) -> float:
-    if not claim_tokens:
-        return 0.0
-    chunk_tokens = _tokenize_for_overlap(chunk_text)
-    if not chunk_tokens:
-        return 0.0
-    matched = claim_tokens & chunk_tokens
-    return len(matched) / len(claim_tokens)
-
-
-def _status_from_score(score: float) -> str:
-    if score >= 0.35:
-        return "supported"
-    if score >= 0.15:
-        return "partial"
-    return "unsupported"
 
 
 NLI_SYSTEM_PROMPT = (
