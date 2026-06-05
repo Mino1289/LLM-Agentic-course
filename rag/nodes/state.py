@@ -19,16 +19,9 @@ class GraphState(TypedDict, total=False):
     metadata_filter: dict[str, str]
     target_tickers: list[str]
     doc_type_priority: list[str]
-    intent_route: str
-    ambiguous_query: bool
-    general_chat: bool
     off_topic_blocked: bool
     clarification_question: str
-    decomposed_queries: list[str]
     price_context: str
-    price_tool_used: bool
-    price_tool_attempts: int
-    price_tool_decision: str
     price_tickers: list[str]
     price_window_start: str
     price_window_end: str
