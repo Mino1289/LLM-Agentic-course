@@ -220,6 +220,7 @@ def tools_node(agent: Any, state: GraphState) -> GraphState:
 
         if tc.name == "validate_claims_tool":
             stats["validate_tool_used"] = True
+            stats.update(result.get("stats") or {})
 
         if tc.name == "simulate_portfolio_tool" and result.get("positions"):
             stats["simulate_tool_used"] = True
