@@ -115,14 +115,16 @@ def with_exponential_backoff(
     fn: Callable[[], T],
     *,
     config: BackoffConfig,
-    sleep: Callable[[float], None] = time.sleep,
+    sleep: Optional[Callable[[float], None]] = None,
     is_permanent: Callable[[BaseException], bool] = is_permanent_error,
     rng: Optional[random.Random] = None,
 ) -> T:
     """Call ``fn`` with exponential backoff + full jitter on transient errors.
 
     Fail-fast on errors classified as permanent (auth, dim mismatch, ...).
+    ``sleep`` is resolved lazily so test-time patches of ``time.sleep`` apply.
     """
+    sleep_fn = sleep if sleep is not None else time.sleep
     rng = rng or random.Random()
     last_exc: Optional[BaseException] = None
     for attempt in range(1, config.max_retries + 1):
@@ -134,7 +136,7 @@ def with_exponential_backoff(
             last_exc = exc
             if attempt >= config.max_retries:
                 break
-            sleep(_compute_sleep(config, attempt, rng))
+            sleep_fn(_compute_sleep(config, attempt, rng))
     assert last_exc is not None
     raise last_exc
 

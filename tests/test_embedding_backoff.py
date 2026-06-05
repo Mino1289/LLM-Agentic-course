@@ -176,7 +176,7 @@ class YFinanceRetryTests(unittest.TestCase):
 
         with patch("rag.download_share_prices.yf.download", side_effect=fake_yf_download):
             with patch(
-                "rag.download_share_prices.time.sleep", side_effect=lambda v: sleeps.append(v)
+                "rag.embedding_pipeline.time.sleep", side_effect=lambda v: sleeps.append(v)
             ):
                 df = download_with_retry("NVDA", "2024-01-01", "2024-12-31")
 
@@ -190,7 +190,7 @@ class YFinanceRetryTests(unittest.TestCase):
             raise ConnectionError("nope")
 
         with patch("rag.download_share_prices.yf.download", side_effect=always_fail):
-            with patch("rag.download_share_prices.time.sleep", lambda _v: None):
+            with patch("rag.embedding_pipeline.time.sleep", lambda _v: None):
                 with self.assertRaises(ConnectionError):
                     download_with_retry("NVDA", "2024-01-01", "2024-12-31", max_retries=2)
 
