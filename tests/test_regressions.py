@@ -501,5 +501,30 @@ class AgentToolsTests(unittest.TestCase):
             self.assertGreaterEqual(final.get("stats", {}).get("agent_iterations", 0), 2)
 
 
+class StateAuditTests(unittest.TestCase):
+    """PRD §4.3 — Audit du State : aucune clé fantôme V1 ne doit être déclarée
+    ni lue/écrite dans le flow actif."""
+
+    GHOST_KEYS = {
+        "intent_route",
+        "ambiguous_query",
+        "general_chat",
+        "decomposed_queries",
+        "price_tool_decision",
+        "price_tool_used",
+        "price_tool_attempts",
+    }
+
+    def test_graphstate_typeddict_has_no_ghosts(self):
+        from rag.nodes.state import GraphState
+
+        declared = set(GraphState.__annotations__.keys())
+        overlap = self.GHOST_KEYS & declared
+        self.assertFalse(
+            overlap,
+            f"Clés fantômes V1 toujours déclarées dans GraphState: {sorted(overlap)}",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
