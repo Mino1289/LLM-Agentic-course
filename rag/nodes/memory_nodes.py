@@ -85,12 +85,16 @@ def gc_node(agent: Any, state: GraphState) -> GraphState:
         agent.memory_store.remember_chunk(conversation_id, chunk)
 
     stats = state.get("stats", {})
+    price_tool_used = any(
+        event.get("tool") == "market_price_tool"
+        for event in (state.get("tool_events") or [])
+    )
     stats.update(
         {
             "chunks_used": len(state.get("final_chunks", [])),
             "gc_applied": gc_applied,
             "estimated_context_tokens": agent.rag.count_context_tokens(state.get("final_chunks", [])),
-            "price_tool_used": state.get("price_tool_used", False),
+            "price_tool_used": price_tool_used,
         }
     )
     return {"gc_applied": gc_applied, "stats": stats}
