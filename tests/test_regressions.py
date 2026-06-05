@@ -501,6 +501,90 @@ class AgentToolsTests(unittest.TestCase):
             self.assertGreaterEqual(final.get("stats", {}).get("agent_iterations", 0), 2)
 
 
+class ValidateClaimsNLITests(unittest.TestCase):
+    """PRD §2.2 + §4.4 — validate_claims_tool uses an LLM NLI judge, not
+    token-overlap. NLI prompt must be invoked, JSON results parsed, fallback
+    on parse/provider error, and NLI stats surfaced."""
+
+    CHUNKS = [
+        "Item 1A risk factors include supply chain concentration and regulatory scrutiny.",
+        "Revenue growth accelerated in data center segment year over year.",
+    ]
+    METADATAS = [
+        {"ticker": "MSFT", "year": "2024", "file_type": "10-K"},
+        {"ticker": "NVDA", "year": "2024", "file_type": "10-K"},
+    ]
+
+    def _make_agent(self, canned_response):
+        provider = MagicMock()
+        provider.generate.return_value = canned_response
+        rag = SimpleNamespace(provider=provider)
+        return SimpleNamespace(rag=rag)
+
+    def test_validate_uses_nli_path(self):
+        from rag.tools import run_validate_claims
+
+        agent = self._make_agent(
+            '{"results": ['
+            '{"claim": "MSFT supply chain risk", "status": "supported",'
+            ' "best_source_index": 1, "reasoning": "Item 1A mentions supply chain risk."},'
+            '{"claim": "Mars reactor", "status": "unsupported",'
+            ' "best_source_index": null, "reasoning": "No relevant excerpt."}'
+            ']}'
+        )
+
+        result = run_validate_claims(
+            agent=agent,
+            claims=["MSFT supply chain risk", "Mars reactor"],
+            chunks=self.CHUNKS,
+            metadatas=self.METADATAS,
+        )
+
+        agent.rag.provider.generate.assert_called_once()
+        call_args = agent.rag.provider.generate.call_args
+        prompt_arg = call_args.kwargs.get("prompt", call_args.args[0] if call_args.args else "")
+        self.assertIn("NLI", prompt_arg)
+        self.assertEqual(result["stats"]["validate_nli_used"], True)
+        self.assertEqual(result["stats"]["validate_nli_claims"], 2)
+        statuses = {v["status"] for v in result["validations"]}
+        self.assertIn("supported", statuses)
+        self.assertIn("unsupported", statuses)
+        for v in result["validations"]:
+            self.assertTrue(v.get("nli_used"))
+            self.assertIn("reasoning", v)
+
+    def test_validate_fallback_on_invalid_json(self):
+        from rag.tools import run_validate_claims
+
+        agent = self._make_agent("not valid json at all")
+        result = run_validate_claims(
+            agent=agent,
+            claims=["claim A", "claim B"],
+            chunks=self.CHUNKS,
+            metadatas=self.METADATAS,
+        )
+
+        self.assertEqual(len(result["validations"]), 2)
+        for v in result["validations"]:
+            self.assertEqual(v["status"], "unsupported")
+            self.assertIn("nli_parse_error", v["reasoning"])
+        self.assertEqual(result["stats"]["validate_nli_used"], True)
+
+    def test_validate_nli_skipped_when_chunks_empty(self):
+        from rag.tools import run_validate_claims
+
+        agent = self._make_agent("")
+        result = run_validate_claims(
+            agent=agent,
+            claims=["any claim"],
+            chunks=[],
+            metadatas=[],
+        )
+        agent.rag.provider.generate.assert_not_called()
+        self.assertIn("sec_filings_rag_tool", result["text"])
+        self.assertEqual(result["stats"]["validate_nli_used"], False)
+
+
 class StateAuditTests(unittest.TestCase):
     """PRD §4.3 — Audit du State : aucune clé fantôme V1 ne doit être déclarée
     ni lue/écrite dans le flow actif."""
