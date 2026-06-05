@@ -12,13 +12,13 @@ os.environ["LANGSMITH_TRACING"] = "false"
 
 from rag.hybrid_rag import HybridRAG, build_chunk_id, chunk_text_semantic
 from rag.nodes.decompose_node import parse_query_list
-from rag.nodes.generation_node import format_retrieved_excerpts, synthesis_node
+from rag.nodes._v1_legacy.generation_node import format_retrieved_excerpts, synthesis_node
 from rag.nodes.memory_nodes import context_prune_node
 from rag.nodes.prepare_node import extract_metadata_filter, prepare_query_node
 from rag.nodes.prompt_context import get_known_tickers
 from rag.nodes.rerank_node import rerank_node
 from rag.nodes.retrieval_node import multi_retrieve_node
-from rag.nodes.scope_node import query_scope_node
+from rag.nodes._v1_legacy.scope_node import query_scope_node
 from rag.llm_provider import (
     LLMConfig,
     LLMProvider,
