@@ -418,6 +418,8 @@ class IndexSynchronizationTests(unittest.TestCase):
 
 class AgentToolsTests(unittest.TestCase):
     def test_validate_claims_supported_and_unsupported(self):
+        from rag.tools import run_validate_claims
+
         chunks = [
             "Item 1A risk factors include supply chain concentration and regulatory scrutiny.",
             "Revenue growth accelerated in data center segment year over year.",
@@ -426,9 +428,21 @@ class AgentToolsTests(unittest.TestCase):
             {"ticker": "MSFT", "year": "2024", "file_type": "10-K"},
             {"ticker": "NVDA", "year": "2024", "file_type": "10-K"},
         ]
+        canned = (
+            '{"results": ['
+            '{"claim": "MSFT supply chain risk", "status": "supported",'
+            ' "best_source_index": 1, "reasoning": "Item 1A confirms supply chain risk."},'
+            '{"claim": "Mars reactor", "status": "unsupported",'
+            ' "best_source_index": null, "reasoning": "No relevant excerpt."}'
+            ']}'
+        )
+        agent = SimpleNamespace(rag=SimpleNamespace(provider=MagicMock()))
+        agent.rag.provider.generate.return_value = canned
+
         result = run_validate_claims(
+            agent=agent,
             claims=[
-                "MSFT faces supply chain risk factors",
+                "MSFT supply chain risk",
                 "The company operates a nuclear fusion reactor on Mars",
             ],
             chunks=chunks,
@@ -437,10 +451,16 @@ class AgentToolsTests(unittest.TestCase):
         statuses = {v["status"] for v in result["validations"]}
         self.assertIn("supported", statuses)
         self.assertIn("unsupported", statuses)
+        self.assertEqual(result["stats"]["validate_nli_used"], True)
 
     def test_validate_claims_requires_rag_chunks(self):
-        result = run_validate_claims(claims=["test claim"], chunks=[], metadatas=[])
+        from rag.tools import run_validate_claims
+
+        agent = SimpleNamespace(rag=SimpleNamespace(provider=MagicMock()))
+        result = run_validate_claims(agent=agent, claims=["test claim"], chunks=[], metadatas=[])
         self.assertIn("sec_filings_rag_tool", result["text"])
+        agent.rag.provider.generate.assert_not_called()
+        self.assertEqual(result["stats"]["validate_nli_used"], False)
 
     def test_simulate_portfolio_rejects_invalid_weights(self):
         bad_sum = run_simulate_portfolio({"MSFT": 40, "NVDA": 40})
