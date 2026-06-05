@@ -113,8 +113,8 @@ class BackoffRetryTests(unittest.TestCase):
                 sleep=collect_sleep,
             )
 
-        # 6 retries => 6 sleeps.
-        self.assertEqual(len(sleeps), 6)
+        # 6 attempts => 5 sleeps (no sleep after the last attempt).
+        self.assertEqual(len(sleeps), 5)
         for attempt, slept in enumerate(sleeps, start=1):
             self.assertGreaterEqual(slept, 0.0)
             self.assertLessEqual(slept, min(8.0, 1.0 * (2 ** attempt)))
