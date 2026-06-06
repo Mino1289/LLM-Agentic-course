@@ -127,5 +127,27 @@ class FinanceLangGraphAgent:
         messages: list[dict[str, str]] | None = None,
     ) -> AsyncIterator[dict]:
         initial_state = self._initial_state(query, conversation_id, messages)
+        last_state: GraphState | None = None
         async for event in self.graph.astream_events(initial_state, version="v2"):
+            kind = event.get("event")
+            # Rename LangChain's on_chat_model_stream → on_llm_token (UI-friendly)
+            if kind == "on_chat_model_stream":
+                chunk = event.get("data", {}).get("chunk")
+                delta = ""
+                if chunk is not None:
+                    delta = getattr(chunk, "content", None) or ""
+                    if not delta and isinstance(chunk, dict):
+                        delta = chunk.get("content", "") or ""
+                if delta:
+                    yield {"event": "on_llm_token", "token": delta}
+                continue
+            # Track the latest state from each on_chain_end (cumulative)
+            if kind == "on_chain_end":
+                output = event.get("data", {}).get("output")
+                if isinstance(output, dict):
+                    last_state = output
             yield event
+        # Emit a final event with the complete GraphState so the UI can
+        # render artifacts without a second `arun()` call.
+        if last_state is not None:
+            yield {"event": "on_graph_end", "state": last_state}

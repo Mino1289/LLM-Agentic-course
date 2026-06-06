@@ -95,21 +95,26 @@ class AsyncNodeThreadWrappingTests(unittest.IsolatedAsyncioTestCase):
             return None
         return spy
 
-    async def test_agent_node_wraps_provider_call_in_to_thread(self):
+    async def test_agent_node_calls_ainvoke_with_tools_stream(self):
+        # agent_node now uses ainvoke_with_tools_stream (async, no to_thread wrap)
         from rag.nodes import agent_nodes
         from rag.nodes.agent_nodes import agent_node
-        wrapped: list = []
-        spy = await self._spy_to_thread(wrapped, exc=asyncio.CancelledError())
+        from rag.llm_provider import LLMStreamChunk
 
-        # Minimal stub agent with provider
-        class _StubProvider:
-            def invoke_with_tools(self, *a, **kw):
-                return None
-        _stub_provider = _StubProvider()
+        called_with: dict = {}
+
+        async def fake_astream(messages, tools=None, temperature=0.1, max_tokens=2000):
+            called_with["messages"] = messages
+            called_with["tools"] = tools
+            called_with["temperature"] = temperature
+            called_with["max_tokens"] = max_tokens
+            yield LLMStreamChunk(delta="Réponse.", finish_reason="stop")
+
         class _StubAgent:
             max_tool_iterations = 10
             class rag:
-                provider = _stub_provider
+                class provider:
+                    ainvoke_with_tools_stream = staticmethod(fake_astream)
         state = {
             "conversation_id": "x",
             "query": "Hello",
@@ -119,17 +124,15 @@ class AsyncNodeThreadWrappingTests(unittest.IsolatedAsyncioTestCase):
             "agent_iterations": 0,
             "lc_messages": [],
         }
-        with unittest.mock.patch.object(agent_nodes.asyncio, "to_thread", side_effect=spy):
-            try:
-                await agent_node(_StubAgent(), state)
-            except asyncio.CancelledError:
-                pass
-        # Verify that a function with name "invoke_with_tools" was wrapped
-        names = [getattr(f, "__name__", "") for f in wrapped]
-        self.assertIn(
-            "invoke_with_tools", names,
-            "agent_node must wrap provider.invoke_with_tools in asyncio.to_thread",
-        )
+        result = await agent_node(_StubAgent(), state)
+        # Verify ainvoke_with_tools_stream was called with the right args
+        self.assertIn("messages", called_with)
+        self.assertIn("tools", called_with)
+        self.assertEqual(called_with["temperature"], 0.2)
+        self.assertEqual(called_with["max_tokens"], 2500)
+        # Verify the response was captured into the state
+        self.assertEqual(result["answer"], "Réponse.")
+        self.assertFalse(result.get("tool_calls_pending"))
 
     async def test_tools_node_wraps_execute_tool_in_to_thread(self):
         from rag.nodes import agent_nodes

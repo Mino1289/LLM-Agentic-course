@@ -18,11 +18,19 @@ from rag.llm_provider import LLMToolResponse
 
 def _make_fake_provider(content: str = "Réponse stub async.") -> object:
     """Build a fake LLMProvider that returns canned responses for testing."""
+    from rag.llm_provider import LLMStreamChunk
+
     provider = SimpleNamespace()
     provider.generate = lambda *a, **kw: content
     provider.invoke_with_tools = lambda *a, **kw: LLMToolResponse(
         content=content, tool_calls=[]
     )
+
+    async def fake_astream(messages, tools=None, temperature=0.1, max_tokens=2000):
+        # Yield a single chunk with the canned content
+        yield LLMStreamChunk(delta=content, finish_reason="stop")
+
+    provider.ainvoke_with_tools_stream = fake_astream
     provider.embed = lambda texts: [[0.0] * 8 for _ in texts]
     return provider
 

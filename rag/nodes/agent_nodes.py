@@ -190,26 +190,54 @@ async def agent_node(agent: Any, state: GraphState) -> GraphState:
         }
 
     lc_messages = _build_lc_messages(agent, state)
-    response = await asyncio.to_thread(
-        agent.rag.provider.invoke_with_tools,
+    text_parts: list[str] = []
+    tool_calls_dict: dict[str, dict[str, Any]] = {}
+
+    async for stream_chunk in agent.rag.provider.ainvoke_with_tools_stream(
         lc_messages,
         tools=get_tool_definitions(),
         temperature=0.2,
         max_tokens=2500,
-    )
+    ):
+        if stream_chunk.delta:
+            text_parts.append(stream_chunk.delta)
+        if stream_chunk.tool_call_delta:
+            for tc_delta in stream_chunk.tool_call_delta:
+                tc_id = tc_delta.get("id") or f"tc_{len(tool_calls_dict)}"
+                if tc_id not in tool_calls_dict:
+                    tool_calls_dict[tc_id] = {
+                        "id": tc_id,
+                        "name": tc_delta.get("name") or "",
+                        "arguments_parts": [],
+                    }
+                if tc_delta.get("name"):
+                    tool_calls_dict[tc_id]["name"] = tc_delta["name"]
+                if tc_delta.get("arguments"):
+                    tool_calls_dict[tc_id]["arguments_parts"].append(tc_delta["arguments"])
+
+    final_text = "".join(text_parts)
+    final_tool_calls: list[ToolCall] = [
+        ToolCall(
+            id=tc["id"],
+            name=tc["name"],
+            arguments="".join(tc["arguments_parts"]),
+        )
+        for tc in tool_calls_dict.values()
+        if tc["name"]
+    ]
 
     stats = dict(state.get("stats") or {})
     stats["agent_iterations"] = iterations + 1
 
-    if response.tool_calls:
+    if final_tool_calls:
         assistant_msg: dict[str, Any] = {
             "role": "assistant",
-            "content": response.content,
-            "tool_calls": response.tool_calls,
+            "content": final_text,
+            "tool_calls": final_tool_calls,
         }
         lc_messages.append(assistant_msg)
         tool_events = list(state.get("tool_events") or [])
-        for tc in response.tool_calls:
+        for tc in final_tool_calls:
             tool_events.append(
                 {
                     "tool": tc.name,
@@ -220,13 +248,13 @@ async def agent_node(agent: Any, state: GraphState) -> GraphState:
         return {
             "lc_messages": lc_messages,
             "tool_calls_pending": True,
-            "pending_tool_calls": response.tool_calls,
+            "pending_tool_calls": final_tool_calls,
             "tool_events": tool_events,
             "agent_iterations": iterations + 1,
             "stats": stats,
         }
 
-    answer = (response.content or "").strip() or "Je n'ai pas pu formuler de réponse."
+    answer = (final_text or "").strip() or "Je n'ai pas pu formuler de réponse."
     lc_messages.append({"role": "assistant", "content": answer})
     return {
         "lc_messages": lc_messages,

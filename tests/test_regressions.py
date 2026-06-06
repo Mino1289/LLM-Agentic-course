@@ -516,6 +516,38 @@ class AgentToolsTests(unittest.TestCase):
                 "final_metadatas": [{"ticker": "MSFT", "year": "2024", "file_type": "10-K"}],
                 "stats": {"chunks_used": 1},
             }
+            from rag.llm_provider import LLMStreamChunk
+
+            # First ainvoke_with_tools_stream call → tool_call (sec_filings_rag_tool)
+            # Second call → final answer text
+            async def fake_astream_factory():
+                responses = [
+                    [
+                        LLMStreamChunk(
+                            tool_call_delta=[{
+                                "id": "tc_1",
+                                "name": "sec_filings_rag_tool",
+                                "arguments": '{"query": "risk"}',
+                            }],
+                            finish_reason="tool_calls",
+                        ),
+                    ],
+                    [
+                        LLMStreamChunk(delta="Synthèse mock basée sur les outils."),
+                        LLMStreamChunk(delta="", finish_reason="stop"),
+                    ],
+                ]
+                idx = {"i": 0}
+                async def stream(messages, tools=None, temperature=0.1, max_tokens=2000):
+                    out = responses[idx["i"]]
+                    idx["i"] += 1
+                    for c in out:
+                        yield c
+                return stream
+
+            stream_fn = asyncio.run(fake_astream_factory())
+            agent.rag.provider.ainvoke_with_tools_stream = stream_fn
+
             after_agent = asyncio.run(agent_node(agent, state))
             self.assertTrue(after_agent.get("tool_calls_pending"))
 
