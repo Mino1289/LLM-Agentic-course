@@ -19,7 +19,7 @@ def build_graph():
         summarize_every_n_turns=int(os.getenv("SUMMARIZE_EVERY_N_TURNS", "6")),
         max_context_chunks=int(os.getenv("MAX_CONTEXT_CHUNKS", "8")),
         max_context_tokens=int(os.getenv("MAX_CONTEXT_TOKENS", "3500")),
-        decompose_query_count=int(os.getenv("QUERY_DECOMPOSE_COUNT", "4")),
+        decompose_query_count=int(os.getenv("QUERY_DECOMPOSE_COUNT", "2")),
         price_max_days=int(os.getenv("PRICE_MAX_DAYS", "180")),
         price_max_points=int(os.getenv("PRICE_MAX_POINTS", "40")),
         price_max_tickers=int(os.getenv("PRICE_MAX_TICKERS", "3")),

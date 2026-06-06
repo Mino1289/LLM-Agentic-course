@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import time
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -21,6 +23,8 @@ from rag.tool_schemas import (
     ValidateClaimsLLMArgs,
 )
 from rag.tools import execute_tool, get_tool_definitions
+
+_LOGGER = logging.getLogger("rag.nodes.agent_nodes")
 
 AGENT_SYSTEM_PROMPT = """You are a finance research assistant for NVDA, AMD, and MSFT.
 You have tools to search SEC filings and earnings calls, fetch market prices, validate claims,
@@ -199,6 +203,12 @@ async def agent_node(agent: Any, state: GraphState) -> GraphState:
     text_parts: list[str] = []
     tool_calls_dict: dict[str, dict[str, Any]] = {}
 
+    llm_t0 = time.perf_counter()
+    _LOGGER.info(
+        "agent_node: llm stream start (iter=%d, history=%d msgs)",
+        iterations,
+        len(lc_messages),
+    )
     async for stream_chunk in agent.rag.provider.ainvoke_with_tools_stream(
         lc_messages,
         tools=get_tool_definitions(),
@@ -253,6 +263,12 @@ async def agent_node(agent: Any, state: GraphState) -> GraphState:
         for tc in tool_calls_dict.values()
         if tc["name"]
     ]
+    _LOGGER.info(
+        "agent_node: llm stream end (%.2fs, text_chars=%d, tool_calls=%d)",
+        time.perf_counter() - llm_t0,
+        len(final_text),
+        len(final_tool_calls),
+    )
 
     stats = dict(state.get("stats") or {})
     stats["agent_iterations"] = iterations + 1

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
+import time
 from datetime import UTC, datetime
 from typing import Any
 
@@ -55,6 +57,7 @@ SIMULATE_PORTFOLIO_DESCRIPTION = (
 
 _MAX_NOTIONAL_USD = 1_000_000
 _WEIGHT_TOLERANCE = 0.01
+_LOGGER = logging.getLogger("rag.tools")
 
 
 def _normalize_doc_types(doc_types: Any) -> list[str]:
@@ -159,6 +162,7 @@ async def run_sec_filings_rag(
     in a worker thread, which collided with the ``AsyncOpenAI`` httpx
     connection pool — manifesting as a 2-minute hang in the Streamlit UI.
     """
+    pipeline_t0 = time.perf_counter()
     normalized_tickers = _normalize_tickers(args.tickers)
     normalized_years = _normalize_years(args.years)
     normalized_doc_types = _normalize_doc_types(args.doc_types)
@@ -170,11 +174,29 @@ async def run_sec_filings_rag(
     if len(normalized_tickers) == 1:
         metadata_filter["ticker"] = normalized_tickers[0]
 
-    if metadata_filter.get("ticker") and metadata_filter.get("year"):
+    decomposed: list[str]
+    decompose_skipped_reason: str | None = None
+    if len(normalized_tickers) == 1:
+        # Single-ticker queries are precise enough to skip the LLM-based
+        # decomposition (saves ~3-7s per call). The year filter, when set,
+        # still restricts retrieval via ``metadata_filter``.
         decomposed = [query]
+        decompose_skipped_reason = "single_ticker"
+        _LOGGER.info(
+            "rag.tools: decompose skipped (single ticker=%s, years=%s)",
+            normalized_tickers[0],
+            normalized_years or "any",
+        )
     else:
-        # Native await on the agent's event loop.
+        decompose_t0 = time.perf_counter()
         decomposed = await decompose_query(agent, query)
+        _LOGGER.info(
+            "rag.tools: decompose took %.2fs (count=%d, tickers=%s, years=%s)",
+            time.perf_counter() - decompose_t0,
+            len(decomposed),
+            normalized_tickers or "any",
+            normalized_years or "any",
+        )
 
     rag_state: dict[str, Any] = {
         "normalized_query": query,
@@ -182,13 +204,26 @@ async def run_sec_filings_rag(
         "target_tickers": normalized_tickers,
         "doc_type_priority": normalized_doc_types,
         "decomposed_queries": decomposed,
-        "stats": {},
+        "stats": {"decomposed_count": len(decomposed)},
     }
+    if decompose_skipped_reason:
+        rag_state["stats"]["decompose_skipped_reason"] = decompose_skipped_reason
+
+    retrieve_t0 = time.perf_counter()
     retrieve_result = await multi_retrieve_node(agent, rag_state)
     rag_state.update(retrieve_result)
+    _LOGGER.info(
+        "rag.tools: retrieve took %.2fs (candidates=%d)",
+        time.perf_counter() - retrieve_t0,
+        len(rag_state.get("candidate_indices", [])),
+    )
 
     candidates = rag_state.get("candidate_indices", [])
     if not candidates:
+        _LOGGER.info(
+            "rag.tools: pipeline total %.2fs (no candidates, skipped rerank)",
+            time.perf_counter() - pipeline_t0,
+        )
         return {
             "text": format_rag_excerpts([], []),
             "final_chunks": [],
@@ -196,7 +231,14 @@ async def run_sec_filings_rag(
             "stats": rag_state.get("stats", {}),
         }
 
+    rerank_t0 = time.perf_counter()
     top_indices = await _balanced_rerank_indices(agent, rag_state, candidates)
+    _LOGGER.info(
+        "rag.tools: rerank took %.2fs (selected=%d/%d)",
+        time.perf_counter() - rerank_t0,
+        len(top_indices),
+        len(candidates),
+    )
     final_chunks = [agent.rag.documents[idx] for idx in top_indices]
     final_metadatas = [agent.rag.doc_metadata[idx] for idx in top_indices]
     stats = rag_state.get("stats", {})
@@ -206,6 +248,13 @@ async def run_sec_filings_rag(
             "rerank_final_count": len(top_indices),
             "chunks_used": len(final_chunks),
         }
+    )
+    _LOGGER.info(
+        "rag.tools: pipeline total %.2fs (decompose=%d, candidates=%d, final=%d)",
+        time.perf_counter() - pipeline_t0,
+        len(decomposed),
+        len(candidates),
+        len(final_chunks),
     )
     return {
         "text": format_rag_excerpts(final_chunks, final_metadatas),

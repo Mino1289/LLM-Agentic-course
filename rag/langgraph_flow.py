@@ -29,7 +29,7 @@ class FinanceLangGraphAgent:
         summarize_every_n_turns: int = 6,
         max_context_chunks: int = 8,
         max_context_tokens: int = 3500,
-        decompose_query_count: int = 4,
+        decompose_query_count: int = 2,
         price_max_days: int = 180,
         price_max_points: int = 40,
         price_max_tickers: int = 3,
@@ -42,7 +42,7 @@ class FinanceLangGraphAgent:
         self.summarize_every_n_turns = max(4, summarize_every_n_turns)
         self.max_context_chunks = max(4, max_context_chunks)
         self.max_context_tokens = max(1200, max_context_tokens)
-        self.decompose_query_count = max(3, decompose_query_count)
+        self.decompose_query_count = max(1, decompose_query_count)
         self.price_max_days = max(30, price_max_days)
         self.price_max_points = max(10, price_max_points)
         self.price_max_tickers = max(1, price_max_tickers)

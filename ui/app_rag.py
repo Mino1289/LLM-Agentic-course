@@ -327,7 +327,7 @@ memory_window_default = int(os.getenv("MEMORY_WINDOW_SIZE", "6"))
 summarize_every_n_turns_default = int(os.getenv("SUMMARIZE_EVERY_N_TURNS", "6"))
 max_context_chunks_default = int(os.getenv("MAX_CONTEXT_CHUNKS", "8"))
 max_context_tokens_default = int(os.getenv("MAX_CONTEXT_TOKENS", "3500"))
-decompose_query_count_default = int(os.getenv("QUERY_DECOMPOSE_COUNT", "4"))
+decompose_query_count_default = int(os.getenv("QUERY_DECOMPOSE_COUNT", "2"))
 price_max_days_default = int(os.getenv("PRICE_MAX_DAYS", "180"))
 price_max_points_default = int(os.getenv("PRICE_MAX_POINTS", "40"))
 price_max_tickers_default = int(os.getenv("PRICE_MAX_TICKERS", "3"))
@@ -344,7 +344,7 @@ max_context_tokens = st.sidebar.slider(
     "Tokens contexte max", min_value=1200, max_value=8000, step=100, value=max_context_tokens_default
 )
 decompose_query_count = st.sidebar.slider(
-    "Nb sous-requêtes", min_value=3, max_value=8, value=decompose_query_count_default
+    "Nb sous-requêtes", min_value=1, max_value=8, value=decompose_query_count_default
 )
 price_max_days = st.sidebar.slider("Prix max jours", min_value=30, max_value=365, value=price_max_days_default)
 price_max_points = st.sidebar.slider("Prix max points", min_value=10, max_value=120, value=price_max_points_default)
