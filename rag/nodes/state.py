@@ -1,8 +1,20 @@
 from __future__ import annotations
 
-from typing import Any, TypedDict
+from typing import Any, Literal, TypedDict
 
 from rag.llm_provider import ToolCall
+
+
+class ToolEvent(TypedDict, total=False):
+    id: str
+    tool: str
+    status: Literal["running", "completed", "failed"]
+    started_at: str  # ISO UTC
+    finished_at: str  # ISO UTC
+    args: dict[str, Any]
+    args_summary: str
+    result: dict[str, Any] | None
+    error: str | None
 
 
 class GraphState(TypedDict, total=False):
@@ -10,7 +22,7 @@ class GraphState(TypedDict, total=False):
     query: str
     messages: list[dict[str, str]]
     lc_messages: list[dict[str, Any]]
-    tool_events: list[dict[str, Any]]
+    tool_events: list[ToolEvent]
     report_artifacts: list[dict[str, Any]]
     tool_calls_pending: bool
     pending_tool_calls: list[ToolCall]
