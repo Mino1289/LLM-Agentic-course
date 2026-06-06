@@ -65,20 +65,32 @@ class AsyncAPIStructureTests(unittest.TestCase):
 
 
 class AsyncAPIBehaviorTests(unittest.IsolatedAsyncioTestCase):
-    async def test_run_delegates_to_asyncio_run(self):
+    async def test_run_delegates_to_asyncio_run_via_thread(self):
+        # `run()` is sync; we cannot call it from inside an async context
+        # (the new implementation explicitly raises in that case). Run it
+        # in a thread to escape the running loop and verify delegation.
+        import threading
         from rag import langgraph_flow
         agent = _make_agent_with_mock_graph()
-        # Patch asyncio.run at the module level where run() is defined
-        with unittest.mock.patch.object(
-            langgraph_flow.asyncio, "run", wraps=asyncio.run
-        ) as spy_run:
-            result = agent.run("test query")
-        # The result must be the state from arun
-        self.assertEqual(result["answer"], "ok")
-        self.assertEqual(result["conversation_id"], "cid")
-        # Verify asyncio.run was called (delegation to async runtime)
-        self.assertGreaterEqual(
-            spy_run.call_count, 1,
+        captured: dict = {}
+        original_run = langgraph_flow.asyncio.run
+
+        def spy_run(coro, *args, **kwargs):
+            captured["called"] = True
+            return original_run(coro, *args, **kwargs)
+
+        result_holder: dict = {}
+        def worker():
+            with unittest.mock.patch.object(langgraph_flow.asyncio, "run", spy_run):
+                result_holder["value"] = agent.run("test query")
+
+        t = threading.Thread(target=worker)
+        t.start()
+        t.join()
+        self.assertEqual(result_holder["value"]["answer"], "ok")
+        self.assertEqual(result_holder["value"]["conversation_id"], "cid")
+        self.assertTrue(
+            captured.get("called", False),
             "agent.run() must delegate to asyncio.run(arun())",
         )
 

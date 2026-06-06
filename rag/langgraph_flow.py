@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
 from functools import partial
+from typing import AsyncIterator
 
 from langgraph.graph import END, StateGraph
 
@@ -76,6 +78,21 @@ class FinanceLangGraphAgent:
         graph.add_edge("gc_node", END)
         return graph.compile()
 
+    def _initial_state(
+        self,
+        query: str,
+        conversation_id: str | None,
+        messages: list[dict[str, str]] | None,
+    ) -> GraphState:
+        return {
+            "conversation_id": conversation_id or str(uuid.uuid4()),
+            "query": query,
+            "messages": messages or [],
+            "agent_iterations": 0,
+            "tool_events": [],
+            "report_artifacts": [],
+        }
+
     @traceable(name="finance_langgraph_run")
     def run(
         self,
@@ -83,13 +100,32 @@ class FinanceLangGraphAgent:
         conversation_id: str | None = None,
         messages: list[dict[str, str]] | None = None,
     ) -> GraphState:
-        convo_id = conversation_id or str(uuid.uuid4())
-        initial_state: GraphState = {
-            "conversation_id": convo_id,
-            "query": query,
-            "messages": messages or [],
-            "agent_iterations": 0,
-            "tool_events": [],
-            "report_artifacts": [],
-        }
-        return self.graph.invoke(initial_state)
+        try:
+            running_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = None
+        if running_loop is not None and running_loop.is_running():
+            raise RuntimeError(
+                "agent.run() ne peut pas être appelé depuis une boucle asyncio. "
+                "Utilisez 'await agent.arun(...)' à la place."
+            )
+        return asyncio.run(self.arun(query, conversation_id, messages))
+
+    async def arun(
+        self,
+        query: str,
+        conversation_id: str | None = None,
+        messages: list[dict[str, str]] | None = None,
+    ) -> GraphState:
+        initial_state = self._initial_state(query, conversation_id, messages)
+        return await self.graph.ainvoke(initial_state)
+
+    async def astream(
+        self,
+        query: str,
+        conversation_id: str | None = None,
+        messages: list[dict[str, str]] | None = None,
+    ) -> AsyncIterator[dict]:
+        initial_state = self._initial_state(query, conversation_id, messages)
+        async for event in self.graph.astream_events(initial_state, version="v2"):
+            yield event
