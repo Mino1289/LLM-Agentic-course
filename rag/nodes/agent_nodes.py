@@ -1,13 +1,24 @@
 from __future__ import annotations
 
 import json
+import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+from pydantic import BaseModel, ValidationError
+
 from rag.llm_provider import ToolCall
 from rag.nodes.prompt_context import format_universe_hint
-from rag.nodes.state import GraphState
+from rag.nodes.state import GraphState, ToolEvent
 from rag.nodes.tracing import traceable
+from rag.tool_schemas import (
+    ExportReportArgs,
+    MarketPriceArgs,
+    SecFilingsRAGArgs,
+    SimulatePortfolioArgs,
+    ValidateClaimsArgs,
+    ValidateClaimsLLMArgs,
+)
 from rag.tools import execute_tool, get_tool_definitions
 
 AGENT_SYSTEM_PROMPT = """You are a finance research assistant for NVDA, AMD, and MSFT.
@@ -90,6 +101,52 @@ def _summarize_tool_args(name: str, arguments: str) -> str:
     if name == "simulate_portfolio_tool":
         return f"allocations={args.get('allocations')}, notional={args.get('notional_usd', 100000)}"
     return str(args)[:120]
+
+
+def _now_utc() -> str:
+    return datetime.now(UTC).isoformat(timespec="seconds")
+
+
+def _safe_dict(obj: Any) -> dict[str, Any]:
+    if isinstance(obj, dict):
+        return obj
+    if isinstance(obj, BaseModel):
+        return obj.model_dump()
+    return {}
+
+
+def _safe_result(obj: Any) -> dict[str, Any] | None:
+    if obj is None:
+        return None
+    if isinstance(obj, dict):
+        return obj
+    return {"text": str(obj)}
+
+
+def _resolve_full_args(
+    tool_name: str, llm_args: dict[str, Any], state: Any
+) -> BaseModel:
+    """Map a tool name + LLM-supplied args to a fully-resolved BaseModel.
+
+    For ``validate_claims_tool``, chunks and metadatas are injected from
+    ``state["final_chunks"]`` and ``state["final_metadatas"]``.
+    """
+    if tool_name == "validate_claims_tool":
+        llm = ValidateClaimsLLMArgs.model_validate(llm_args)
+        return ValidateClaimsArgs(
+            claims=llm.claims,
+            chunks=list((state or {}).get("final_chunks") or []),
+            metadatas=list((state or {}).get("final_metadatas") or []),
+        )
+    if tool_name == "sec_filings_rag_tool":
+        return SecFilingsRAGArgs.model_validate(llm_args)
+    if tool_name == "market_price_tool":
+        return MarketPriceArgs.model_validate(llm_args)
+    if tool_name == "simulate_portfolio_tool":
+        return SimulatePortfolioArgs.model_validate(llm_args)
+    if tool_name == "export_investment_report_tool":
+        return ExportReportArgs.model_validate(llm_args)
+    raise ValueError(f"Unknown tool: {tool_name}")
 
 
 def pre_agent_guard(state: GraphState) -> GraphState | None:
@@ -188,18 +245,54 @@ def tools_node(agent: Any, state: GraphState) -> GraphState:
     final_metadatas = list(state.get("final_metadatas") or [])
     price_context = state.get("price_context", "")
     report_artifacts = list(state.get("report_artifacts") or [])
-
-    rag_context = {"final_chunks": final_chunks, "final_metadatas": final_metadatas}
+    tool_events = list(state.get("tool_events") or [])
 
     for tc in pending:
-        result = execute_tool(agent, tc.name, tc.arguments, rag_context=rag_context)
+        event_id = str(uuid.uuid4())
+        try:
+            llm_args = json.loads(tc.arguments or "{}")
+        except json.JSONDecodeError:
+            llm_args = {}
+
+        event: ToolEvent = {
+            "id": event_id,
+            "tool": tc.name,
+            "status": "running",
+            "started_at": _now_utc(),
+            "args": llm_args,
+            "args_summary": _summarize_tool_args(tc.name, tc.arguments),
+        }
+        tool_events.append(event)
+
+        # Validate LLM args; resolve injected (chunks/metadatas) from state.
+        try:
+            full_args = _resolve_full_args(tc.name, llm_args, state)
+        except ValidationError as e:
+            event["status"] = "failed"
+            msg = e.errors()[0]["msg"] if e.errors() else str(e)
+            event["error"] = f"args_validation: {msg}"
+            event["finished_at"] = _now_utc()
+            continue
+
+        # Execute the tool.
+        try:
+            result = execute_tool(tc.name, full_args, agent=agent, state=state)
+        except Exception as e:
+            event["status"] = "failed"
+            event["error"] = f"execution: {e}"
+            event["finished_at"] = _now_utc()
+            continue
+
+        event["status"] = "completed"
+        event["result"] = _safe_result(result)
+        event["finished_at"] = _now_utc()
+
+        # Update state side-effects per tool.
         tool_text = result.get("text", json.dumps(result, ensure_ascii=False))
 
         if tc.name == "sec_filings_rag_tool":
             final_chunks = result.get("final_chunks") or final_chunks
             final_metadatas = result.get("final_metadatas") or final_metadatas
-            rag_context["final_chunks"] = final_chunks
-            rag_context["final_metadatas"] = final_metadatas
             stats.update(result.get("stats") or {})
             stats["rag_tool_used"] = True
 
@@ -242,7 +335,7 @@ def tools_node(agent: Any, state: GraphState) -> GraphState:
         "final_metadatas": final_metadatas,
         "price_context": price_context,
         "report_artifacts": report_artifacts,
-        "tool_events": state.get("tool_events") or [],
+        "tool_events": tool_events,
         "stats": stats,
     }
 
