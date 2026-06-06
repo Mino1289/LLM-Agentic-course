@@ -670,6 +670,119 @@ class AgentToolsTests(unittest.TestCase):
             final = asyncio.run(agent_node(agent, {**merged, **after_tools}))
             self.assertEqual(final.get("answer"), "Réponse finale.")
 
+    def test_agent_parallel_tool_calls_with_one_execution_failure(self):
+        """When the LLM calls 2 tools in parallel and one fails (validation
+        or execution), tools_node MUST still append a tool message for the
+        failed one. Otherwise the next LLM call fails with:
+          400 invalid_request_error: assistant.tool_calls ids without matching
+          tool responses.
+        This is an OpenAI API invariant, not a convention.
+        """
+        from rag.llm_provider import LLMStreamChunk
+
+        agent = SimpleNamespace(max_tool_iterations=6, rag=SimpleNamespace(provider=MagicMock()))
+        ID_OK = "call_ok_real"
+        ID_BAD = "call_bad_real"
+
+        responses = [
+            [
+                # Two parallel tool_calls with different index
+                LLMStreamChunk(
+                    tool_call_delta=[{
+                        "index": 0, "id": ID_OK, "name": "sec_filings_rag_tool",
+                        "arguments": '{"query":"risks NVDA 2024","tickers":["NVDA"]}',
+                    }],
+                    finish_reason=None,
+                ),
+                LLMStreamChunk(
+                    tool_call_delta=[{
+                        "index": 1, "id": ID_BAD, "name": "sec_filings_rag_tool",
+                        "arguments": '{"query":"risks AMD 2024","tickers":["AMD"]}',
+                    }],
+                    finish_reason="tool_calls",
+                ),
+            ],
+            [
+                LLMStreamChunk(delta="Synthèse après outils partiels."),
+                LLMStreamChunk(delta="", finish_reason="stop"),
+            ],
+        ]
+        idx = {"i": 0}
+
+        async def stream(messages, tools=None, temperature=0.1, max_tokens=2000):
+            out = responses[idx["i"]]
+            idx["i"] += 1
+            for c in out:
+                yield c
+
+        agent.rag.provider.ainvoke_with_tools_stream = stream
+
+        state = {
+            "normalized_query": "Compare NVDA et AMD 2024",
+            "query": "Compare NVDA et AMD 2024",
+            "messages": [],
+            "agent_iterations": 0,
+            "tool_events": [],
+            "stats": {},
+        }
+
+        with patch("rag.nodes.agent_nodes.execute_tool") as mock_execute:
+            def execute_side_effect(name, args, agent=None, state=None):
+                # First call (NVDA) succeeds; second call (AMD) raises
+                # to simulate yfinance/retrieval error.
+                if args.tickers == ["NVDA"]:
+                    return {
+                        "text": "[1] NVDA excerpt",
+                        "final_chunks": ["risk"],
+                        "final_metadatas": [{"ticker": "NVDA", "year": "2024", "file_type": "10-K"}],
+                        "stats": {"chunks_used": 1},
+                    }
+                raise RuntimeError("simulated retrieval failure for AMD")
+
+            mock_execute.side_effect = execute_side_effect
+
+            after_agent = asyncio.run(agent_node(agent, state))
+            pending = after_agent.get("pending_tool_calls") or []
+            # Both parallel calls must be present.
+            self.assertEqual(len(pending), 2, f"Expected 2 parallel tool_calls, got {len(pending)}")
+            ids = {t.id for t in pending}
+            self.assertEqual(ids, {ID_OK, ID_BAD})
+
+            merged = {**state, **after_agent}
+            after_tools = asyncio.run(tools_node(agent, merged))
+
+            # CRITICAL: a tool message MUST exist for BOTH ids, even though
+            # one tool raised during execution. OpenAI rejects the next
+            # request if any tool_call lacks a matching tool response.
+            lc_msgs = after_tools.get("lc_messages") or []
+            tool_msgs = [m for m in lc_msgs if m.get("role") == "tool"]
+            tool_msg_ids = {m.get("tool_call_id") for m in tool_msgs}
+            self.assertEqual(
+                tool_msg_ids, {ID_OK, ID_BAD},
+                f"tools_node must append a tool message for EVERY tool_call, "
+                f"even on failure. Got tool_msg_ids={tool_msg_ids}, "
+                f"expected={ {ID_OK, ID_BAD} }",
+            )
+
+            # The failed tool message should mention the error.
+            bad_msg = next(m for m in tool_msgs if m.get("tool_call_id") == ID_BAD)
+            self.assertIn("error", bad_msg.get("content", "").lower())
+
+            # The successful tool message should have the actual result.
+            ok_msg = next(m for m in tool_msgs if m.get("tool_call_id") == ID_OK)
+            self.assertEqual(ok_msg.get("content"), "[1] NVDA excerpt")
+
+            # tool_events should record both (one completed, one failed).
+            events = after_tools.get("tool_events") or []
+            # Full ToolEvents (with status) come from tools_node; agent_node
+            # also appends a lighter "args summary" record. Filter to full ones.
+            full_events = [e for e in events if "status" in e]
+            rag_full = [e for e in full_events if e.get("tool") == "sec_filings_rag_tool"]
+            self.assertEqual(len(rag_full), 2)
+            statuses = [e.get("status") for e in rag_full]
+            self.assertIn("completed", statuses)
+            self.assertIn("failed", statuses)
+
 
 class ValidateClaimsNLITests(unittest.TestCase):
     """PRD §2.2 + §4.4 — validate_claims_tool uses an LLM NLI judge, not

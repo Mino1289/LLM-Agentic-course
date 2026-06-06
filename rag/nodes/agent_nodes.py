@@ -316,7 +316,13 @@ async def tools_node(agent: Any, state: GraphState) -> GraphState:
         }
         tool_events.append(event)
 
+        # OpenAI API invariant: every assistant.tool_call MUST be followed by
+        # a matching tool response. We accumulate a single tool_text per
+        # pending tool_call and ALWAYS append the tool message below, even
+        # on validation/execution failure (with an error payload).
+
         # Validate LLM args; resolve injected (chunks/metadatas) from state.
+        tool_text: str
         try:
             full_args = _resolve_full_args(tc.name, llm_args, state)
         except ValidationError as e:
@@ -324,6 +330,15 @@ async def tools_node(agent: Any, state: GraphState) -> GraphState:
             msg = e.errors()[0]["msg"] if e.errors() else str(e)
             event["error"] = f"args_validation: {msg}"
             event["finished_at"] = _now_utc()
+            tool_text = json.dumps({"error": f"args_validation: {msg}"}, ensure_ascii=False)
+            lc_messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "name": tc.name,
+                    "content": tool_text,
+                }
+            )
             continue
 
         # Execute the tool (blocking I/O → offload to thread).
@@ -335,6 +350,15 @@ async def tools_node(agent: Any, state: GraphState) -> GraphState:
             event["status"] = "failed"
             event["error"] = f"execution: {e}"
             event["finished_at"] = _now_utc()
+            tool_text = json.dumps({"error": f"execution: {e}"}, ensure_ascii=False)
+            lc_messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "name": tc.name,
+                    "content": tool_text,
+                }
+            )
             continue
 
         event["status"] = "completed"
