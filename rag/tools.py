@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from datetime import UTC, datetime
@@ -146,7 +147,10 @@ def run_sec_filings_rag(
     if metadata_filter.get("ticker") and metadata_filter.get("year"):
         decomposed = [query]
     else:
-        decomposed = decompose_query(agent, query)
+        # run_sec_filings_rag is sync (called from tools_node via
+        # asyncio.to_thread). It runs in a worker thread without a running
+        # event loop, so we use asyncio.run() to drive the coroutine.
+        decomposed = asyncio.run(decompose_query(agent, query))
 
     rag_state: dict[str, Any] = {
         "normalized_query": query,
@@ -156,7 +160,8 @@ def run_sec_filings_rag(
         "decomposed_queries": decomposed,
         "stats": {},
     }
-    retrieve_result = multi_retrieve_node(agent, rag_state)
+    # Same pattern: drive the async multi_retrieve_node to completion.
+    retrieve_result = asyncio.run(multi_retrieve_node(agent, rag_state))
     rag_state.update(retrieve_result)
 
     candidates = rag_state.get("candidate_indices", [])
@@ -168,7 +173,7 @@ def run_sec_filings_rag(
             "stats": rag_state.get("stats", {}),
         }
 
-    top_indices = _balanced_rerank_indices(agent, rag_state, candidates)
+    top_indices = asyncio.run(_balanced_rerank_indices(agent, rag_state, candidates))
     final_chunks = [agent.rag.documents[idx] for idx in top_indices]
     final_metadatas = [agent.rag.doc_metadata[idx] for idx in top_indices]
     stats = rag_state.get("stats", {})

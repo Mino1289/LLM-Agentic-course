@@ -783,6 +783,72 @@ class AgentToolsTests(unittest.TestCase):
             self.assertIn("completed", statuses)
             self.assertIn("failed", statuses)
 
+    def test_run_sec_filings_rag_awaits_multi_retrieve_node(self):
+        """run_sec_filings_rag is sync (called from tools_node via
+        asyncio.to_thread). It calls multi_retrieve_node (async) and
+        decompose_query (async) — both must be driven to completion
+        via asyncio.run, otherwise the coroutine is never awaited and
+        rag_state.update(coroutine) raises TypeError. The bug surfaces
+        in the UI as "0 chunks" + the LLM apologizing for a 'technical
+        problem accessing documents' (it actually received a
+        'coroutine is not iterable' error message).
+        """
+        from rag.tools import run_sec_filings_rag
+        from rag.tool_schemas import SecFilingsRAGArgs
+
+        # Fake agent whose rag.retrieve returns 2 NVDA chunks.
+        class FakeRetrieval:
+            chunk_indices = [0, 1]
+
+        class FakeRag:
+            documents = {0: "nvda risk chunk A", 1: "nvda risk chunk B"}
+            doc_metadata = [
+                {"ticker": "NVDA", "year": "2024", "source": "nvda-10-k_2024.htm", "section": "Item_1A"},
+                {"ticker": "NVDA", "year": "2024", "source": "nvda-10-k_2024.htm", "section": "Item_1A"},
+            ]
+
+            def __init__(self):
+                self.retrieve_calls = 0
+
+            def retrieve(self, query, **kwargs):
+                self.retrieve_calls += 1
+                return FakeRetrieval()
+
+            def _deduplicate_indices(self, indices):
+                return list(dict.fromkeys(indices))
+
+            def _rerank(self, **kwargs):
+                return kwargs.get("candidate_indices", [])
+
+        # Avoid the rerank path complexity by stubbing _balanced_rerank_indices
+        # to just return the candidates as-is.
+        with patch("rag.tools._balanced_rerank_indices", return_value=[0, 1]), \
+             patch("rag.tools._ticker_counts", return_value={"NVDA": 2}):
+            agent = SimpleNamespace(
+                rag=FakeRag(),
+                max_tool_iterations=6,
+            )
+            args = SecFilingsRAGArgs(
+                query="NVDA 10-K risk factors 2024",
+                tickers=["NVDA"],
+                years=["2024"],
+                doc_types=["10-K"],
+            )
+            result = run_sec_filings_rag(args, agent=agent)
+
+        # Must return chunks (the bug returned 0 because the coroutine
+        # was never awaited, causing rag_state.update to fail).
+        self.assertEqual(
+            len(result.get("final_chunks", [])), 2,
+            f"run_sec_filings_rag must drive multi_retrieve_node to "
+            f"completion (use asyncio.run). Got: {result}",
+        )
+        self.assertEqual(
+            result.get("stats", {}).get("chunks_used"), 2,
+            f"chunks_used stat must reflect retrieved chunks. Got: {result.get('stats')}",
+        )
+        self.assertGreater(agent.rag.retrieve_calls, 0, "rag.retrieve must be called")
+
 
 class ValidateClaimsNLITests(unittest.TestCase):
     """PRD §2.2 + §4.4 — validate_claims_tool uses an LLM NLI judge, not
