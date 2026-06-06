@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import contextvars
+import inspect
 import json
 import os
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Generator, Iterable, Optional
+from typing import Any, AsyncIterator, Callable, Generator, Iterable, Optional
 
 from openai import AsyncOpenAI, OpenAI
 
@@ -52,6 +55,45 @@ class LLMStreamChunk:
     delta: str = ""
     tool_call_delta: Optional[list[dict[str, Any]]] = None
     finish_reason: Optional[str] = None
+
+
+# Module-level context variable for the token sink. The provider's async
+# stream methods invoke this sink for each token, allowing the UI layer
+# to receive tokens in real time without depending on LangChain's chat
+# model callback machinery (which doesn't fire for raw provider calls).
+_token_sink_var: contextvars.ContextVar[Optional[Callable[[str], Any]]] = (
+    contextvars.ContextVar("rag_llm_token_sink", default=None)
+)
+
+
+@contextmanager
+def token_sink(sink: Optional[Callable[[str], Any]]):
+    """Context manager that registers a token sink for the duration of
+    the block. The sink is called with each text delta as it streams.
+    Supports both sync and async sinks.
+
+    Example:
+        with token_sink(lambda t: container.markdown(t)):
+            async for event in agent.astream(...): ...
+    """
+    token = _token_sink_var.set(sink)
+    try:
+        yield
+    finally:
+        _token_sink_var.reset(token)
+
+
+async def _call_token_sink(delta: str) -> None:
+    """Await the registered token sink (if any) for a text delta.
+    No-ops when no sink is registered or the delta is empty.
+    """
+    sink = _token_sink_var.get()
+    if not sink or not delta:
+        return
+    result = sink(delta)
+    if inspect.iscoroutine(result):
+        await result
+
 
 
 def _normalize_github_model_id(model: str) -> str:
@@ -452,11 +494,14 @@ class LLMProvider:
                             "arguments": getattr(fn, "arguments", None) if fn else None,
                         }
                     )
-            yield LLMStreamChunk(
+            chunk = LLMStreamChunk(
                 delta=delta_text,
                 tool_call_delta=tool_deltas,
                 finish_reason=getattr(choice, "finish_reason", None),
             )
+            if delta_text:
+                await _call_token_sink(delta_text)
+            yield chunk
 
     async def _ainvoke_gemini_stream(
         self,
@@ -522,10 +567,14 @@ class LLMProvider:
                                 "arguments": json.dumps(dict(getattr(fc, "args", None) or {})),
                             }
                         )
-            yield LLMStreamChunk(
-                delta="".join(text_parts),
+            delta = "".join(text_parts)
+            chunk = LLMStreamChunk(
+                delta=delta,
                 tool_call_delta=tool_deltas or None,
             )
+            if delta:
+                await _call_token_sink(delta)
+            yield chunk
 
     def _invoke_openai_with_tools(
         self,

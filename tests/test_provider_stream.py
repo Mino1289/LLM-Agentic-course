@@ -196,5 +196,79 @@ class LLMProviderAsyncStreamTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(finish_chunks[0].finish_reason, "tool_calls")
 
 
+class TokenSinkTests(unittest.IsolatedAsyncioTestCase):
+    """Verify the contextvar-based token sink receives each text delta
+    produced by ainvoke_with_tools_stream."""
+
+    def _make_provider(self, chunks: list[_FakeChatCompletionChunk]):
+        from rag.llm_provider import LLMConfig, LLMProvider
+        provider = LLMProvider.__new__(LLMProvider)
+        provider.config = LLMConfig(
+            provider="openai",
+            chat_model="gpt-4o-mini",
+            embedding_model="text-embedding-3-small",
+            api_key="x",
+            embedding_api_key="x",
+        )
+        provider.async_client = _FakeAsyncClient(chunks)
+        return provider
+
+    async def test_sink_invoked_for_each_text_delta(self):
+        from rag.llm_provider import token_sink
+        chunks = [
+            _FakeChatCompletionChunk([_FakeChoice(_FakeDelta(content="A"))]),
+            _FakeChatCompletionChunk([_FakeChoice(_FakeDelta(content="B"))]),
+            _FakeChatCompletionChunk([_FakeChoice(_FakeDelta(content="C"))]),
+        ]
+        provider = self._make_provider(chunks)
+        captured: list[str] = []
+
+        def sink(delta: str) -> None:
+            captured.append(delta)
+
+        with token_sink(sink):
+            async for _ in provider.ainvoke_with_tools_stream(
+                [{"role": "user", "content": "x"}], tools=None,
+                temperature=0.1, max_tokens=100,
+            ):
+                pass
+
+        self.assertEqual(captured, ["A", "B", "C"])
+
+    async def test_sink_not_invoked_when_no_sink_registered(self):
+        from rag.llm_provider import token_sink
+        chunks = [
+            _FakeChatCompletionChunk([_FakeChoice(_FakeDelta(content="A"))]),
+        ]
+        provider = self._make_provider(chunks)
+        # No sink registered — must not raise
+        with token_sink(None):
+            async for _ in provider.ainvoke_with_tools_stream(
+                [{"role": "user", "content": "x"}], tools=None,
+                temperature=0.1, max_tokens=100,
+            ):
+                pass
+
+    async def test_async_sink_is_awaited(self):
+        from rag.llm_provider import token_sink
+        chunks = [
+            _FakeChatCompletionChunk([_FakeChoice(_FakeDelta(content="A"))]),
+        ]
+        provider = self._make_provider(chunks)
+        captured: list[str] = []
+
+        async def async_sink(delta: str) -> None:
+            captured.append(delta)
+
+        with token_sink(async_sink):
+            async for _ in provider.ainvoke_with_tools_stream(
+                [{"role": "user", "content": "x"}], tools=None,
+                temperature=0.1, max_tokens=100,
+            ):
+                pass
+
+        self.assertEqual(captured, ["A"])
+
+
 if __name__ == "__main__":
     unittest.main()
