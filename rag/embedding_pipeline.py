@@ -170,7 +170,13 @@ class QuotaState:
 
     def save(self, payload: dict[str, Any]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        # Atomic write: write to a sibling .tmp file, then rename. This
+        # avoids leaving a half-written JSON on disk if the process
+        # crashes (or is killed) mid-write. Same pattern as
+        # ``EmbeddingCache._save()`` — uniform across the codebase.
+        tmp = self.path.with_suffix(self.path.suffix + ".tmp")
+        tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(self.path)
 
     def quota_used(self) -> int:
         return self.load()["quota_used"]

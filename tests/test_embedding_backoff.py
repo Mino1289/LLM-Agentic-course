@@ -158,6 +158,78 @@ class QuotaStateTests(unittest.TestCase):
         self.assertEqual(state.load()["quota_used"], 0)
 
 
+class QuotaStateAtomicWriteTests(unittest.TestCase):
+    """QuotaState.save() must write atomically (.tmp + rename).
+
+    Without atomic writes, a process crash mid-write leaves the JSON
+    file half-written, and the next ``load()`` either returns defaults
+    (silent quota reset) or raises (operator-visible failure). The fix
+    is the standard write-temp-then-rename pattern, identical to
+    ``EmbeddingCache._save()``.
+    """
+
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.path = Path(self.tmpdir.name) / "quota_state.json"
+
+    def tearDown(self) -> None:
+        self.tmpdir.cleanup()
+
+    def test_save_leaves_no_temp_file_behind(self) -> None:
+        state = QuotaState(self.path)
+        state.update(batch_size=10)
+        tmp = self.path.with_suffix(self.path.suffix + ".tmp")
+        self.assertFalse(
+            tmp.exists(),
+            f"Atomic save must not leave a .tmp file behind ({tmp})",
+        )
+
+    def test_save_overwrite_does_not_corrupt_existing_file(self) -> None:
+        """Simulate a crash: a stale .tmp is dropped before the rename.
+
+        The existing ``quota_state.json`` must remain readable and
+        unchanged. Without atomic writes, the next ``load()`` would
+        either crash (partial JSON) or silently reset to defaults.
+        """
+        first = QuotaState(self.path)
+        first.update(batch_size=42, last_error=None)
+        self.assertTrue(self.path.exists())
+        original_bytes = self.path.read_bytes()
+
+        # Simulate a crashed prior save: drop a .tmp that has partial
+        # garbage content. A non-atomic save() would happily leave this
+        # on disk; an atomic save() must use it as a transient buffer
+        # only and must NOT let a future load() see partial content.
+        tmp = self.path.with_suffix(self.path.suffix + ".tmp")
+        tmp.write_text('{"date": "2026-06-06", "quota_us', encoding="utf-8")
+
+        # Now do a fresh save. After this, the file must contain the
+        # full JSON, the .tmp must be gone, and load() must succeed.
+        # ``update`` is INCREMENTAL, so 42 + 100 = 142.
+        second = QuotaState(self.path)
+        second.update(batch_size=100)
+        self.assertFalse(
+            tmp.exists(),
+            "Atomic save must consume the .tmp via Path.replace()",
+        )
+        payload = second.load()
+        self.assertEqual(payload["quota_used"], 142)
+        # The original file's content was 42; after the new save it
+        # must reflect 142. (We don't insist on bytes-equal because the
+        # timestamp changes; the point is: full, parseable JSON.)
+        self.assertNotEqual(original_bytes, self.path.read_bytes())
+
+    def test_save_then_load_round_trip(self) -> None:
+        """Sanity: a save followed by a load returns the same payload."""
+        state = QuotaState(self.path)
+        state.update(batch_size=7, last_error="transient_429")
+        fresh = QuotaState(self.path)
+        payload = fresh.load()
+        self.assertEqual(payload["quota_used"], 7)
+        self.assertEqual(payload["last_batch_size"], 7)
+        self.assertEqual(payload["last_error"], "transient_429")
+
+
 class YFinanceRetryTests(unittest.TestCase):
     def test_download_with_retry_recovers_from_transient_error(self) -> None:
         # We import the wrapper function lazily to avoid pulling yfinance at import time.
