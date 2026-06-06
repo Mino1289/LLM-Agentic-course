@@ -2,9 +2,12 @@
 - `run()` (sync, backwards compat) delegates to `asyncio.run(arun())`
 - `arun()` is an async method that calls `graph.ainvoke(initial_state)`
 - `astream()` is an async generator that yields events from
-  `graph.astream_events(initial_state, version="v2")`
+  `graph.astream_events(initial_state, version="v2")`, including:
+  * `on_llm_token` events (one per LLM token, renamed from on_chat_model_stream)
+  * `on_graph_end` event (final event with the complete GraphState)
 
-These tests are RED at G3 (no arun/astream yet). They turn GREEN after G4.
+These tests were RED at G3 (no arun/astream). They turn GREEN after G4.
+H3 adds the on_llm_token / on_graph_end semantics — RED until H4.
 """
 
 import asyncio
@@ -126,6 +129,94 @@ class AsyncAPIBehaviorTests(unittest.IsolatedAsyncioTestCase):
             # We're already in an async context (IsolatedAsyncioTestCase)
             agent.run("from-async")
         self.assertIn("arun", str(ctx.exception).lower())
+
+
+class AStreamTokenEventsTests(unittest.IsolatedAsyncioTestCase):
+    """Verify astream yields on_llm_token and on_graph_end events."""
+
+    def _make_agent_with_astream_events_mock(self, raw_events: list[dict]):
+        """Build an agent whose graph.astream_events yields the given raw events
+        (already in the LangGraph astream_events schema, NOT yet transformed
+        by our astream() wrapper)."""
+        from rag.langgraph_flow import FinanceLangGraphAgent
+        agent = FinanceLangGraphAgent.__new__(FinanceLangGraphAgent)
+
+        async def fake_astream_events(state, version=None):
+            for ev in raw_events:
+                yield ev
+
+        mock_graph = unittest.mock.MagicMock()
+        mock_graph.astream_events = fake_astream_events
+        agent.graph = mock_graph
+        return agent
+
+    async def test_astream_yields_on_llm_token_for_each_token(self):
+        # LangGraph emits on_chat_model_stream with chunk.content being the delta.
+        # Our astream() wrapper must rename it to on_llm_token.
+        class _FakeChunk:
+            def __init__(self, content):
+                self.content = content
+        raw_events = [
+            {"event": "on_chain_start", "name": "agent_node", "data": {}},
+            {"event": "on_chat_model_stream", "data": {"chunk": _FakeChunk("Hello ")}},
+            {"event": "on_chat_model_stream", "data": {"chunk": _FakeChunk("world")}},
+            {"event": "on_chat_model_stream", "data": {"chunk": _FakeChunk("!")}},
+            {"event": "on_chain_end", "name": "agent_node", "data": {"output": {"answer": "Hello world!"}}},
+            {"event": "on_chain_end", "name": "LangGraph", "data": {"output": {"answer": "Hello world!", "tool_events": []}}},
+        ]
+        agent = self._make_agent_with_astream_events_mock(raw_events)
+        tokens = []
+        async for event in agent.astream("test"):
+            if event.get("event") == "on_llm_token":
+                tokens.append(event["token"])
+        self.assertEqual(
+            "".join(tokens), "Hello world!",
+            f"astream must yield on_llm_token for each token; got {tokens}",
+        )
+
+    async def test_astream_yields_on_graph_end_with_full_state(self):
+        # astream() must emit a final on_graph_end event with the state
+        # accumulated from the last on_chain_end output.
+        final_state = {
+            "conversation_id": "x",
+            "answer": "Réponse finale",
+            "tool_events": [{"tool": "market_price_tool", "status": "completed"}],
+            "final_chunks": ["chunk1"],
+            "final_metadatas": [{"ticker": "NVDA"}],
+            "stats": {"chunks_used": 1},
+        }
+        raw_events = [
+            {"event": "on_chain_start", "name": "agent_node", "data": {}},
+            {"event": "on_chain_end", "name": "gc_node", "data": {"output": final_state}},
+        ]
+        agent = self._make_agent_with_astream_events_mock(raw_events)
+        captured = []
+        async for event in agent.astream("test"):
+            if event.get("event") == "on_graph_end":
+                captured.append(event["state"])
+        self.assertEqual(len(captured), 1, "astream must yield exactly one on_graph_end event")
+        self.assertEqual(captured[0]["answer"], "Réponse finale")
+
+    async def test_astream_final_state_has_tool_events(self):
+        # The final state must contain tool_events (no need to call arun again).
+        final_state = {
+            "answer": "ok",
+            "tool_events": [
+                {"tool": "sec_filings_rag_tool", "status": "completed", "args_summary": "x"},
+                {"tool": "market_price_tool", "status": "completed", "args_summary": "y"},
+            ],
+        }
+        raw_events = [
+            {"event": "on_chain_end", "name": "gc_node", "data": {"output": final_state}},
+        ]
+        agent = self._make_agent_with_astream_events_mock(raw_events)
+        final = None
+        async for event in agent.astream("test"):
+            if event.get("event") == "on_graph_end":
+                final = event["state"]
+        self.assertIsNotNone(final)
+        self.assertIn("tool_events", final)
+        self.assertEqual(len(final["tool_events"]), 2)
 
 
 if __name__ == "__main__":
