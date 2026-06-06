@@ -28,6 +28,7 @@ from rag.llm_provider import (
     _parse_openai_tool_calls,
 )
 from rag.nodes.agent_nodes import agent_node, tools_node
+from rag.tool_schemas import ExportReportArgs, SimulatePortfolioArgs
 from rag.tools import (
     _normalize_doc_types,
     run_export_investment_report,
@@ -349,7 +350,7 @@ class ConfigurationTests(unittest.TestCase):
             from rag import tools as tools_module
 
             tools_module.REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-            result = run_export_investment_report("Test Report", "## Section\nContent", fmt="md")
+            result = run_export_investment_report(ExportReportArgs(title="Test Report", content="## Section\nContent", format="md"))
             path = Path(result["path"])
             self.assertTrue(path.is_file())
             self.assertIn("# Test Report", path.read_text(encoding="utf-8"))
@@ -418,6 +419,7 @@ class IndexSynchronizationTests(unittest.TestCase):
 
 class AgentToolsTests(unittest.TestCase):
     def test_validate_claims_supported_and_unsupported(self):
+        from rag.tool_schemas import ValidateClaimsArgs
         from rag.tools import run_validate_claims
 
         chunks = [
@@ -440,13 +442,15 @@ class AgentToolsTests(unittest.TestCase):
         agent.rag.provider.generate.return_value = canned
 
         result = run_validate_claims(
+            args=ValidateClaimsArgs(
+                claims=[
+                    "MSFT supply chain risk",
+                    "The company operates a nuclear fusion reactor on Mars",
+                ],
+                chunks=chunks,
+                metadatas=metadatas,
+            ),
             agent=agent,
-            claims=[
-                "MSFT supply chain risk",
-                "The company operates a nuclear fusion reactor on Mars",
-            ],
-            chunks=chunks,
-            metadatas=metadatas,
         )
         statuses = {v["status"] for v in result["validations"]}
         self.assertIn("supported", statuses)
@@ -454,23 +458,27 @@ class AgentToolsTests(unittest.TestCase):
         self.assertEqual(result["stats"]["validate_nli_used"], True)
 
     def test_validate_claims_requires_rag_chunks(self):
+        from rag.tool_schemas import ValidateClaimsArgs
         from rag.tools import run_validate_claims
 
         agent = SimpleNamespace(rag=SimpleNamespace(provider=MagicMock()))
-        result = run_validate_claims(agent=agent, claims=["test claim"], chunks=[], metadatas=[])
+        result = run_validate_claims(
+            args=ValidateClaimsArgs(claims=["test claim"], chunks=[], metadatas=[]),
+            agent=agent,
+        )
         self.assertIn("sec_filings_rag_tool", result["text"])
         agent.rag.provider.generate.assert_not_called()
         self.assertEqual(result["stats"]["validate_nli_used"], False)
 
     def test_simulate_portfolio_rejects_invalid_weights(self):
-        bad_sum = run_simulate_portfolio({"MSFT": 40, "NVDA": 40})
+        bad_sum = run_simulate_portfolio(SimulatePortfolioArgs(allocations={"MSFT": 40, "NVDA": 40}))
         self.assertEqual(bad_sum.get("error"), "invalid_weights")
 
-        bad_ticker = run_simulate_portfolio({"AAPL": 100})
+        bad_ticker = run_simulate_portfolio(SimulatePortfolioArgs(allocations={"AAPL": 100}))
         self.assertEqual(bad_ticker.get("error"), "invalid_tickers")
 
     def test_simulate_portfolio_valid_allocation(self):
-        result = run_simulate_portfolio({"MSFT": 50, "NVDA": 50}, notional_usd=10_000)
+        result = run_simulate_portfolio(SimulatePortfolioArgs(allocations={"MSFT": 50, "NVDA": 50}, notional_usd=10_000))
         self.assertEqual(len(result["positions"]), 2)
         self.assertAlmostEqual(sum(p["notional_usd"] for p in result["positions"]), 10_000, places=0)
 
@@ -542,6 +550,7 @@ class ValidateClaimsNLITests(unittest.TestCase):
         return SimpleNamespace(rag=rag)
 
     def test_validate_uses_nli_path(self):
+        from rag.tool_schemas import ValidateClaimsArgs
         from rag.tools import run_validate_claims
 
         agent = self._make_agent(
@@ -554,10 +563,12 @@ class ValidateClaimsNLITests(unittest.TestCase):
         )
 
         result = run_validate_claims(
+            args=ValidateClaimsArgs(
+                claims=["MSFT supply chain risk", "Mars reactor"],
+                chunks=self.CHUNKS,
+                metadatas=self.METADATAS,
+            ),
             agent=agent,
-            claims=["MSFT supply chain risk", "Mars reactor"],
-            chunks=self.CHUNKS,
-            metadatas=self.METADATAS,
         )
 
         agent.rag.provider.generate.assert_called_once()
@@ -578,14 +589,17 @@ class ValidateClaimsNLITests(unittest.TestCase):
             self.assertIn("reasoning", v)
 
     def test_validate_fallback_on_invalid_json(self):
+        from rag.tool_schemas import ValidateClaimsArgs
         from rag.tools import run_validate_claims
 
         agent = self._make_agent("not valid json at all")
         result = run_validate_claims(
+            args=ValidateClaimsArgs(
+                claims=["claim A", "claim B"],
+                chunks=self.CHUNKS,
+                metadatas=self.METADATAS,
+            ),
             agent=agent,
-            claims=["claim A", "claim B"],
-            chunks=self.CHUNKS,
-            metadatas=self.METADATAS,
         )
 
         self.assertEqual(len(result["validations"]), 2)
@@ -595,14 +609,13 @@ class ValidateClaimsNLITests(unittest.TestCase):
         self.assertEqual(result["stats"]["validate_nli_used"], True)
 
     def test_validate_nli_skipped_when_chunks_empty(self):
+        from rag.tool_schemas import ValidateClaimsArgs
         from rag.tools import run_validate_claims
 
         agent = self._make_agent("")
         result = run_validate_claims(
+            args=ValidateClaimsArgs(claims=["any claim"], chunks=[], metadatas=[]),
             agent=agent,
-            claims=["any claim"],
-            chunks=[],
-            metadatas=[],
         )
         agent.rag.provider.generate.assert_not_called()
         self.assertIn("sec_filings_rag_tool", result["text"])
