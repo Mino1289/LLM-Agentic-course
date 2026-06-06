@@ -108,5 +108,32 @@ class SecTickerFilterTests(unittest.TestCase):
         self.assertEqual(len(SKIPPED_TICKERS), 5)
 
 
+class SecFormCoverageTests(unittest.TestCase):
+    """Foreign private issuers file 20-F (annual) and 6-K (interim) instead of 10-K/10-Q."""
+
+    def test_get_filings_accepts_us_forms(self):
+        from rag.download_SEC_reports import get_filings
+
+        filings = get_filings("NVDA", "0001045810", 2024, 2026)
+        self.assertGreater(len(filings), 0)
+        forms = {f["form"] for f in filings}
+        # NVDA files 10-K, 10-Q, 8-K only
+        self.assertTrue(forms.issubset({"10-K", "10-Q", "8-K"}))
+
+    def test_get_filings_includes_foreign_issuer_forms(self):
+        from rag.download_SEC_reports import get_filings
+
+        # ASML is a Dutch foreign private issuer (CIK 0000937966)
+        filings = get_filings("ASML", "0000937966", 2024, 2026)
+        self.assertGreater(len(filings), 0, "ASML should have foreign-issuer filings (20-F/6-K)")
+        forms = {f["form"] for f in filings}
+        # Must include at least one 20-F (annual) and 6-K (interim)
+        self.assertIn("20-F", forms)
+        self.assertIn("6-K", forms)
+        # Must NOT include 10-K/10-Q (those are US issuers only)
+        self.assertNotIn("10-K", forms)
+        self.assertNotIn("10-Q", forms)
+
+
 if __name__ == "__main__":
     unittest.main()

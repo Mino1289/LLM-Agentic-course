@@ -89,29 +89,34 @@ def get_cik_mapping():
     return mapping
 
 def get_filings(ticker, cik, min_year, max_year):
-    """Cherche les formulaires 8-K (Item 2.02), 10-K et 10-Q de la plage demandée."""
+    """Cherche les formulaires SEC de la plage demandée.
+
+    Pour les émetteurs US (10-K, 10-Q, 8-K avec item 2.02).
+    Pour les foreign private issuers (20-F annuel, 6-K interim). Les 6-K
+    sont des rapports de résultats étrangers, on les inclut tous.
+    """
     print(f"\nRecherche des rapports pour {ticker} (CIK: {cik})...")
     url = f"https://data.sec.gov/submissions/CIK{cik}.json"
-    
+
     response = requests.get(url, headers=HEADERS)
     if response.status_code != 200:
         print(f"Impossible de récupérer les données pour {ticker}")
         return []
-    
+
     rate_limit_sleep()
     data = response.json()
     recent_filings = data.get("filings", {}).get("recent", {})
-    
+
     if not recent_filings:
         return []
-    
+
     filings_found = []
     # Parcourt les documents soumis
     for i in range(len(recent_filings["form"])):
         form = recent_filings["form"][i]
         filing_date_str = recent_filings["filingDate"][i]
         filing_year = int(filing_date_str.split("-")[0])
-        
+
         if not (min_year <= filing_year <= max_year):
             continue
 
@@ -122,24 +127,27 @@ def get_filings(ticker, cik, min_year, max_year):
             items_raw = filing_items[i] if i < len(filing_items) else ""
             items = items_raw if isinstance(items_raw, list) else str(items_raw).split(",")
             items = [item.strip() for item in items]
-            
+
             # 2.02 = Communiqué de presse sur les résultats financiers
             if "2.02" in items:
                 is_wanted = True
         elif form in {"10-K", "10-Q"}:
             is_wanted = True
-            
+        elif form in {"20-F", "6-K"}:
+            # Foreign private issuers : 20-F = rapport annuel, 6-K = interim.
+            is_wanted = True
+
         if is_wanted:
             accession_num = recent_filings["accessionNumber"][i]
             accession_clean = accession_num.replace("-", "")
             primary_doc = recent_filings["primaryDocument"][i]
-            
+
             # Reconstruction de l'URL vers la page d'index du dépôt
             index_url = f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{accession_clean}/{accession_num}-index.htm"
-            
+
             # Reconstruction du lien direct vers le corps principal
             doc_url = f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{accession_clean}/{primary_doc}"
-            
+
             filings_found.append({
                 "ticker": ticker,
                 "form": form,
@@ -148,7 +156,7 @@ def get_filings(ticker, cik, min_year, max_year):
                 "indexUrl": index_url,
                 "documentUrl": doc_url
             })
-                
+
     return filings_found
 
 def download_filing(ticker, form, date, url):
