@@ -522,13 +522,15 @@ class AgentToolsTests(unittest.TestCase):
             "stats": {},
         }
 
-        with patch("rag.nodes.agent_nodes.execute_tool") as mock_execute:
-            mock_execute.return_value = {
-                "text": "[1] ticker=MSFT excerpt",
-                "final_chunks": ["risk factors supply chain"],
-                "final_metadatas": [{"ticker": "MSFT", "year": "2024", "file_type": "10-K"}],
-                "stats": {"chunks_used": 1},
-            }
+        with patch("rag.tools.run_sec_filings_rag") as mock_rag:
+            async def fake_rag(args, *, agent):
+                return {
+                    "text": "[1] ticker=MSFT excerpt",
+                    "final_chunks": ["risk factors supply chain"],
+                    "final_metadatas": [{"ticker": "MSFT", "year": "2024", "file_type": "10-K"}],
+                    "stats": {"chunks_used": 1},
+                }
+            mock_rag.side_effect = fake_rag
             from rag.llm_provider import LLMStreamChunk
 
             # First ainvoke_with_tools_stream call → tool_call (sec_filings_rag_tool)
@@ -739,10 +741,10 @@ class AgentToolsTests(unittest.TestCase):
             "stats": {},
         }
 
-        with patch("rag.nodes.agent_nodes.execute_tool") as mock_execute:
-            def execute_side_effect(name, args, agent=None, state=None):
+        with patch("rag.tools.run_sec_filings_rag") as mock_rag:
+            async def rag_side_effect(args, *, agent):
                 # First call (NVDA) succeeds; second call (AMD) raises
-                # to simulate yfinance/retrieval error.
+                # to simulate retrieval error.
                 if args.tickers == ["NVDA"]:
                     return {
                         "text": "[1] NVDA excerpt",
@@ -752,7 +754,7 @@ class AgentToolsTests(unittest.TestCase):
                     }
                 raise RuntimeError("simulated retrieval failure for AMD")
 
-            mock_execute.side_effect = execute_side_effect
+            mock_rag.side_effect = rag_side_effect
 
             after_agent = asyncio.run(agent_node(agent, state))
             pending = after_agent.get("pending_tool_calls") or []
@@ -797,15 +799,15 @@ class AgentToolsTests(unittest.TestCase):
             self.assertIn("failed", statuses)
 
     def test_run_sec_filings_rag_awaits_multi_retrieve_node(self):
-        """run_sec_filings_rag is sync (called from tools_node via
-        asyncio.to_thread). It calls multi_retrieve_node (async) and
-        decompose_query (async) — both must be driven to completion
-        via asyncio.run, otherwise the coroutine is never awaited and
-        rag_state.update(coroutine) raises TypeError. The bug surfaces
-        in the UI as "0 chunks" + the LLM apologizing for a 'technical
-        problem accessing documents' (it actually received a
-        'coroutine is not iterable' error message).
+        """run_sec_filings_rag is async (called from tools_node via await).
+        It calls multi_retrieve_node (async) and decompose_query (async) —
+        both must be driven to completion on the agent's event loop,
+        otherwise the coroutine is never awaited and rag_state.update raises
+        TypeError. The bug surfaces in the UI as "0 chunks" + the LLM
+        apologizing for a 'technical problem accessing documents' (it
+        actually received a 'coroutine is not iterable' error message).
         """
+        import asyncio
         from rag.tools import run_sec_filings_rag
         from rag.tool_schemas import SecFilingsRAGArgs
 
@@ -847,14 +849,14 @@ class AgentToolsTests(unittest.TestCase):
                 years=["2024"],
                 doc_types=["10-K"],
             )
-            result = run_sec_filings_rag(args, agent=agent)
+            result = asyncio.run(run_sec_filings_rag(args, agent=agent))
 
         # Must return chunks (the bug returned 0 because the coroutine
         # was never awaited, causing rag_state.update to fail).
         self.assertEqual(
             len(result.get("final_chunks", [])), 2,
             f"run_sec_filings_rag must drive multi_retrieve_node to "
-            f"completion (use asyncio.run). Got: {result}",
+            f"completion via await. Got: {result}",
         )
         self.assertEqual(
             result.get("stats", {}).get("chunks_used"), 2,

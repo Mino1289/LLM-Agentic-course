@@ -347,11 +347,19 @@ async def tools_node(agent: Any, state: GraphState) -> GraphState:
             )
             continue
 
-        # Execute the tool (blocking I/O → offload to thread).
+        # Execute the tool.
+        # - sec_filings_rag_tool is async and must share the agent's event
+        #   loop (so AsyncOpenAI httpx pool is consistent with agent_node).
+        # - The 4 other tools are sync I/O — offload to a worker thread.
         try:
-            result = await asyncio.to_thread(
-                execute_tool, tc.name, full_args, agent=agent, state=state,
-            )
+            if tc.name == "sec_filings_rag_tool":
+                from rag.tools import run_sec_filings_rag
+
+                result = await run_sec_filings_rag(full_args, agent=agent)
+            else:
+                result = await asyncio.to_thread(
+                    execute_tool, tc.name, full_args, agent=agent, state=state,
+                )
         except Exception as e:
             event["status"] = "failed"
             event["error"] = f"execution: {e}"

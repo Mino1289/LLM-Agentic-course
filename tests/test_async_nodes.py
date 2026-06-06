@@ -134,26 +134,38 @@ class AsyncNodeThreadWrappingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["answer"], "Réponse.")
         self.assertFalse(result.get("tool_calls_pending"))
 
-    async def test_tools_node_wraps_execute_tool_in_to_thread(self):
+    async def test_tools_node_wraps_sync_execute_tool_in_to_thread(self):
         from rag.nodes import agent_nodes
         from rag.nodes.agent_nodes import tools_node
         from rag.tools import execute_tool
         from rag.llm_provider import ToolCall
+        # ... spy on asyncio.to_thread to ensure it is used for execute_tool
         wrapped: list = []
-        spy = await self._spy_to_thread(wrapped, exc=asyncio.CancelledError())
-
+        async def spy(*args, **kwargs):
+            wrapped.append(args[0])
+            # Return a fake result to short-circuit the tool execution.
+            return {
+                "text": "[1] mock",
+                "final_chunks": ["mock"],
+                "final_metadatas": [{"ticker": "NVDA"}],
+                "stats": {"chunks_used": 1},
+            }
+        # Build a minimal state with a single pending market_price_tool call
+        # (sync tool — must go through asyncio.to_thread).
         state = {
-            "conversation_id": "x",
-            "query": "test",
-            "normalized_query": "test",
-            "messages": [],
+            "pending_tool_calls": [
+                ToolCall(id="1", name="market_price_tool", arguments='{"tickers": ["NVDA"], "start_date": "2024-01-01", "end_date": "2024-12-31"}'),
+            ],
+            "tool_calls_pending": True,
+            "stats": {},
+            "final_chunks": [],
+            "final_metadatas": [],
+            "price_context": "",
+            "report_artifacts": [],
             "tool_events": [],
             "agent_iterations": 0,
             "lc_messages": [],
             "llm_response": {},
-            "pending_tool_calls": [
-                ToolCall(id="1", name="sec_filings_rag_tool", arguments='{"query": "risk"}'),
-            ],
             "retrieval_chunks": [],
             "retrieval_metadatas": [],
         }
@@ -166,7 +178,7 @@ class AsyncNodeThreadWrappingTests(unittest.IsolatedAsyncioTestCase):
                 pass
         self.assertIn(
             execute_tool, wrapped,
-            "tools_node must wrap execute_tool in asyncio.to_thread",
+            "tools_node must wrap execute_tool in asyncio.to_thread for sync tools",
         )
 
     async def test_memory_read_node_wraps_memory_store_in_to_thread(self):

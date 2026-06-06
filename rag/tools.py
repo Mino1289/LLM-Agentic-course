@@ -146,11 +146,19 @@ def format_rag_excerpts(chunks: list[str], metadatas: list[dict[str, Any]]) -> s
     return toon_encode({"excerpts": rows})
 
 
-def run_sec_filings_rag(
+async def run_sec_filings_rag(
     args: SecFilingsRAGArgs,
     *,
     agent: Any,
 ) -> dict[str, Any]:
+    """Run the SEC RAG pipeline for the user query.
+
+    This is a native async function so it can share the agent's event loop
+    with the LLM calls in ``agent_node`` and ``ainvoke_with_tools_stream``.
+    The previous sync + ``asyncio.run`` pattern created a second event loop
+    in a worker thread, which collided with the ``AsyncOpenAI`` httpx
+    connection pool — manifesting as a 2-minute hang in the Streamlit UI.
+    """
     normalized_tickers = _normalize_tickers(args.tickers)
     normalized_years = _normalize_years(args.years)
     normalized_doc_types = _normalize_doc_types(args.doc_types)
@@ -165,10 +173,8 @@ def run_sec_filings_rag(
     if metadata_filter.get("ticker") and metadata_filter.get("year"):
         decomposed = [query]
     else:
-        # run_sec_filings_rag is sync (called from tools_node via
-        # asyncio.to_thread). It runs in a worker thread without a running
-        # event loop, so we use asyncio.run() to drive the coroutine.
-        decomposed = asyncio.run(decompose_query(agent, query))
+        # Native await on the agent's event loop.
+        decomposed = await decompose_query(agent, query)
 
     rag_state: dict[str, Any] = {
         "normalized_query": query,
@@ -178,8 +184,7 @@ def run_sec_filings_rag(
         "decomposed_queries": decomposed,
         "stats": {},
     }
-    # Same pattern: drive the async multi_retrieve_node to completion.
-    retrieve_result = asyncio.run(multi_retrieve_node(agent, rag_state))
+    retrieve_result = await multi_retrieve_node(agent, rag_state)
     rag_state.update(retrieve_result)
 
     candidates = rag_state.get("candidate_indices", [])
@@ -191,7 +196,7 @@ def run_sec_filings_rag(
             "stats": rag_state.get("stats", {}),
         }
 
-    top_indices = asyncio.run(_balanced_rerank_indices(agent, rag_state, candidates))
+    top_indices = await _balanced_rerank_indices(agent, rag_state, candidates)
     final_chunks = [agent.rag.documents[idx] for idx in top_indices]
     final_metadatas = [agent.rag.doc_metadata[idx] for idx in top_indices]
     stats = rag_state.get("stats", {})
