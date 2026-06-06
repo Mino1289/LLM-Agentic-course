@@ -332,20 +332,53 @@ class LLMProvider:
         self._gemini_client = None
         self.async_client: Optional[AsyncOpenAI] = None
 
+        # Request timeout + max retries for all OpenAI-compatible clients.
+        # Default 30s prevents indefinite hangs when the upstream is slow
+        # (e.g. GitHub Models rate-limited or cold-starting). Override via
+        # OPENAI_REQUEST_TIMEOUT / OPENAI_MAX_RETRIES env vars.
+        self.request_timeout = self._parse_request_timeout()
+        self.max_retries = self._parse_max_retries()
+
         embed_kwargs = {"api_key": self.config.embedding_api_key or self.config.api_key}
         if self.config.embedding_base_url:
             embed_kwargs["base_url"] = self.config.embedding_base_url
+        embed_kwargs["timeout"] = self.request_timeout
+        embed_kwargs["max_retries"] = self.max_retries
         self.embedding_client = OpenAI(**embed_kwargs)
 
         if self.config.provider in {"openai", "github_models"}:
             client_kwargs = {"api_key": self.config.api_key}
             if self.config.base_url:
                 client_kwargs["base_url"] = self.config.base_url
+            client_kwargs["timeout"] = self.request_timeout
+            client_kwargs["max_retries"] = self.max_retries
             self.client = OpenAI(**client_kwargs)
         else:
             self.client = None
 
         self._init_async_client()
+
+    @staticmethod
+    def _parse_request_timeout() -> float:
+        raw = os.getenv("OPENAI_REQUEST_TIMEOUT", "30.0")
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            return 30.0
+        if value <= 0:
+            return 30.0
+        return value
+
+    @staticmethod
+    def _parse_max_retries() -> int:
+        raw = os.getenv("OPENAI_MAX_RETRIES", "2")
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            return 2
+        if value < 0:
+            return 2
+        return value
 
     def _init_async_client(self) -> None:
         """Initialize the async OpenAI client (openai/github_models only).
@@ -356,6 +389,11 @@ class LLMProvider:
             client_kwargs = {"api_key": self.config.api_key}
             if self.config.base_url:
                 client_kwargs["base_url"] = self.config.base_url
+            # request_timeout / max_retries are normally set in __init__,
+            # but some tests construct a provider via __new__ and call
+            # _init_async_client directly — fall back to defaults.
+            client_kwargs["timeout"] = getattr(self, "request_timeout", 30.0)
+            client_kwargs["max_retries"] = getattr(self, "max_retries", 2)
             self.async_client = AsyncOpenAI(**client_kwargs)
         else:
             self.async_client = None
