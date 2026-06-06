@@ -5,12 +5,22 @@ import re
 from datetime import UTC, datetime
 from typing import Any
 
+from pydantic import BaseModel
+
 from rag.config import TRACKED_TICKERS
 from rag.nodes.decompose_node import decompose_query
 from rag.nodes.rerank_node import _balanced_rerank_indices, _ticker_counts
 from rag.nodes.retrieval_node import multi_retrieve_node
 from rag.nodes.tool_nodes import fetch_price_context
 from rag.paths import REPORTS_DIR, ensure_dir
+from rag.tool_schemas import (
+    ExportReportArgs,
+    MarketPriceArgs,
+    SecFilingsRAGArgs,
+    SimulatePortfolioArgs,
+    ValidateClaimsArgs,
+    ValidateClaimsLLMArgs,
+)
 
 ALLOWED_DOC_TYPES = ["10-K", "10-Q", "8-K", "EARNINGS_CALL"]
 
@@ -118,15 +128,14 @@ def format_rag_excerpts(chunks: list[str], metadatas: list[dict[str, Any]]) -> s
 
 
 def run_sec_filings_rag(
+    args: SecFilingsRAGArgs,
+    *,
     agent: Any,
-    query: str,
-    tickers: list[str] | None = None,
-    years: list[str] | None = None,
-    doc_types: list[str] | None = None,
 ) -> dict[str, Any]:
-    normalized_tickers = _normalize_tickers(tickers)
-    normalized_years = _normalize_years(years)
-    normalized_doc_types = _normalize_doc_types(doc_types)
+    normalized_tickers = _normalize_tickers(args.tickers)
+    normalized_years = _normalize_years(args.years)
+    normalized_doc_types = _normalize_doc_types(args.doc_types)
+    query = args.query
 
     metadata_filter: dict[str, str] = {}
     if len(normalized_years) == 1:
@@ -179,12 +188,13 @@ def run_sec_filings_rag(
 
 
 def run_market_price_tool(
+    args: MarketPriceArgs,
+    *,
     agent: Any,
-    tickers: list[str],
-    start_date: str,
-    end_date: str,
 ) -> dict[str, Any]:
-    normalized = _normalize_tickers(tickers)
+    normalized = _normalize_tickers(args.tickers)
+    start_date = args.start_date
+    end_date = args.end_date
     if not normalized:
         return {"text": "No valid tickers provided. Use NVDA, AMD, or MSFT.", "price_context": ""}
     summary = fetch_price_context(agent, normalized, start_date, end_date)
@@ -256,11 +266,13 @@ def _render_validation_text(validations: list[dict[str, Any]]) -> str:
 
 
 def run_validate_claims(
+    args: ValidateClaimsArgs,
+    *,
     agent: Any,
-    claims: list[str],
-    chunks: list[str],
-    metadatas: list[dict[str, Any]],
 ) -> dict[str, Any]:
+    claims = args.claims
+    chunks = args.chunks
+    metadatas = args.metadatas
     if not chunks:
         return {
             "text": (
@@ -381,10 +393,10 @@ def _normalize_allocations(allocations: Any) -> dict[str, float]:
 
 
 def run_simulate_portfolio(
-    allocations: dict[str, float],
-    notional_usd: float = 100_000,
+    args: SimulatePortfolioArgs,
 ) -> dict[str, Any]:
-    normalized = _normalize_allocations(allocations)
+    normalized = _normalize_allocations(args.allocations)
+    notional_usd = args.notional_usd
     if not normalized:
         return {
             "text": "Allocations invalides. Utilisez NVDA, AMD ou MSFT avec des poids >= 0.",
@@ -439,8 +451,11 @@ def run_simulate_portfolio(
     }
 
 
-def run_export_investment_report(title: str, content: str, fmt: str = "md") -> dict[str, Any]:
+def run_export_investment_report(args: ExportReportArgs) -> dict[str, Any]:
     ensure_dir(REPORTS_DIR)
+    title = args.title
+    content = args.content
+    fmt = args.format
     safe_title = re.sub(r"[^\w\-]+", "_", title.strip())[:80] or "investment_report"
     timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     extension = "md" if fmt.lower() != "pdf" else "pdf"
@@ -545,17 +560,7 @@ def get_tool_definitions() -> list[dict[str, Any]]:
             "function": {
                 "name": "validate_claims_tool",
                 "description": VALIDATE_CLAIMS_DESCRIPTION,
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "claims": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Factual claims to verify against current RAG excerpts.",
-                        },
-                    },
-                    "required": ["claims"],
-                },
+                "parameters": ValidateClaimsLLMArgs.model_json_schema(),
             },
         },
         {
@@ -584,56 +589,29 @@ def get_tool_definitions() -> list[dict[str, Any]]:
 
 
 def execute_tool(
-    agent: Any,
     name: str,
-    arguments: str | dict[str, Any],
+    args: BaseModel,
     *,
-    rag_context: dict[str, Any] | None = None,
+    agent: Any,
+    state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    if isinstance(arguments, str):
-        try:
-            args = json.loads(arguments or "{}")
-        except json.JSONDecodeError:
-            args = {}
-    else:
-        args = arguments
-
     if name == "sec_filings_rag_tool":
-        return run_sec_filings_rag(
-            agent,
-            query=str(args.get("query", "")),
-            tickers=args.get("tickers"),
-            years=args.get("years"),
-            doc_types=args.get("doc_types"),
-        )
+        return run_sec_filings_rag(args, agent=agent)
     if name == "market_price_tool":
-        return run_market_price_tool(
-            agent,
-            tickers=args.get("tickers") or [],
-            start_date=str(args.get("start_date", "")),
-            end_date=str(args.get("end_date", "")),
-        )
+        return run_market_price_tool(args, agent=agent)
     if name == "export_investment_report_tool":
-        return run_export_investment_report(
-            title=str(args.get("title", "Investment Report")),
-            content=str(args.get("content", "")),
-            fmt=str(args.get("format", "md")),
-        )
+        return run_export_investment_report(args)
     if name == "validate_claims_tool":
-        ctx = rag_context or {}
-        raw_claims = args.get("claims") or []
-        if isinstance(raw_claims, str):
-            raw_claims = [raw_claims]
-        claims = [str(c) for c in raw_claims if str(c).strip()]
-        return run_validate_claims(
-            agent=agent,
-            claims=claims,
-            chunks=list(ctx.get("final_chunks") or []),
-            metadatas=list(ctx.get("final_metadatas") or []),
-        )
+        # Resolve injected args from state (chunks + metadatas) if needed.
+        if not isinstance(args, ValidateClaimsArgs):
+            full = ValidateClaimsArgs(
+                claims=args.claims,
+                chunks=list((state or {}).get("final_chunks") or []),
+                metadatas=list((state or {}).get("final_metadatas") or []),
+            )
+        else:
+            full = args
+        return run_validate_claims(full, agent=agent)
     if name == "simulate_portfolio_tool":
-        return run_simulate_portfolio(
-            allocations=args.get("allocations") or {},
-            notional_usd=float(args.get("notional_usd", 100_000)),
-        )
+        return run_simulate_portfolio(args)
     return {"text": f"Unknown tool: {name}"}
