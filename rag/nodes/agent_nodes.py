@@ -42,6 +42,12 @@ For complex tasks (e.g. compare MSFT vs NVDA with 2024 SEC risks and 6-month per
 5) Synthesize in French
 6) Call export_investment_report_tool with the full report body when saving is requested
 
+Payload format note: some tool responses and the conversation memory block use
+TOON (Token-Oriented Object Notation) instead of JSON. TOON tabular arrays look
+like `name[N]{col1,col2,...}:\n  val1,val2\n  ...` where N is the row count and
+each row is a comma-separated record matching the column order. Treat TOON
+input the same as JSON — read fields by column name, not by position.
+
 Respond in French unless the user writes in English. Do not invent facts not supported by tool outputs.
 """
 

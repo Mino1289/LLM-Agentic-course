@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import BaseModel
+from toon_format import encode as toon_encode
 
 from rag.config import TRACKED_TICKERS
 from rag.nodes.decompose_node import decompose_query
@@ -113,19 +114,36 @@ def _normalize_years(years: Any) -> list[str]:
 
 
 def format_rag_excerpts(chunks: list[str], metadatas: list[dict[str, Any]]) -> str:
+    """Serialize RAG excerpts as a TOON tabular array for LLM context.
+
+    TOON format (Token-Oriented Object Notation) saves 30-60% tokens vs
+    the legacy "key=value" text format. Output structure:
+        excerpts[N]{i,ticker,year,file_type,section,source,text}:
+          1,NVDA,"2024",10-K,Item_1A,nvda-10-k_2024.htm,"<truncated chunk>"
+          ...
+
+    Chunks are still truncated to 1200 chars (legacy constraint) to keep
+    individual rows manageable. Empty input returns a human-readable
+    fallback string (not a TOON "[0]:" header) so the LLM gets a clear
+    "no results" signal.
+    """
     if not chunks:
         return "No matching SEC or earnings-call excerpts found for the given filters."
-    lines = []
+    rows: list[dict[str, Any]] = []
     for idx, chunk in enumerate(chunks):
         meta = metadatas[idx] if idx < len(metadatas) else {}
-        lines.append(
-            f"[{idx + 1}] ticker={meta.get('ticker', 'UNKNOWN')} "
-            f"year={meta.get('year', 'unknown')} "
-            f"file_type={meta.get('file_type', 'unknown')} "
-            f"section={meta.get('section', 'unknown')} "
-            f"source={meta.get('source', 'unknown')}\n{chunk[:1200]}"
+        rows.append(
+            {
+                "i": idx + 1,
+                "ticker": str(meta.get("ticker", "UNKNOWN")),
+                "year": str(meta.get("year", "unknown")),
+                "file_type": str(meta.get("file_type", "unknown")),
+                "section": str(meta.get("section", "unknown")),
+                "source": str(meta.get("source", "unknown")),
+                "text": chunk[:1200],
+            }
         )
-    return "\n\n---\n\n".join(lines)
+    return toon_encode({"excerpts": rows})
 
 
 def run_sec_filings_rag(
