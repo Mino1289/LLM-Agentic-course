@@ -32,7 +32,7 @@ def extract_metadata_filter(query: str) -> dict[str, str]:
 
 
 @traceable(name="prepare_query_node")
-def prepare_query_node(_agent: Any, state: GraphState) -> GraphState:
+async def prepare_query_node(_agent: Any, state: GraphState) -> GraphState:
     raw = state.get("query", "")
     normalized = re.sub(r"\s+", " ", raw).strip()
     tickers = extract_query_tickers(normalized)

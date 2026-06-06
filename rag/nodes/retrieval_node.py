@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import re
 from typing import Any
 
@@ -88,7 +89,7 @@ def _ticker_specific_query(query: str, ticker: str, all_tickers: list[str]) -> s
     return rewritten
 
 
-def _retrieve_with_fallbacks(
+async def _retrieve_with_fallbacks(
     agent: Any,
     query: str,
     filters_to_try: list[dict[str, str] | None],
@@ -96,7 +97,8 @@ def _retrieve_with_fallbacks(
     scoped_doc_types: set[str],
 ) -> list[int]:
     for candidate_filter in filters_to_try:
-        retrieval = agent.rag.retrieve(
+        retrieval = await asyncio.to_thread(
+            agent.rag.retrieve,
             query,
             search_mode="vector",
             use_reranking=False,
@@ -118,7 +120,7 @@ def _retrieve_with_fallbacks(
 
 
 @traceable(name="multi_retrieve_node")
-def multi_retrieve_node(agent: Any, state: GraphState) -> GraphState:
+async def multi_retrieve_node(agent: Any, state: GraphState) -> GraphState:
     queries = state.get("decomposed_queries") or [state["normalized_query"]]
     metadata_filter = state.get("metadata_filter") or {}
     scoped_ticker_list = _scoped_ticker_list(state)
@@ -158,7 +160,7 @@ def multi_retrieve_node(agent: Any, state: GraphState) -> GraphState:
                         scoped_filter["ticker"] = ticker
                         ticker_filters.append(scoped_filter)
                 ticker_query = _ticker_specific_query(query, ticker, scoped_ticker_list)
-                per_ticker_indices = _retrieve_with_fallbacks(
+                per_ticker_indices = await _retrieve_with_fallbacks(
                     agent,
                     ticker_query,
                     ticker_filters,
@@ -168,7 +170,7 @@ def multi_retrieve_node(agent: Any, state: GraphState) -> GraphState:
                 query_indices.extend(per_ticker_indices[:12])
 
         if not query_indices:
-            query_indices = _retrieve_with_fallbacks(
+            query_indices = await _retrieve_with_fallbacks(
                 agent,
                 query,
                 filters_to_try,
@@ -177,7 +179,8 @@ def multi_retrieve_node(agent: Any, state: GraphState) -> GraphState:
             )
 
         if not query_indices and not scoped_tickers and not scoped_doc_types and not metadata_filter:
-            fallback = agent.rag.retrieve(
+            fallback = await asyncio.to_thread(
+                agent.rag.retrieve,
                 query,
                 search_mode="vector",
                 use_reranking=False,
@@ -189,7 +192,7 @@ def multi_retrieve_node(agent: Any, state: GraphState) -> GraphState:
 
         all_indices.extend(query_indices)
 
-    dedup_indices = agent.rag._deduplicate_indices(all_indices)
+    dedup_indices = await asyncio.to_thread(agent.rag._deduplicate_indices, all_indices)
     stats = state.get("stats", {})
     stats.update(
         {

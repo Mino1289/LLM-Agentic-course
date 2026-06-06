@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from datetime import UTC, datetime
@@ -175,7 +176,7 @@ def route_after_agent(state: GraphState) -> str:
 
 
 @traceable(name="agent_node")
-def agent_node(agent: Any, state: GraphState) -> GraphState:
+async def agent_node(agent: Any, state: GraphState) -> GraphState:
     guard = pre_agent_guard(state)
     if guard:
         return guard
@@ -189,7 +190,8 @@ def agent_node(agent: Any, state: GraphState) -> GraphState:
         }
 
     lc_messages = _build_lc_messages(agent, state)
-    response = agent.rag.provider.invoke_with_tools(
+    response = await asyncio.to_thread(
+        agent.rag.provider.invoke_with_tools,
         lc_messages,
         tools=get_tool_definitions(),
         temperature=0.2,
@@ -237,7 +239,7 @@ def agent_node(agent: Any, state: GraphState) -> GraphState:
 
 
 @traceable(name="tools_node")
-def tools_node(agent: Any, state: GraphState) -> GraphState:
+async def tools_node(agent: Any, state: GraphState) -> GraphState:
     lc_messages = list(state.get("lc_messages") or [])
     pending: list[ToolCall] = state.get("pending_tool_calls") or []
     stats = dict(state.get("stats") or {})
@@ -274,9 +276,11 @@ def tools_node(agent: Any, state: GraphState) -> GraphState:
             event["finished_at"] = _now_utc()
             continue
 
-        # Execute the tool.
+        # Execute the tool (blocking I/O → offload to thread).
         try:
-            result = execute_tool(tc.name, full_args, agent=agent, state=state)
+            result = await asyncio.to_thread(
+                execute_tool, tc.name, full_args, agent=agent, state=state,
+            )
         except Exception as e:
             event["status"] = "failed"
             event["error"] = f"execution: {e}"
@@ -340,7 +344,7 @@ def tools_node(agent: Any, state: GraphState) -> GraphState:
     }
 
 
-def finalize_from_agent_state(state: GraphState) -> GraphState:
+async def finalize_from_agent_state(state: GraphState) -> GraphState:
     """Ensure answer and metadata are present for UI after guard or agent completion."""
     if state.get("answer"):
         return {}

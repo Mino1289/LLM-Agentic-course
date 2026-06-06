@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import unittest
 from pathlib import Path
@@ -123,7 +124,7 @@ class RetrievalTests(unittest.TestCase):
             "stats": {},
         }
 
-        result = multi_retrieve_node(SimpleNamespace(rag=FakeRag()), state)
+        result = asyncio.run(multi_retrieve_node(SimpleNamespace(rag=FakeRag()), state))
 
         self.assertEqual(result["candidate_indices"], [])
 
@@ -163,7 +164,7 @@ class RetrievalTests(unittest.TestCase):
             "stats": {},
         }
 
-        result = multi_retrieve_node(SimpleNamespace(rag=rag), state)
+        result = asyncio.run(multi_retrieve_node(SimpleNamespace(rag=rag), state))
 
         self.assertEqual(result["candidate_indices"], [0, 1])
         nvda_queries = [query for query, ticker in rag.calls if ticker == "NVDA"]
@@ -217,10 +218,10 @@ class PrepareTests(unittest.TestCase):
         self.assertEqual(result, {"ticker": "AMD", "year": "2024"})
 
     def test_comparison_query_keeps_all_tickers_without_single_ticker_filter(self):
-        state = prepare_query_node(
+        state = asyncio.run(prepare_query_node(
             SimpleNamespace(),
             {"query": "Compare MSFT et NVDA sur la croissance recente du chiffre d'affaires."},
-        )
+        ))
 
         self.assertEqual(state["target_tickers"], ["MSFT", "NVDA"])
         self.assertNotIn("ticker", state["metadata_filter"])
@@ -249,7 +250,7 @@ class RerankTests(unittest.TestCase):
             "candidate_indices": [0, 1, 2, 3, 4, 5],
         }
 
-        result = rerank_node(agent, state)
+        result = asyncio.run(rerank_node(agent, state))
 
         self.assertEqual(
             [meta["ticker"] for meta in result["final_metadatas"]],
@@ -329,7 +330,7 @@ class ContextPruneTests(unittest.TestCase):
             "stats": {},
         }
 
-        result = context_prune_node(agent, state)
+        result = asyncio.run(context_prune_node(agent, state))
 
         self.assertEqual(result["final_chunks"], ["keep"])
         self.assertEqual(result["final_metadatas"], [{"source": "keep-meta"}])
@@ -515,15 +516,15 @@ class AgentToolsTests(unittest.TestCase):
                 "final_metadatas": [{"ticker": "MSFT", "year": "2024", "file_type": "10-K"}],
                 "stats": {"chunks_used": 1},
             }
-            after_agent = agent_node(agent, state)
+            after_agent = asyncio.run(agent_node(agent, state))
             self.assertTrue(after_agent.get("tool_calls_pending"))
 
             merged = {**state, **after_agent}
-            after_tools = tools_node(agent, merged)
+            after_tools = asyncio.run(tools_node(agent, merged))
             self.assertFalse(after_tools.get("tool_calls_pending"))
             self.assertTrue(after_tools.get("stats", {}).get("rag_tool_used"))
 
-            final = agent_node(agent, {**merged, **after_tools})
+            final = asyncio.run(agent_node(agent, {**merged, **after_tools}))
             self.assertEqual(final.get("answer"), "Synthèse mock basée sur les outils.")
             self.assertGreaterEqual(len(final.get("tool_events", [])), 1)
             self.assertGreaterEqual(final.get("stats", {}).get("agent_iterations", 0), 2)

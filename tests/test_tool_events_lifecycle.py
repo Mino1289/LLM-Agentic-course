@@ -1,5 +1,6 @@
 """Lifecycle tool_events: running → completed / failed (PRD etape 4 §3.3)."""
 
+import asyncio
 import json
 import unittest
 from datetime import datetime
@@ -38,7 +39,7 @@ class ToolEventLifecycleTests(unittest.TestCase):
 
         with patch("rag.nodes.agent_nodes.execute_tool") as mock_execute:
             mock_execute.return_value = {"text": "ok", "price_context": "ctx"}
-            result = tools_node(agent, state)
+            result = asyncio.run(tools_node(agent, state))
 
         events = result["tool_events"]
         self.assertGreaterEqual(len(events), 1)
@@ -68,7 +69,7 @@ class ToolEventLifecycleTests(unittest.TestCase):
 
         with patch("rag.nodes.agent_nodes.execute_tool") as mock_execute:
             mock_execute.side_effect = RuntimeError("provider down")
-            result = tools_node(agent, state)
+            result = asyncio.run(tools_node(agent, state))
 
         events = result["tool_events"]
         last = events[-1]
@@ -87,7 +88,7 @@ class ToolEventLifecycleTests(unittest.TestCase):
         state = _build_state(pending_tool_calls=[tc])
 
         with patch("rag.nodes.agent_nodes.execute_tool") as mock_execute:
-            result = tools_node(agent, state)
+            result = asyncio.run(tools_node(agent, state))
 
         events = result["tool_events"]
         last = events[-1]
@@ -115,7 +116,7 @@ class ToolEventLifecycleTests(unittest.TestCase):
 
         with patch("rag.nodes.agent_nodes.execute_tool") as mock_execute:
             mock_execute.return_value = {"text": "ok", "validations": []}
-            tools_node(agent, state)
+            asyncio.run(tools_node(agent, state))
             args = mock_execute.call_args[0][1]  # second positional arg
 
         # args is a ValidateClaimsArgs BaseModel
