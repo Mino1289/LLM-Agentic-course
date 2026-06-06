@@ -26,6 +26,7 @@ from rag.hybrid_rag import HybridRAG
 from rag.langgraph_flow import FinanceLangGraphAgent
 from rag.llm_provider import build_llm_config_from_env
 from rag.tools import get_tool_definitions
+from ui.streaming import run_stream
 
 st.set_page_config(page_title="Finance RAG LangGraph", page_icon="📈", layout="wide")
 st.title("📈 Finance RAG LangGraph")
@@ -407,48 +408,53 @@ if query:
         st.markdown(query)
 
     with st.chat_message("assistant"):
-        with st.spinner("Analyse en cours..."):
-            try:
-                result = agent.run(
-                    query,
-                    conversation_id=st.session_state.conversation_id,
-                    messages=st.session_state.messages,
-                )
+        text_container = st.empty()
+        status_container = st.status("⏳ Analyse en cours...", expanded=True)
+        try:
+            result = run_stream(
+                agent,
+                query,
+                conversation_id=st.session_state.conversation_id,
+                messages=st.session_state.messages,
+                text_container=text_container,
+                status_container=status_container,
+            )
 
-                assistant_text = result.get("clarification_question") or result.get(
-                    "answer", "Aucune réponse générée."
-                )
-                st.markdown(assistant_text)
+            assistant_text = result.get("clarification_question") or result.get(
+                "answer", "Aucune réponse générée."
+            )
+            # Replace the streamed text with the final answer (no cursor)
+            text_container.markdown(assistant_text)
 
-                chunks = result.get("final_chunks", [])
-                metadatas = result.get("final_metadatas", [])
-                price_context = result.get("price_context", "")
-                sources = build_sources(chunks, metadatas)
-                debug = {
-                    "normalized_query": result.get("normalized_query", ""),
-                    "metadata_filter": result.get("metadata_filter", {}),
-                    "target_tickers": result.get("target_tickers", []),
-                }
+            chunks = result.get("final_chunks", [])
+            metadatas = result.get("final_metadatas", [])
+            price_context = result.get("price_context", "")
+            sources = build_sources(chunks, metadatas)
+            debug = {
+                "normalized_query": result.get("normalized_query", ""),
+                "metadata_filter": result.get("metadata_filter", {}),
+                "target_tickers": result.get("target_tickers", []),
+            }
 
-                assistant_message = {
-                    "role": "assistant",
-                    "content": assistant_text,
-                    "stats": result.get("stats", {}),
-                    "sources": sources,
-                    "price_context": price_context,
-                    "tool_events": result.get("tool_events", []),
-                    "report_artifacts": result.get("report_artifacts", []),
-                    "debug": debug,
-                }
-                render_assistant_artifacts(
-                    assistant_message, key_prefix=f"live_{len(st.session_state.messages)}"
-                )
+            assistant_message = {
+                "role": "assistant",
+                "content": assistant_text,
+                "stats": result.get("stats", {}),
+                "sources": sources,
+                "price_context": price_context,
+                "tool_events": result.get("tool_events", []),
+                "report_artifacts": result.get("report_artifacts", []),
+                "debug": debug,
+            }
+            render_assistant_artifacts(
+                assistant_message, key_prefix=f"live_{len(st.session_state.messages)}"
+            )
 
-                st.session_state.messages.append(assistant_message)
-            except Exception as e:
-                error_msg = f"Erreur lors de l'analyse: {e}"
-                st.error(error_msg)
-                st.session_state.messages.append({"role": "assistant", "content": error_msg})
+            st.session_state.messages.append(assistant_message)
+        except Exception as e:
+            error_msg = f"Erreur lors de l'analyse: {e}"
+            st.error(error_msg)
+            st.session_state.messages.append({"role": "assistant", "content": error_msg})
 
 st.divider()
 st.caption("OpenAI / GitHub Models / Gemini (chat) + ChromaDB + LangGraph Agent v2")

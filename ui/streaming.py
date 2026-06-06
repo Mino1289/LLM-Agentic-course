@@ -1,0 +1,100 @@
+"""UI streaming helper for the Finance RAG LangGraph agent.
+
+Consumes `agent.astream()` via `asyncio.run` and dispatches events to
+the provided text/status containers. Returns the final GraphState
+captured from the `on_graph_end` event (no double `arun()` call).
+
+This module is intentionally decoupled from Streamlit at the call site:
+the caller passes anything that implements `.markdown(str)` (for the
+text container) and `.update(label=...)` (for the status container).
+In production these are `st.empty()` and `st.status(...)`; in tests
+they are mocks.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from typing import Any, Iterable
+
+WORD_SEPARATORS = (" ", "\n", ".", ",", ";", ":", "!", "?")
+
+
+def run_stream(
+    agent: Any,
+    query: str,
+    conversation_id: str,
+    messages: list[dict[str, str]],
+    text_container: Any,
+    status_container: Any,
+    *,
+    on_text_chunk: callable = None,
+) -> dict[str, Any]:
+    """Synchronously drive `agent.astream()` and dispatch events to the
+    containers. Returns the final GraphState.
+
+    The function uses `asyncio.run` internally; calling it from inside
+    an already-running event loop raises RuntimeError pointing to
+    `await agent.astream(...)`.
+
+    Args:
+        agent: A FinanceLangGraphAgent (anything with `astream(query, ...)`).
+        query: The user question.
+        conversation_id: Conversation ID for the run.
+        messages: Prior messages for the conversation.
+        text_container: Anything with `.markdown(str)` method. Receives
+            progressive updates as tokens arrive.
+        status_container: Anything with `.update(label=str)` method.
+            Receives node/tool lifecycle updates.
+        on_text_chunk: Optional callback invoked with the final streamed
+            text when the stream ends (used by tests for assertions).
+
+    Returns:
+        The final GraphState (dict) — same as `agent.arun()` would
+        return. Comes from the custom `on_graph_end` event emitted by
+        `agent.astream()`.
+    """
+    final_state: dict[str, Any] = {}
+    streamed_text: list[str] = []
+    word_buffer: list[str] = []
+
+    def _flush_buffer(force: bool = False) -> None:
+        if not word_buffer:
+            return
+        chunk = "".join(word_buffer)
+        if not force and not any(sep in chunk for sep in WORD_SEPARATORS):
+            return
+        word_buffer.clear()
+        streamed_text.append(chunk)
+        text_container.markdown("".join(streamed_text) + "▌")
+
+    async def consume() -> None:
+        nonlocal final_state
+        async for event in agent.astream(query, conversation_id, messages):
+            kind = event.get("event")
+            if kind == "on_chain_start":
+                name = event.get("name", "?")
+                status_container.update(label=f"⏳ {name} en cours...")
+            elif kind == "on_tool_start":
+                tool = event.get("name", "?")
+                status_container.update(label=f"⏳ Outil `{tool}` en cours...")
+            elif kind == "on_tool_end":
+                status_container.update(label="✅ Outil terminé")
+            elif kind == "on_llm_token":
+                token = event.get("token", "")
+                if not token:
+                    continue
+                word_buffer.append(token)
+                _flush_buffer(force=False)
+            elif kind == "on_graph_end":
+                _flush_buffer(force=True)
+                final_state = event.get("state", {}) or {}
+                # Update status to done
+                status_container.update(label="✅ Terminé")
+                # Final text (no cursor) — only if we have a streamed prefix
+                if streamed_text:
+                    text_container.markdown("".join(streamed_text))
+
+    asyncio.run(consume())
+    if on_text_chunk is not None:
+        on_text_chunk("".join(streamed_text))
+    return final_state

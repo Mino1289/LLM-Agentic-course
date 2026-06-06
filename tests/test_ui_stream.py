@@ -48,7 +48,7 @@ def _build_agent_with_astream_events(raw_events: list[dict]):
 
 class RunStreamHelperTests(unittest.TestCase):
     def test_run_stream_invokes_asyncio_run(self):
-        from ui.app_rag import run_stream
+        from ui.streaming import run_stream
         agent = _build_agent_with_astream_events([
             {"event": "on_chain_start", "name": "agent_node", "data": {}},
             {"event": "on_graph_end", "state": {"answer": "ok", "tool_events": []}},
@@ -61,7 +61,7 @@ class RunStreamHelperTests(unittest.TestCase):
         self.assertEqual(final["answer"], "ok")
 
     def test_run_stream_flushes_word_buffer_on_separator(self):
-        from ui.app_rag import run_stream
+        from ui.streaming import run_stream
         # Stream yields "Hello" " " "world" "!" as 4 separate on_llm_token events
         agent = _build_agent_with_astream_events([
             {"event": "on_llm_token", "token": "Hello"},
@@ -85,7 +85,7 @@ class RunStreamHelperTests(unittest.TestCase):
         self.assertIn("Hello world", last)
 
     def test_run_stream_updates_status_on_chain_start(self):
-        from ui.app_rag import run_stream
+        from ui.streaming import run_stream
         agent = _build_agent_with_astream_events([
             {"event": "on_chain_start", "name": "agent_node", "data": {}},
             {"event": "on_chain_start", "name": "tools_node", "data": {}},
@@ -105,7 +105,7 @@ class RunStreamHelperTests(unittest.TestCase):
         )
 
     def test_run_stream_returns_state_from_on_graph_end(self):
-        from ui.app_rag import run_stream
+        from ui.streaming import run_stream
         final_state = {
             "answer": "Réponse finale",
             "tool_events": [
