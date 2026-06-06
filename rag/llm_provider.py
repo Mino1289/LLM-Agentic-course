@@ -4,9 +4,9 @@ import json
 import os
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Generator, Iterable, Optional
+from typing import Any, AsyncIterator, Generator, Iterable, Optional
 
-from openai import OpenAI
+from openai import AsyncOpenAI, OpenAI
 
 SUPPORTED_CHAT_PROVIDERS = {"openai", "github_models", "gemini"}
 SUPPORTED_EMBEDDING_PROVIDERS = {"openai", "github_models"}
@@ -41,6 +41,17 @@ class LLMConfig:
 class LLMToolResponse:
     content: Optional[str]
     tool_calls: list[ToolCall] = field(default_factory=list)
+
+
+@dataclass
+class LLMStreamChunk:
+    """Chunk incrémental d'un stream LLM.
+    Soit un delta texte (delta != ""), soit un delta de tool_call
+    (tool_call_delta != None), soit les deux. Un chunk final peut
+    contenir finish_reason set ("stop", "tool_calls", "length")."""
+    delta: str = ""
+    tool_call_delta: Optional[list[dict[str, Any]]] = None
+    finish_reason: Optional[str] = None
 
 
 def _normalize_github_model_id(model: str) -> str:
@@ -277,6 +288,7 @@ class LLMProvider:
     def __init__(self, config: Optional[LLMConfig] = None):
         self.config = config or build_llm_config_from_env()
         self._gemini_client = None
+        self.async_client: Optional[AsyncOpenAI] = None
 
         embed_kwargs = {"api_key": self.config.embedding_api_key or self.config.api_key}
         if self.config.embedding_base_url:
@@ -290,6 +302,21 @@ class LLMProvider:
             self.client = OpenAI(**client_kwargs)
         else:
             self.client = None
+
+        self._init_async_client()
+
+    def _init_async_client(self) -> None:
+        """Initialize the async OpenAI client (openai/github_models only).
+        For Gemini, async_client stays None — genai.aio is used directly
+        via _get_gemini_client().aio.models.generate_content_stream(...).
+        """
+        if self.config.provider in {"openai", "github_models"}:
+            client_kwargs = {"api_key": self.config.api_key}
+            if self.config.base_url:
+                client_kwargs["base_url"] = self.config.base_url
+            self.async_client = AsyncOpenAI(**client_kwargs)
+        else:
+            self.async_client = None
 
     def _get_gemini_client(self):
         if self._gemini_client is None:
@@ -342,6 +369,163 @@ class LLMProvider:
         if self.config.provider == "gemini":
             return self._invoke_gemini_with_tools(messages, tools, temperature, max_tokens)
         return self._invoke_openai_with_tools(messages, tools, temperature, max_tokens)
+
+    async def agenerate_stream(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        temperature: float = 0.1,
+        max_tokens: int = 900,
+    ) -> AsyncIterator[str]:
+        """Stream token-par-token (texte pur). Pour NLI judge, summary, etc.
+        Délègue à ainvoke_with_tools_stream(tools=None) et yield les deltas.
+        """
+        messages: list[dict[str, Any]] = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+        async for chunk in self.ainvoke_with_tools_stream(
+            messages, tools=None, temperature=temperature, max_tokens=max_tokens
+        ):
+            if chunk.delta:
+                yield chunk.delta
+
+    async def ainvoke_with_tools_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: Optional[list[dict[str, Any]]] = None,
+        temperature: float = 0.1,
+        max_tokens: int = 2000,
+    ) -> AsyncIterator[LLMStreamChunk]:
+        """Stream LLM token-par-token avec gestion des tool_calls.
+        Pour OpenAI/GitHub: utilise async_client.chat.completions.create(stream=True).
+        Pour Gemini: tente genai.aio.models.generate_content_stream; fallback
+        non-streaming via _invoke_gemini_with_tools si aio indisponible.
+        """
+        if self.config.provider == "gemini":
+            async for chunk in self._ainvoke_gemini_stream(messages, tools, temperature, max_tokens):
+                yield chunk
+            return
+        async for chunk in self._ainvoke_openai_stream(messages, tools, temperature, max_tokens):
+            yield chunk
+
+    async def _ainvoke_openai_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: Optional[list[dict[str, Any]]],
+        temperature: float,
+        max_tokens: int,
+    ) -> AsyncIterator[LLMStreamChunk]:
+        kwargs: dict[str, Any] = {
+            "model": self.config.chat_model,
+            "messages": _openai_messages_to_api(messages),
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": True,
+        }
+        if tools:
+            kwargs["tools"] = tools
+            kwargs["tool_choice"] = "auto"
+        if self.async_client is None:
+            raise RuntimeError(
+                "async_client is None — openai/github_models provider required for streaming"
+            )
+        response = await self.async_client.chat.completions.create(**kwargs)
+        async for raw_chunk in response:
+            if not getattr(raw_chunk, "choices", None):
+                continue
+            choice = raw_chunk.choices[0]
+            delta = getattr(choice, "delta", None)
+            if delta is None:
+                continue
+            delta_text = getattr(delta, "content", None) or ""
+            tool_deltas: Optional[list[dict[str, Any]]] = None
+            delta_tool_calls = getattr(delta, "tool_calls", None)
+            if delta_tool_calls:
+                tool_deltas = []
+                for tc in delta_tool_calls:
+                    fn = getattr(tc, "function", None)
+                    tool_deltas.append(
+                        {
+                            "id": getattr(tc, "id", None),
+                            "name": getattr(fn, "name", None) if fn else None,
+                            "arguments": getattr(fn, "arguments", None) if fn else None,
+                        }
+                    )
+            yield LLMStreamChunk(
+                delta=delta_text,
+                tool_call_delta=tool_deltas,
+                finish_reason=getattr(choice, "finish_reason", None),
+            )
+
+    async def _ainvoke_gemini_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: Optional[list[dict[str, Any]]],
+        temperature: float,
+        max_tokens: int,
+    ) -> AsyncIterator[LLMStreamChunk]:
+        """Gemini streaming via genai.Client.aio. Fallback non-streaming
+        si genai.aio indisponible (régression safe)."""
+        try:
+            from google.genai import types
+        except ImportError:
+            yield LLMStreamChunk(
+                delta=self.invoke_with_tools(messages, tools, temperature, max_tokens).content or "",
+                finish_reason="stop",
+            )
+            return
+        client = self._get_gemini_client()
+        system_instruction, contents = _gemini_contents_from_messages(messages)
+        config_kwargs: dict[str, Any] = {
+            "temperature": temperature,
+            "max_output_tokens": max_tokens,
+        }
+        if system_instruction:
+            config_kwargs["system_instruction"] = system_instruction
+        if tools:
+            config_kwargs["tools"] = _tool_definitions_to_gemini(tools)
+            config_kwargs["tool_config"] = types.ToolConfig(
+                function_calling_config=types.FunctionCallingConfig(mode="AUTO")
+            )
+        try:
+            response = await client.aio.models.generate_content_stream(
+                model=self.config.chat_model,
+                contents=contents,
+                config=types.GenerateContentConfig(**config_kwargs),
+            )
+        except (AttributeError, RuntimeError, NotImplementedError):
+            # Fallback non-streaming
+            full = self._invoke_gemini_with_tools(messages, tools, temperature, max_tokens)
+            yield LLMStreamChunk(
+                delta=full.content or "",
+                tool_call_delta=[
+                    {"id": tc.id, "name": tc.name, "arguments": tc.arguments}
+                    for tc in full.tool_calls
+                ] or None,
+                finish_reason="stop",
+            )
+            return
+        async for raw_chunk in response:
+            text_parts: list[str] = []
+            tool_deltas: list[dict[str, Any]] = []
+            for candidate in getattr(raw_chunk, "candidates", []) or []:
+                for part in getattr(candidate.content, "parts", []) or []:
+                    if getattr(part, "text", None):
+                        text_parts.append(part.text)
+                    fc = getattr(part, "function_call", None)
+                    if fc:
+                        tool_deltas.append(
+                            {
+                                "id": str(uuid.uuid4()),
+                                "name": getattr(fc, "name", "") or "",
+                                "arguments": json.dumps(dict(getattr(fc, "args", None) or {})),
+                            }
+                        )
+            yield LLMStreamChunk(
+                delta="".join(text_parts),
+                tool_call_delta=tool_deltas or None,
+            )
 
     def _invoke_openai_with_tools(
         self,

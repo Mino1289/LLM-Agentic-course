@@ -72,7 +72,7 @@ class _FakeChatCompletions:
 
 class _FakeAsyncClient:
     def __init__(self, chunks: list[_FakeChatCompletionChunk] | None = None):
-        self.chats = type("_Chats", (), {"completions": _FakeChatCompletions(chunks or [])})()
+        self.chat = type("_Chat", (), {"completions": _FakeChatCompletions(chunks or [])})()
 
 
 class LLMProviderAsyncInitTests(unittest.TestCase):
