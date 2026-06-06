@@ -203,17 +203,39 @@ async def agent_node(agent: Any, state: GraphState) -> GraphState:
             text_parts.append(stream_chunk.delta)
         if stream_chunk.tool_call_delta:
             for tc_delta in stream_chunk.tool_call_delta:
-                tc_id = tc_delta.get("id") or f"tc_{len(tool_calls_dict)}"
-                if tc_id not in tool_calls_dict:
-                    tool_calls_dict[tc_id] = {
-                        "id": tc_id,
+                # OpenAI streaming protocol: the FIRST chunk of a tool_call
+                # carries `index`, `id`, `name`, and `arguments="""`; subsequent
+                # continuation chunks of the SAME tool_call carry only
+                # `arguments` (id, name, and sometimes index are None).
+                # We MUST accumulate by `index` (the canonical position in the
+                # tool_calls array), NOT by `id` — otherwise continuation chunks
+                # get treated as separate tool_calls with synthesized ids
+                # ("tc_0", "tc_1", ...) which break tool_call_id matching
+                # in the next LLM call.
+                tc_index = tc_delta.get("index")
+                if tc_index is None:
+                    # Fallback: if index is missing, assume this is a
+                    # continuation of the LAST tool_call. This handles
+                    # providers that omit `index` after the first chunk.
+                    if tool_calls_dict:
+                        last_key = next(reversed(tool_calls_dict))
+                        tc_key = last_key
+                    else:
+                        tc_key = "tc_0"
+                else:
+                    tc_key = tc_index
+                if tc_key not in tool_calls_dict:
+                    tool_calls_dict[tc_key] = {
+                        "id": tc_delta.get("id") or f"tc_{tc_key}",
                         "name": tc_delta.get("name") or "",
                         "arguments_parts": [],
                     }
+                if tc_delta.get("id"):
+                    tool_calls_dict[tc_key]["id"] = tc_delta["id"]
                 if tc_delta.get("name"):
-                    tool_calls_dict[tc_id]["name"] = tc_delta["name"]
+                    tool_calls_dict[tc_key]["name"] = tc_delta["name"]
                 if tc_delta.get("arguments"):
-                    tool_calls_dict[tc_id]["arguments_parts"].append(tc_delta["arguments"])
+                    tool_calls_dict[tc_key]["arguments_parts"].append(tc_delta["arguments"])
 
     final_text = "".join(text_parts)
     final_tool_calls: list[ToolCall] = [

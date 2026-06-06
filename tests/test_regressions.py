@@ -561,6 +561,115 @@ class AgentToolsTests(unittest.TestCase):
             self.assertGreaterEqual(len(final.get("tool_events", [])), 1)
             self.assertGreaterEqual(final.get("stats", {}).get("agent_iterations", 0), 2)
 
+    def test_agent_streaming_tool_call_continuation_chunks_have_id_none(self):
+        """Real OpenAI streaming protocol: only the FIRST chunk of a tool_call
+        carries `id` and `name`; subsequent chunks for the SAME tool_call
+        have `id=None` and `name=None` (only `arguments` is set).
+
+        The accumulation in agent_node must NOT synthesize a new tool_call per
+        chunk — that would break tool_call_id matching in the next LLM call
+        (assistant.tool_calls ids no longer match the tool messages' tool_call_id).
+        """
+        from rag.llm_provider import LLMStreamChunk
+
+        agent = SimpleNamespace(max_tool_iterations=6, rag=SimpleNamespace(provider=MagicMock()))
+        REAL_ID = "call_r3YATjEm9WWID8AGbBzQddld"
+
+        # Chunks 1 has id+name+empty args; chunks 2-3 have id=None, name=None,
+        # only arguments delta. This is exactly what the OpenAI Python client
+        # emits for `chat.completions.create(stream=True)`.
+        responses = [
+            [
+                LLMStreamChunk(
+                    tool_call_delta=[{
+                        "id": REAL_ID,
+                        "name": "sec_filings_rag_tool",
+                        "arguments": '{"query":',
+                    }],
+                    finish_reason=None,
+                ),
+                LLMStreamChunk(
+                    tool_call_delta=[{
+                        "id": None,
+                        "name": None,
+                        "arguments": '"risks NVDA 2024"',
+                    }],
+                    finish_reason=None,
+                ),
+                LLMStreamChunk(
+                    tool_call_delta=[{
+                        "id": None,
+                        "name": None,
+                        "arguments": ',"tickers":["NVDA"]}',
+                    }],
+                    finish_reason="tool_calls",
+                ),
+            ],
+            [
+                LLMStreamChunk(delta="Réponse finale."),
+                LLMStreamChunk(delta="", finish_reason="stop"),
+            ],
+        ]
+        idx = {"i": 0}
+
+        async def stream(messages, tools=None, temperature=0.1, max_tokens=2000):
+            out = responses[idx["i"]]
+            idx["i"] += 1
+            for c in out:
+                yield c
+
+        agent.rag.provider.ainvoke_with_tools_stream = stream
+
+        state = {
+            "normalized_query": "Risques NVDA 2024",
+            "query": "Risques NVDA 2024",
+            "messages": [],
+            "agent_iterations": 0,
+            "tool_events": [],
+            "stats": {},
+        }
+
+        with patch("rag.nodes.agent_nodes.execute_tool") as mock_execute:
+            mock_execute.return_value = {
+                "text": "[1] NVDA risk excerpt",
+                "final_chunks": ["risk"],
+                "final_metadatas": [{"ticker": "NVDA", "year": "2024", "file_type": "10-K"}],
+                "stats": {"chunks_used": 1},
+            }
+
+            after_agent = asyncio.run(agent_node(agent, state))
+            # Only ONE tool_call must be produced from 3 chunks.
+            pending = after_agent.get("pending_tool_calls") or []
+            self.assertEqual(
+                len(pending), 1,
+                f"Expected 1 tool_call (3 continuation chunks of same call), got {len(pending)}: "
+                f"{[(t.id, t.name, t.arguments) for t in pending]}",
+            )
+            # The id must be the REAL_ID from the first chunk — not a synthesized "tc_N".
+            self.assertEqual(pending[0].id, REAL_ID)
+            self.assertEqual(pending[0].name, "sec_filings_rag_tool")
+            # Arguments must be the full JSON, not just the first chunk.
+            self.assertEqual(pending[0].arguments, '{"query":"risks NVDA 2024","tickers":["NVDA"]}')
+
+            merged = {**state, **after_agent}
+            after_tools = asyncio.run(tools_node(agent, merged))
+
+            # The tool message must use the SAME id as the assistant tool_call,
+            # otherwise the next LLM call will fail with "missing tool_call_id response".
+            lc_msgs = after_tools.get("lc_messages") or []
+            tool_msgs = [m for m in lc_msgs if m.get("role") == "tool"]
+            self.assertEqual(len(tool_msgs), 1)
+            self.assertEqual(
+                tool_msgs[0].get("tool_call_id"), REAL_ID,
+                "tool_call_id in tool message must match the assistant tool_call id",
+            )
+
+            # Now simulate the second LLM call to confirm no API error
+            # would arise. We don't actually call the API — we just verify
+            # the message list is internally consistent.
+            final = asyncio.run(agent_node(agent, {**merged, **after_tools}))
+            self.assertEqual(final.get("answer"), "Réponse finale.")
+
 
 class ValidateClaimsNLITests(unittest.TestCase):
     """PRD §2.2 + §4.4 — validate_claims_tool uses an LLM NLI judge, not

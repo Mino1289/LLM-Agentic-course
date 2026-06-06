@@ -489,6 +489,7 @@ class LLMProvider:
                     fn = getattr(tc, "function", None)
                     tool_deltas.append(
                         {
+                            "index": getattr(tc, "index", None),
                             "id": getattr(tc, "id", None),
                             "name": getattr(fn, "name", None) if fn else None,
                             "arguments": getattr(fn, "arguments", None) if fn else None,
