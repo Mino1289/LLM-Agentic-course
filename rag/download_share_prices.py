@@ -14,11 +14,30 @@ from rag.config import TRACKED_TICKERS
 from rag.embedding_pipeline import BackoffConfig, with_exponential_backoff
 from rag.paths import DATA_DIR, ensure_dir
 
-# Liste des entreprises demandées avec leurs tickers officiels du NASDAQ / NYSE
+# Liste des entreprises demandées avec leurs tickers officiels.
+# 20 entreprises — 14 US/EU (SEC) + 6 Euronext Paris (yfinance prix seuls).
+# Le nom (slug) sert à nommer le CSV historique_prix_<slug>.csv.
 supported_companies = {
     "nvidia": "NVDA",
+    "asml": "ASML",
+    "tsm": "TSM",
     "amd": "AMD",
+    "broadcom": "AVGO",
+    "arm": "ARM",
     "microsoft": "MSFT",
+    "apple": "AAPL",
+    "intel": "INTC",
+    "qualcomm": "QCOM",
+    "lvmh": "MC.PA",
+    "hermes": "RMS.PA",
+    "kering": "KER.PA",
+    "airbus": "AIR.PA",
+    "totalenergies": "TTE.PA",
+    "berkshire": "BRK-B",
+    "jpmorgan": "JPM",
+    "caterpillar": "CAT",
+    "nike": "NKE",
+    "exxonmobil": "XOM",
 }
 entreprises = {
     name: ticker for name, ticker in supported_companies.items() if ticker in TRACKED_TICKERS
@@ -119,6 +138,7 @@ if __name__ == "__main__":
 
     print(f"Début du téléchargement des données du {date_debut} au {date_fin}...")
     print(f"Dossier de sortie : {DATA_DIR}\n")
+    print(f"📋 Univers : {len(entreprises)} tickers (yfinance accepte tout, dont .PA)")
 
     inter_sleep = float(os.getenv("YFINANCE_INTER_TICKER_SLEEP", "1.0"))
     summary = download_all_entreprises(

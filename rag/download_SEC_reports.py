@@ -30,12 +30,46 @@ HEADERS = {
     "Accept-Encoding": "gzip, deflate"
 }
 
-# Liste des tickers ciblés (univers debug volontairement limité).
-TICKERS = list(TRACKED_TICKERS)
+# Liste des tickers éligibles SEC (US + foreign issuers via ADR).
+# Exclut automatiquement les tickers Euronext (.PA) qui n'ont pas de CIK SEC.
+SEC_TICKERS = tuple(t for t in TRACKED_TICKERS if not t.endswith(".PA"))
+SKIPPED_TICKERS = tuple(t for t in TRACKED_TICKERS if t.endswith(".PA"))
+
+# Liste des tickers ciblés pour le téléchargement SEC.
+TICKERS = list(SEC_TICKERS)
+
+# Pacing SEC : 0.15s par défaut = 6.6 req/s, sous la limite 10 req/s imposée par la SEC.
+# Ajustable via env var SEC_INTER_TICKER_SLEEP pour tests ou stress.
+_SEC_DEFAULT_INTER_TICKER_SLEEP = 0.15
+_SEC_MIN_INTER_TICKER_SLEEP = 0.10
+_SEC_HARD_CAP_INTER_TICKER_SLEEP = 0.05
+
+
+def _get_inter_ticker_sleep() -> float:
+    """Read SEC inter-ticker sleep from env, with a safety floor (no <50ms)."""
+    raw = os.getenv("SEC_INTER_TICKER_SLEEP", str(_SEC_DEFAULT_INTER_TICKER_SLEEP))
+    try:
+        value = float(raw)
+    except ValueError:
+        return _SEC_DEFAULT_INTER_TICKER_SLEEP
+    if value < _SEC_HARD_CAP_INTER_TICKER_SLEEP:
+        return _SEC_HARD_CAP_INTER_TICKER_SLEEP
+    if value < _SEC_MIN_INTER_TICKER_SLEEP:
+        return _SEC_MIN_INTER_TICKER_SLEEP
+    return value
+
+
+_INTER_TICKER_SLEEP = _get_inter_ticker_sleep()
+
 
 def rate_limit_sleep():
-    """Garantit le respect de la limite de la SEC (max 10 req/sec)"""
-    time.sleep(0.15)
+    """Garantit le respect de la limite de la SEC (max 10 req/sec).
+
+    Le délai inter-ticker est paramétrable via SEC_INTER_TICKER_SLEEP
+    (défaut 0.15s). Un plancher de sécurité de 50ms est appliqué pour
+    éviter tout dépassement de quota.
+    """
+    time.sleep(_INTER_TICKER_SLEEP)
 
 def get_cik_mapping():
     """Récupère le dictionnaire officiel Ticker -> CIK de la SEC"""
@@ -159,6 +193,18 @@ def parse_args():
 
 def main():
     args = parse_args()
+    if SKIPPED_TICKERS:
+        print(
+            f"⏭  {len(SKIPPED_TICKERS)} ticker(s) sans CIK SEC (Euronext), "
+            f"skip auto : {', '.join(SKIPPED_TICKERS)}"
+        )
+    print(
+        f"⏱  Pacing SEC : {_INTER_TICKER_SLEEP}s entre tickers "
+        f"(SEC_INTER_TICKER_SLEEP={os.getenv('SEC_INTER_TICKER_SLEEP', 'default')})"
+    )
+    print(
+        f"📋 Univers SEC : {len(TICKERS)} tickers ({len(SKIPPED_TICKERS)} skip)\n"
+    )
     # 1. Obtenir les identifiants SEC (CIK) des entreprises
     cik_map = get_cik_mapping()
     

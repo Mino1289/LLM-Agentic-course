@@ -338,9 +338,22 @@ class ContextPruneTests(unittest.TestCase):
 
 class ConfigurationTests(unittest.TestCase):
     def test_universe_is_limited_to_debug_tickers(self):
-        rag = SimpleNamespace(doc_metadata=[{"ticker": "AMD"}, {"ticker": "INTC"}])
+        from rag.config import TRACKED_TICKERS
 
-        self.assertEqual(get_known_tickers(SimpleNamespace(rag=rag), max_items=20), ["AMD", "NVDA", "MSFT"])
+        rag = SimpleNamespace(doc_metadata=[{"ticker": "AMD"}, {"ticker": "INTC"}, {"ticker": "FAKE"}])
+
+        result = get_known_tickers(SimpleNamespace(rag=rag), max_items=20)
+        # Unknown tickers must be filtered, the rest comes from TRACKED_TICKERS order.
+        self.assertNotIn("FAKE", result)
+        self.assertIn("AMD", result)
+        self.assertIn("INTC", result)
+        self.assertEqual(len(result), len(TRACKED_TICKERS))
+
+    def test_universe_respects_max_items(self):
+        rag = SimpleNamespace(doc_metadata=[])
+
+        result = get_known_tickers(SimpleNamespace(rag=rag), max_items=3)
+        self.assertEqual(len(result), 3)
 
     def test_normalize_doc_types_includes_earnings_call(self):
         normalized = _normalize_doc_types(["earnings call", "10-K", "EARNINGS_CALL"])
@@ -475,7 +488,7 @@ class AgentToolsTests(unittest.TestCase):
         bad_sum = run_simulate_portfolio(SimulatePortfolioArgs(allocations={"MSFT": 40, "NVDA": 40}))
         self.assertEqual(bad_sum.get("error"), "invalid_weights")
 
-        bad_ticker = run_simulate_portfolio(SimulatePortfolioArgs(allocations={"AAPL": 100}))
+        bad_ticker = run_simulate_portfolio(SimulatePortfolioArgs(allocations={"ZZZZ": 100}))
         self.assertEqual(bad_ticker.get("error"), "invalid_tickers")
 
     def test_simulate_portfolio_valid_allocation(self):
