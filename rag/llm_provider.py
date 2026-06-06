@@ -409,11 +409,53 @@ class LLMProvider:
         payload = [text for text in texts if text and text.strip()]
         if not payload:
             return []
-        response = self.embedding_client.embeddings.create(
-            model=self.config.embedding_model,
-            input=payload,
-        )
-        return [item.embedding for item in response.data]
+        cache = self._get_embedding_cache()
+        # Deduplicate while preserving order — duplicates in the same batch
+        # would otherwise cost N API calls for the same vector.
+        unique_payload = list(dict.fromkeys(payload))
+        cached: dict[str, list[float]] = {}
+        uncached: list[str] = []
+        for text in unique_payload:
+            hit = cache.get(text)
+            if hit is not None:
+                cached[text] = hit
+            else:
+                uncached.append(text)
+        if uncached:
+            response = self.embedding_client.embeddings.create(
+                model=self.config.embedding_model,
+                input=uncached,
+            )
+            new_vectors = [item.embedding for item in response.data]
+            cache.put_many(list(zip(uncached, new_vectors)))
+            for text, vec in zip(uncached, new_vectors):
+                cached[text] = vec
+        return [cached[text] for text in payload]
+
+    def _get_embedding_cache(self):
+        """Lazy-load the persistent query-embedding cache.
+
+        Held as ``self._embedding_cache`` to keep the constructor signature
+        stable. Falls back to a fresh in-memory cache if the default file
+        cannot be read (e.g. on a read-only filesystem).
+        """
+        cache = getattr(self, "_embedding_cache", None)
+        if cache is None:
+            from rag.embedding_cache import build_embedding_cache_from_env
+
+            try:
+                cache = build_embedding_cache_from_env()
+            except Exception:
+                from rag.embedding_cache import EmbeddingCache
+                from rag.paths import DATA_DIR
+
+                cache = EmbeddingCache(DATA_DIR / "embedding_query_cache.json")
+            self._embedding_cache = cache
+        return cache
+
+    def embedding_cache_stats(self) -> dict[str, int | str]:
+        """Return hit/miss counters for the persistent query-embedding cache."""
+        return self._get_embedding_cache().stats()
 
     def generate(
         self,
