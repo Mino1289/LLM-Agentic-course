@@ -346,6 +346,14 @@ def is_10q_filename(filename: str) -> bool:
     return bool(re.search(r"10[-_]?q", filename, re.I))
 
 
+def is_20f_filename(filename: str) -> bool:
+    return bool(re.search(r"20[-_]?f", filename, re.I))
+
+
+def is_6k_filename(filename: str) -> bool:
+    return bool(re.search(r"6[-_]?k", filename, re.I))
+
+
 def is_earnings_call_filename(filename: str) -> bool:
     stem = os.path.splitext(filename)[0].lower()
     patterns = [
@@ -615,6 +623,16 @@ def main():
                     out_path.write_text(text, encoding="utf-8")
                     stats["sections_written"] += 1
                     print("  10-Q -> fallback texte integral (aucune section SEC reconnue).")
+                elif is_20f_filename(filename):
+                    out_path = PROCESSED_DATA_DIR / output_filename(filename, "foreign_annual_report")
+                    out_path.write_text(text, encoding="utf-8")
+                    stats["sections_written"] += 1
+                    print("  20-F -> fallback texte integral (aucune section SEC reconnue).")
+                elif is_6k_filename(filename):
+                    out_path = PROCESSED_DATA_DIR / output_filename(filename, "foreign_interim_report")
+                    out_path.write_text(text, encoding="utf-8")
+                    stats["sections_written"] += 1
+                    print("  6-K -> fallback texte integral (aucune section SEC reconnue).")
                 else:
                     print(f"  Skip: document sans sections SEC reconnues.")
 

@@ -102,6 +102,7 @@ class ToonFormatSavingsTests(unittest.TestCase):
 
     def test_estimate_savings_returns_positive_for_tabular_data(self):
         from toon_format import estimate_savings
+        from unittest.mock import patch
 
         # RAG-like tabular structure: 4 chunks with 4 uniform metadata fields.
         data = {
@@ -112,7 +113,8 @@ class ToonFormatSavingsTests(unittest.TestCase):
                 {"ticker": "NVDA", "year": "2024", "file_type": "10-K", "section": "Item_7"},
             ]
         }
-        result = estimate_savings(data)
+        with patch("toon_format.utils.count_tokens", side_effect=lambda text, *_args, **_kwargs: len(text.split())):
+            result = estimate_savings(data)
         # Savings must be non-negative (TOON is never worse than JSON
         # for our usage patterns).
         self.assertGreaterEqual(result.get("savings_percent", 0), 0)

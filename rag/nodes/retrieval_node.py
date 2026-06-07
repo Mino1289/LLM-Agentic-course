@@ -19,6 +19,10 @@ def _infer_doc_type(metadata: dict[str, Any]) -> str:
         return "10-K"
     if "8-k" in source or "8k" in source or section == "earnings_8k":
         return "8-K"
+    if "20-f" in source or "20f" in source:
+        return "20-F"
+    if "6-k" in source or "6k" in source:
+        return "6-K"
     if section == "earnings_call" or re.search(r"(transcript|earnings[_\- ]?call|conference[_\- ]?call)", source):
         return "EARNINGS_CALL"
     return "OTHER"

@@ -28,7 +28,8 @@ from rag.llm_provider import (
     _normalize_github_model_id,
     _parse_openai_tool_calls,
 )
-from rag.nodes.agent_nodes import agent_node, tools_node
+from rag.nodes.agent_nodes import agent_node
+from rag.nodes.tool_execution_node import tools_node
 from rag.tool_schemas import ExportReportArgs, SimulatePortfolioArgs
 from rag.tools import (
     _normalize_doc_types,
@@ -37,6 +38,10 @@ from rag.tools import (
     run_validate_claims,
 )
 from rag.preprocess import SECTION_SPECS, _extract_between, is_in_year_range
+
+
+async def _inline_to_thread(func, *args, **kwargs):
+    return func(*args, **kwargs)
 
 
 class ExtractionTests(unittest.TestCase):
@@ -124,7 +129,8 @@ class RetrievalTests(unittest.TestCase):
             "stats": {},
         }
 
-        result = asyncio.run(multi_retrieve_node(SimpleNamespace(rag=FakeRag()), state))
+        with patch("rag.nodes.retrieval_node.asyncio.to_thread", side_effect=_inline_to_thread):
+            result = asyncio.run(multi_retrieve_node(SimpleNamespace(rag=FakeRag()), state))
 
         self.assertEqual(result["candidate_indices"], [])
 
@@ -164,7 +170,8 @@ class RetrievalTests(unittest.TestCase):
             "stats": {},
         }
 
-        result = asyncio.run(multi_retrieve_node(SimpleNamespace(rag=rag), state))
+        with patch("rag.nodes.retrieval_node.asyncio.to_thread", side_effect=_inline_to_thread):
+            result = asyncio.run(multi_retrieve_node(SimpleNamespace(rag=rag), state))
 
         self.assertEqual(result["candidate_indices"], [0, 1])
         nvda_queries = [query for query, ticker in rag.calls if ticker == "NVDA"]
@@ -250,7 +257,8 @@ class RerankTests(unittest.TestCase):
             "candidate_indices": [0, 1, 2, 3, 4, 5],
         }
 
-        result = asyncio.run(rerank_node(agent, state))
+        with patch("rag.nodes.rerank_node.asyncio.to_thread", side_effect=_inline_to_thread):
+            result = asyncio.run(rerank_node(agent, state))
 
         self.assertEqual(
             [meta["ticker"] for meta in result["final_metadatas"]],
@@ -330,7 +338,8 @@ class ContextPruneTests(unittest.TestCase):
             "stats": {},
         }
 
-        result = asyncio.run(context_prune_node(agent, state))
+        with patch("rag.nodes.memory_nodes.asyncio.to_thread", side_effect=_inline_to_thread):
+            result = asyncio.run(context_prune_node(agent, state))
 
         self.assertEqual(result["final_chunks"], ["keep"])
         self.assertEqual(result["final_metadatas"], [{"source": "keep-meta"}])
@@ -340,13 +349,13 @@ class ConfigurationTests(unittest.TestCase):
     def test_universe_is_limited_to_debug_tickers(self):
         from rag.config import TRACKED_TICKERS
 
-        rag = SimpleNamespace(doc_metadata=[{"ticker": "AMD"}, {"ticker": "INTC"}, {"ticker": "FAKE"}])
+        rag = SimpleNamespace(doc_metadata=[{"ticker": "AMD"}, {"ticker": "ASML"}, {"ticker": "FAKE"}])
 
         result = get_known_tickers(SimpleNamespace(rag=rag), max_items=20)
         # Unknown tickers must be filtered, the rest comes from TRACKED_TICKERS order.
         self.assertNotIn("FAKE", result)
         self.assertIn("AMD", result)
-        self.assertIn("INTC", result)
+        self.assertIn("ASML", result)
         self.assertEqual(len(result), len(TRACKED_TICKERS))
 
     def test_universe_respects_max_items(self):
@@ -358,6 +367,22 @@ class ConfigurationTests(unittest.TestCase):
     def test_normalize_doc_types_includes_earnings_call(self):
         normalized = _normalize_doc_types(["earnings call", "10-K", "EARNINGS_CALL"])
         self.assertEqual(normalized, ["EARNINGS_CALL", "10-K"])
+
+    def test_normalize_doc_types_includes_foreign_issuer_forms(self):
+        normalized = _normalize_doc_types(["20-F", "6-K", "10-K"])
+        self.assertEqual(normalized, ["20-F", "6-K", "10-K"])
+
+    def test_file_type_infers_sec_form_from_source_name(self):
+        from rag.hybrid_rag import extract_file_type_from_source
+
+        self.assertEqual(
+            extract_file_type_from_source("asml-20-f_2025-03-05.htm__foreign_annual_report.txt"),
+            "20-F",
+        )
+        self.assertEqual(
+            extract_file_type_from_source("arm-6-k_2025-01-01.htm__foreign_interim_report.txt"),
+            "6-K",
+        )
 
     def test_export_report_writes_markdown_file(self):
         with patch("rag.tools.REPORTS_DIR", Path(os.getenv("TMPDIR", "/tmp")) / "finance_rag_test_reports"):
@@ -644,13 +669,16 @@ class AgentToolsTests(unittest.TestCase):
             "stats": {},
         }
 
-        with patch("rag.nodes.agent_nodes.execute_tool") as mock_execute:
-            mock_execute.return_value = {
-                "text": "[1] NVDA risk excerpt",
-                "final_chunks": ["risk"],
-                "final_metadatas": [{"ticker": "NVDA", "year": "2024", "file_type": "10-K"}],
-                "stats": {"chunks_used": 1},
-            }
+        with patch("rag.tools.run_sec_filings_rag") as mock_rag:
+            async def fake_rag(args, *, agent):
+                return {
+                    "text": "[1] NVDA risk excerpt",
+                    "final_chunks": ["risk"],
+                    "final_metadatas": [{"ticker": "NVDA", "year": "2024", "file_type": "10-K"}],
+                    "stats": {"chunks_used": 1},
+                }
+
+            mock_rag.side_effect = fake_rag
 
             after_agent = asyncio.run(agent_node(agent, state))
             # Only ONE tool_call must be produced from 3 chunks.
@@ -838,7 +866,8 @@ class AgentToolsTests(unittest.TestCase):
         # Avoid the rerank path complexity by stubbing _balanced_rerank_indices
         # to just return the candidates as-is.
         with patch("rag.tools._balanced_rerank_indices", return_value=[0, 1]), \
-             patch("rag.tools._ticker_counts", return_value={"NVDA": 2}):
+             patch("rag.tools._ticker_counts", return_value={"NVDA": 2}), \
+             patch("rag.nodes.retrieval_node.asyncio.to_thread", side_effect=_inline_to_thread):
             agent = SimpleNamespace(
                 rag=FakeRag(),
                 max_tool_iterations=6,

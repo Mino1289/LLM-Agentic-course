@@ -17,13 +17,13 @@ def _split_csv(value: Any) -> Any:
 class SecFilingsRAGArgs(BaseModel):
     query: str = Field(..., min_length=1, description="Search query for SEC filings / earnings calls.")
     tickers: list[str] | None = Field(
-        default=None, description="Tracked tickers filter: NVDA, AMD, MSFT."
+        default=None, description="Tracked tickers filter: NVDA, ASML, AMD, ARM, MSFT."
     )
     years: list[str] | None = Field(
         default=None, description="Filing years filter, e.g. ['2024']."
     )
     doc_types: list[str] | None = Field(
-        default=None, description="Allowed: 10-K, 10-Q, 8-K, EARNINGS_CALL."
+        default=None, description="Allowed: 10-K, 10-Q, 8-K, 20-F, 6-K, EARNINGS_CALL."
     )
 
     @field_validator("tickers", "years", "doc_types", mode="before")

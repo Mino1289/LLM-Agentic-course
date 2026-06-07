@@ -8,16 +8,17 @@ from typing import AsyncIterator
 from langgraph.graph import END, StateGraph
 
 from rag.hybrid_rag import HybridRAG
+from rag.guards import guard_node, route_after_guard
 from rag.nodes.agent_nodes import (
     agent_node,
     finalize_from_agent_state,
     route_after_agent,
-    tools_node,
 )
 from rag.nodes.memory_nodes import gc_node, memory_read_node, memory_write_node
 from rag.nodes.memory_store import MemoryStore
 from rag.nodes.prepare_node import prepare_query_node
 from rag.nodes.state import GraphState
+from rag.nodes.tool_execution_node import tools_node
 from rag.nodes.tracing import traceable
 
 
@@ -54,6 +55,7 @@ class FinanceLangGraphAgent:
     def _build_graph(self):
         graph = StateGraph(GraphState)
         graph.add_node("prepare_query_node", partial(prepare_query_node, self))
+        graph.add_node("guard_node", partial(guard_node, self))
         graph.add_node("memory_read_node", partial(memory_read_node, self))
         graph.add_node("agent_node", partial(agent_node, self))
         graph.add_node("tools_node", partial(tools_node, self))
@@ -63,7 +65,15 @@ class FinanceLangGraphAgent:
 
         graph.set_entry_point("prepare_query_node")
         graph.add_edge("prepare_query_node", "memory_read_node")
-        graph.add_edge("memory_read_node", "agent_node")
+        graph.add_edge("memory_read_node", "guard_node")
+        graph.add_conditional_edges(
+            "guard_node",
+            route_after_guard,
+            {
+                "agent": "agent_node",
+                "finalize": "finalize_node",
+            },
+        )
         graph.add_conditional_edges(
             "agent_node",
             route_after_agent,

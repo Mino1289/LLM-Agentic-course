@@ -26,17 +26,21 @@ from rag.tool_schemas import (
     ValidateClaimsLLMArgs,
 )
 
-ALLOWED_DOC_TYPES = ["10-K", "10-Q", "8-K", "EARNINGS_CALL"]
+ALLOWED_DOC_TYPES = ["10-K", "10-Q", "8-K", "20-F", "6-K", "EARNINGS_CALL"]
+
+
+def _tracked_tickers_text() -> str:
+    return ", ".join(TRACKED_TICKERS)
 
 SEC_FILINGS_RAG_DESCRIPTION = (
     "Search SEC filings and earnings call transcripts in ChromaDB. "
     "Filter by document type: 10-K (annual), 10-Q (quarterly), 8-K (events), "
-    "EARNINGS_CALL (conference call transcripts). "
-    "Examples: 'MSFT 10-K risk factors 2024', 'NVDA earnings call transcript 2024'."
+    "20-F (foreign annual), 6-K (foreign interim), EARNINGS_CALL (conference call transcripts). "
+    "Examples: 'MSFT 10-K risk factors 2024', 'ASML 20-F risk factors 2024'."
 )
 
 MARKET_PRICE_DESCRIPTION = (
-    "Fetch stock price performance for tracked tickers (NVDA, AMD, MSFT) "
+    f"Fetch stock price performance for tracked tickers ({_tracked_tickers_text()}) "
     "between start_date and end_date (YYYY-MM-DD)."
 )
 
@@ -52,7 +56,7 @@ VALIDATE_CLAIMS_DESCRIPTION = (
 
 SIMULATE_PORTFOLIO_DESCRIPTION = (
     "Simulate a fictional portfolio allocation (no real trades). "
-    "Weights must sum to 100% across NVDA, AMD, MSFT only. Max 3 positions."
+    f"Weights must sum to 100% across tracked tickers ({_tracked_tickers_text()}). Max 3 positions."
 )
 
 _MAX_NOTIONAL_USD = 1_000_000
@@ -273,7 +277,7 @@ def run_market_price_tool(
     start_date = args.start_date
     end_date = args.end_date
     if not normalized:
-        return {"text": "No valid tickers provided. Use NVDA, AMD, or MSFT.", "price_context": ""}
+        return {"text": f"No valid tickers provided. Use {_tracked_tickers_text()}.", "price_context": ""}
     summary = fetch_price_context(agent, normalized, start_date, end_date)
     if not summary:
         return {
@@ -476,7 +480,7 @@ def run_simulate_portfolio(
     notional_usd = args.notional_usd
     if not normalized:
         return {
-            "text": "Allocations invalides. Utilisez NVDA, AMD ou MSFT avec des poids >= 0.",
+            "text": f"Allocations invalides. Utilisez {_tracked_tickers_text()} avec des poids >= 0.",
             "positions": [],
             "error": "invalid_tickers",
         }
@@ -517,7 +521,7 @@ def run_simulate_portfolio(
 
     lines.append("")
     lines.append(
-        "_Simulation contrôlée: tickers limités à NVDA/AMD/MSFT, pas d'exécution sur marché._"
+        f"_Simulation contrôlée: tickers limités à {_tracked_tickers_text()}, pas d'exécution sur marché._"
     )
 
     return {
@@ -575,7 +579,7 @@ def get_tool_definitions() -> list[dict[str, Any]]:
                         "tickers": {
                             "type": "array",
                             "items": {"type": "string"},
-                            "description": "Optional tickers: NVDA, AMD, MSFT.",
+                            "description": f"Optional tickers: {_tracked_tickers_text()}.",
                         },
                         "years": {
                             "type": "array",
@@ -585,7 +589,7 @@ def get_tool_definitions() -> list[dict[str, Any]]:
                         "doc_types": {
                             "type": "array",
                             "items": {"type": "string"},
-                            "description": "Optional: 10-K, 10-Q, 8-K, EARNINGS_CALL.",
+                            "description": "Optional: 10-K, 10-Q, 8-K, 20-F, 6-K, EARNINGS_CALL.",
                         },
                     },
                     "required": ["query"],

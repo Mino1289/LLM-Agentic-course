@@ -23,10 +23,14 @@ def _build_state(**overrides: Any) -> dict[str, Any]:
     return state
 
 
+async def _inline_to_thread(func, *args, **kwargs):
+    return func(*args, **kwargs)
+
+
 class ToolEventLifecycleTests(unittest.TestCase):
     def test_running_then_completed(self) -> None:
         from rag.llm_provider import ToolCall
-        from rag.nodes.agent_nodes import tools_node
+        from rag.nodes.tool_execution_node import tools_node
 
         agent = MagicMock()
         tc = ToolCall(id="call_1", name="market_price_tool", arguments=json.dumps({
@@ -37,7 +41,8 @@ class ToolEventLifecycleTests(unittest.TestCase):
 
         state = _build_state(pending_tool_calls=[tc])
 
-        with patch("rag.nodes.agent_nodes.execute_tool") as mock_execute:
+        with patch("rag.tool_executor.execute_tool") as mock_execute, \
+             patch("rag.tool_executor.asyncio.to_thread", side_effect=_inline_to_thread):
             mock_execute.return_value = {"text": "ok", "price_context": "ctx"}
             result = asyncio.run(tools_node(agent, state))
 
@@ -56,7 +61,7 @@ class ToolEventLifecycleTests(unittest.TestCase):
 
     def test_running_then_failed_on_execution_exception(self) -> None:
         from rag.llm_provider import ToolCall
-        from rag.nodes.agent_nodes import tools_node
+        from rag.nodes.tool_execution_node import tools_node
 
         agent = MagicMock()
         tc = ToolCall(id="call_1", name="market_price_tool", arguments=json.dumps({
@@ -67,7 +72,8 @@ class ToolEventLifecycleTests(unittest.TestCase):
 
         state = _build_state(pending_tool_calls=[tc])
 
-        with patch("rag.nodes.agent_nodes.execute_tool") as mock_execute:
+        with patch("rag.tool_executor.execute_tool") as mock_execute, \
+             patch("rag.tool_executor.asyncio.to_thread", side_effect=_inline_to_thread):
             mock_execute.side_effect = RuntimeError("provider down")
             result = asyncio.run(tools_node(agent, state))
 
@@ -79,7 +85,7 @@ class ToolEventLifecycleTests(unittest.TestCase):
 
     def test_running_then_failed_on_validation_error(self) -> None:
         from rag.llm_provider import ToolCall
-        from rag.nodes.agent_nodes import tools_node
+        from rag.nodes.tool_execution_node import tools_node
 
         agent = MagicMock()
         # Missing required 'query' field → Pydantic validation should fail
@@ -87,7 +93,8 @@ class ToolEventLifecycleTests(unittest.TestCase):
 
         state = _build_state(pending_tool_calls=[tc])
 
-        with patch("rag.nodes.agent_nodes.execute_tool") as mock_execute:
+        with patch("rag.tool_executor.execute_tool") as mock_execute, \
+             patch("rag.tool_executor.asyncio.to_thread", side_effect=_inline_to_thread):
             result = asyncio.run(tools_node(agent, state))
 
         events = result["tool_events"]
@@ -99,7 +106,7 @@ class ToolEventLifecycleTests(unittest.TestCase):
 
     def test_injected_chunks_and_metadatas_passed_to_execute_tool(self) -> None:
         from rag.llm_provider import ToolCall
-        from rag.nodes.agent_nodes import tools_node
+        from rag.nodes.tool_execution_node import tools_node
 
         agent = MagicMock()
         tc = ToolCall(
@@ -114,7 +121,8 @@ class ToolEventLifecycleTests(unittest.TestCase):
             final_metadatas=[{"ticker": "MSFT", "year": "2024"}],
         )
 
-        with patch("rag.nodes.agent_nodes.execute_tool") as mock_execute:
+        with patch("rag.tool_executor.execute_tool") as mock_execute, \
+             patch("rag.tool_executor.asyncio.to_thread", side_effect=_inline_to_thread):
             mock_execute.return_value = {"text": "ok", "validations": []}
             asyncio.run(tools_node(agent, state))
             args = mock_execute.call_args[0][1]  # second positional arg

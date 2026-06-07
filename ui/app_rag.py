@@ -43,7 +43,7 @@ if "messages" not in st.session_state:
         {
             "role": "assistant",
             "content": (
-                "Bonjour. Je peux comparer NVDA, AMD et MSFT, interroger les 10-K/10-Q/8-K "
+                "Bonjour. Je peux comparer NVDA, AMD et MSFT, ARM, ASML interroger les 10-K/10-Q/8-K/6-K/20-F "
                 "et les transcripts earnings, valider des affirmations, simuler une allocation fictive, "
                 "récupérer les prix et générer un rapport téléchargeable."
             ),
@@ -365,7 +365,7 @@ if st.sidebar.button("Nouvelle conversation", use_container_width=True):
         {
             "role": "assistant",
             "content": (
-                "Bonjour. Je peux comparer NVDA, AMD et MSFT, interroger les filings SEC "
+                "Bonjour. Je peux comparer NVDA, AMD, ARM, ASML et MSFT, interroger les filings SEC "
                 "et earnings calls, valider des affirmations, simuler une allocation fictive "
                 "et exporter un rapport."
             ),

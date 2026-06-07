@@ -20,7 +20,7 @@ class AsyncNodeStructureTests(unittest.TestCase):
         )
 
     def test_tools_node_is_coroutine(self):
-        from rag.nodes.agent_nodes import tools_node
+        from rag.nodes.tool_execution_node import tools_node
         self.assertTrue(
             inspect.iscoroutinefunction(tools_node),
             "tools_node must be `async def` to wrap blocking tool calls",
@@ -59,6 +59,13 @@ class AsyncNodeStructureTests(unittest.TestCase):
         self.assertTrue(
             inspect.iscoroutinefunction(prepare_query_node),
             "prepare_query_node must be `async def`",
+        )
+
+    def test_guard_node_is_coroutine(self):
+        from rag.guards import guard_node
+        self.assertTrue(
+            inspect.iscoroutinefunction(guard_node),
+            "guard_node must be `async def`",
         )
 
     def test_multi_retrieve_node_is_coroutine(self):
@@ -135,8 +142,8 @@ class AsyncNodeThreadWrappingTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.get("tool_calls_pending"))
 
     async def test_tools_node_wraps_sync_execute_tool_in_to_thread(self):
-        from rag.nodes import agent_nodes
-        from rag.nodes.agent_nodes import tools_node
+        import rag.tool_executor as tool_executor
+        from rag.nodes.tool_execution_node import tools_node
         from rag.tools import execute_tool
         from rag.llm_provider import ToolCall
         # ... spy on asyncio.to_thread to ensure it is used for execute_tool
@@ -171,7 +178,7 @@ class AsyncNodeThreadWrappingTests(unittest.IsolatedAsyncioTestCase):
         }
         class _StubAgent:
             pass
-        with unittest.mock.patch.object(agent_nodes.asyncio, "to_thread", side_effect=spy):
+        with unittest.mock.patch.object(tool_executor.asyncio, "to_thread", side_effect=spy):
             try:
                 await tools_node(_StubAgent(), state)
             except asyncio.CancelledError:

@@ -15,7 +15,7 @@ from rag.embedding_pipeline import BackoffConfig, with_exponential_backoff
 from rag.paths import DATA_DIR, ensure_dir
 
 # Liste des entreprises demandées avec leurs tickers officiels.
-# 20 entreprises — 14 US/EU (SEC) + 6 Euronext Paris (yfinance prix seuls).
+# Mode test/debug: seules les valeurs présentes dans TRACKED_TICKERS sont téléchargées.
 # Le nom (slug) sert à nommer le CSV historique_prix_<slug>.csv.
 supported_companies = {
     "nvidia": "NVDA",

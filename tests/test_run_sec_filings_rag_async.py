@@ -17,6 +17,10 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 
+async def _inline_to_thread(func, *args, **kwargs):
+    return func(*args, **kwargs)
+
+
 class RunSecFilingsRagAsyncTests(unittest.TestCase):
     """Fix #2 — run_sec_filings_rag must be a native coroutine function."""
 
@@ -78,7 +82,8 @@ class RunSecFilingsRagAsyncTests(unittest.TestCase):
                 return kwargs.get("candidate_indices", [])
 
         with patch("rag.tools._balanced_rerank_indices", return_value=[0, 1]), \
-             patch("rag.tools._ticker_counts", return_value={"NVDA": 2}):
+             patch("rag.tools._ticker_counts", return_value={"NVDA": 2}), \
+             patch("rag.nodes.retrieval_node.asyncio.to_thread", side_effect=_inline_to_thread):
             agent = SimpleNamespace(rag=FakeRag(), max_tool_iterations=6)
             args = SecFilingsRAGArgs(
                 query="NVDA 10-K risk factors 2024",
@@ -105,8 +110,8 @@ class ToolsNodeDispatchTests(unittest.TestCase):
     def test_tools_node_handles_async_tool_directly(self):
         """tools_node should dispatch sec_filings_rag_tool via await,
         not via asyncio.to_thread (which would defeat the fix)."""
-        import rag.nodes.agent_nodes as agent_nodes_module
-        source = inspect.getsource(agent_nodes_module.tools_node)
+        import rag.tool_executor as tool_executor_module
+        source = inspect.getsource(tool_executor_module.ToolExecutor.dispatch)
         # The tool loop in tools_node must call execute_tool (sync wrapper)
         # for sync tools AND a separate path for async tools.
         self.assertIn("execute_tool", source)
