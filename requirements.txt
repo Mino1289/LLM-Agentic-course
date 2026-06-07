@@ -3,6 +3,7 @@ chromadb
 langchain-text-splitters
 langgraph
 langsmith
+mcp
 openai
 google-genai
 pdfplumber

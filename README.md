@@ -1,6 +1,6 @@
 # Finance RAG LangGraph
 
-Projet RAG financier cohérent de bout en bout pour analyser des rapports SEC (10-K/10-Q/8-K) avec:
+Projet RAG financier cohérent de bout en bout pour analyser des rapports SEC / foreign issuer (10-K/10-Q/8-K/20-F/6-K) avec:
 
 - stratégie unique: **semantic chunking + vector retrieval + reranking**
 - agent **LangGraph v2** (boucle Agent ↔ Outils, style MCP)
@@ -22,9 +22,11 @@ L'interface se comporte comme un chatbot:
 ## Structure
 
 - `rag/download_SEC_reports.py`: téléchargement SEC dans `data/`
-- `rag/preprocess.py`: extraction sections (Item 1A/7/8) vers `rag/processed_data/`
+- `rag/preprocess.py`: extraction sections (Item 1A/7/8) + fallback foreign issuer vers `rag/processed_data/`
 - `rag/hybrid_rag.py`: indexation vectorielle Chroma + retrieval/reranking
-- `rag/langgraph_flow.py`: graphe agent v2 (prepare → memory → agent ⇄ tools → gc)
+- `rag/langgraph_flow.py`: graphe agent v2 (prepare → memory → guard → agent ⇄ tools → gc)
+- `rag/tool_executor.py`: validation, dispatch async/sync et normalisation des résultats d'outils
+- `rag/mcp_server.py`: serveur MCP stdio exposant les outils du projet
 - `rag/tools.py`: 5 outils agent (`sec_filings_rag_tool`, `market_price_tool`, `validate_claims_tool`, `simulate_portfolio_tool`, `export_investment_report_tool`)
 - `PHASE2.md`: démo, bilan phase 2, approche type MCP
 - `rag/llm_provider.py`: providers OpenAI / GitHub Models / Gemini (tool calling)
@@ -35,13 +37,15 @@ L'interface se comporte comme un chatbot:
 
 ### Entreprises suivies (tickers)
 
-Univers temporairement limité au mode test/debug: `NVDA`, `AMD`, `MSFT`.
+Univers temporairement limité au mode test/debug: `NVDA`, `ASML`, `AMD`, `ARM`, `MSFT`.
 
 ### Documents ingeres actuellement
 
 - `10-K` (rapport annuel)
 - `10-Q` (rapport trimestriel)
 - `8-K` limites a l'item `2.02` (publication de resultats)
+- `20-F` (rapport annuel foreign private issuer, ex: ASML/ARM)
+- `6-K` (interim foreign private issuer, ex: ASML/ARM)
 - transcripts d'earnings calls en `.txt` (si le nom contient `earnings_call`, `conference_call` ou `transcript`)
 - sections extraites au preprocess (par defaut): `Item 1A` et `Item 7`
 - section optionnelle: `Item 8` (si activee via `--sections 1a,7,8`)
@@ -52,7 +56,7 @@ Univers temporairement limité au mode test/debug: `NVDA`, `AMD`, `MSFT`.
 
 ### Consequence sur la pertinence
 
-Le chatbot est coherent sur l'analyse fondamentale long-terme et intermediaire (10-K/10-Q/8-K), mais reste limite au perimetre des documents SEC + transcripts disponibles.
+Le chatbot est coherent sur l'analyse fondamentale long-terme et intermediaire (10-K/10-Q/8-K/20-F/6-K), mais reste limite au perimetre des documents SEC/foreign issuer + transcripts disponibles.
 
 ## Configuration
 
@@ -114,6 +118,8 @@ que les sections et années demandées. Utilisez `--no-clean-output` uniquement 
 debug incrémental volontaire.
 
 Par defaut, les `8-K` (item `2.02`) sont inclus.  
+Les documents `20-F` et `6-K` sont conserves via fallback texte integral quand les
+sections SEC standard `Item 1A/7/8` ne sont pas detectees.
 Pour les exclure explicitement:
 
 ```bash
@@ -131,6 +137,45 @@ python3 rag/hybrid_rag.py --plan --strategy semantic
 ```bash
 python3 rag/hybrid_rag.py --embed --strategy semantic --quota-used 0
 ```
+
+### Serveur MCP
+
+Installer les dépendances puis lancer le serveur stdio:
+
+```bash
+.venv/bin/pip install -r requirements.txt
+.venv/bin/python -m rag.mcp_server
+```
+
+Ne collez pas la configuration JSON ci-dessous dans le terminal du serveur.
+En mode `stdio`, le serveur attend des messages JSON-RPC MCP envoyés par un
+client compatible, pas un fichier de configuration.
+
+Exemple de configuration à mettre dans le client MCP:
+
+```json
+{
+  "mcpServers": {
+    "finance-rag": {
+      "command": "/home/julien/Documents/UQAC(nogit)/LLM-Agentic-course/.venv/bin/python",
+      "args": ["-m", "rag.mcp_server"],
+      "cwd": "/home/julien/Documents/UQAC(nogit)/LLM-Agentic-course"
+    }
+  }
+}
+```
+
+Le serveur expose les 5 outils du projet via MCP:
+
+- `sec_filings_rag_tool`
+- `market_price_tool`
+- `validate_claims_tool`
+- `simulate_portfolio_tool`
+- `export_investment_report_tool`
+
+Le serveur charge Chroma avec `max_new_embeddings=0`: il n'embedde pas de
+nouveaux chunks au démarrage. Lancez l'indexation séparément si le plan indique
+des chunks manquants.
 
 Pour un temps d'indexation raisonnable, utilisez les embeddings en batch:
 
@@ -187,9 +232,10 @@ Le graphe exécute:
 
 1. `prepare_query_node` — normalisation requête / tickers / années
 2. `memory_read_node` — résumé conversationnel
-3. `agent_node` — LLM avec tool calling (boucle)
-4. `tools_node` — 5 outils (RAG, prix, validation, simulation, export)
-5. `finalize_node` → `memory_write_node` → `gc_node`
+3. `guard_node` — décision LLM légère avec accès mémoire : hors sujet, coverage info, clarification évidente
+4. `agent_node` — LLM avec tool calling (boucle)
+5. `tools_node` — orchestration minimale, déléguée à `ToolExecutor`
+6. `finalize_node` → `memory_write_node` → `gc_node`
 
 Exemple de requête complexe (démo phase 2) :
 

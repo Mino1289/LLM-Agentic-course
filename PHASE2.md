@@ -8,7 +8,7 @@ Démontrer comment un **agent unique** combine :
 - récupération d'information (RAG SEC / earnings),
 - utilisation d'outils (prix, validation, simulation, export).
 
-Le graphe LangGraph v2 orchestre une boucle `agent_node` ⇄ `tools_node` sans routing statique figé.
+Le graphe LangGraph v2 orchestre une boucle `agent_node` ⇄ `tools_node` sans routing statique figé, précédée d'un `guard_node` LLM léger.
 
 ## Approche « type MCP »
 
@@ -16,21 +16,24 @@ Le projet n'expose pas un serveur MCP (stdio/HTTP). Il reprend les **idées** du
 
 | MCP officiel | Ce projet |
 |--------------|-----------|
-| Serveur + transport réseau | Non |
+| Serveur + transport réseau | Optionnel : `rag/mcp_server.py` en stdio |
 | Contrat outil (nom, description, schéma JSON) | `get_tool_definitions()` dans [`rag/tools.py`](rag/tools.py) |
-| Exécution des outils | `execute_tool()` + `tools_node` |
+| Exécution des outils | `ToolExecutor` + `tools_node` |
 | Orchestration | LLM dans `agent_node` (function calling OpenAI / Gemini) |
 
 Les outils sont **découplés** de la logique agent : le LLM choisit quand les appeler selon la requête.
+
+Le serveur MCP expose les mêmes outils que LangGraph. Il sert de couche
+d'interopérabilité, sans réécrire le RAG ni la logique métier.
 
 ## Catalogue des 5 outils
 
 | Outil | Rôle | Quand l'utiliser |
 |-------|------|------------------|
-| `sec_filings_rag_tool` | Recherche ChromaDB (10-K, 10-Q, 8-K, EARNINGS_CALL) | Faits fondamentaux, risques, MD&A, transcripts |
+| `sec_filings_rag_tool` | Recherche ChromaDB (10-K, 10-Q, 8-K, 20-F, 6-K, EARNINGS_CALL) | Faits fondamentaux, risques, MD&A, foreign issuer filings, transcripts |
 | `market_price_tool` | Prix / performance via yfinance | Comparaisons de performance, fenêtres de dates |
 | `validate_claims_tool` | Vérifie des affirmations vs extraits RAG déjà récupérés | Après RAG, avant conclusion sur des faits SEC |
-| `simulate_portfolio_tool` | Allocation fictive (NVDA/AMD/MSFT, poids = 100 %) | Rebalancement / allocation pédagogique, **aucun ordre réel** |
+| `simulate_portfolio_tool` | Allocation fictive sur `NVDA`, `ASML`, `AMD`, `ARM`, `MSFT` (poids = 100 %) | Rebalancement / allocation pédagogique, **aucun ordre réel** |
 | `export_investment_report_tool` | Sauvegarde Markdown dans `reports/` | Demande explicite de rapport fichier |
 
 ## Scénario de démo (Streamlit)

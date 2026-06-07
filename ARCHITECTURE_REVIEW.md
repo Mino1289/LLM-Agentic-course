@@ -43,15 +43,15 @@ L'indexation batch (`--embed`, RPM, retries) impose une planification manuelle d
 ## Architecture V2 (résumé)
 
 ```
-prepare_query → memory_read → agent_node ⇄ tools_node → finalize → memory_write → gc
+prepare_query → memory_read → guard LLM → agent_node ⇄ tools_node → finalize → memory_write → gc
 ```
 
 Outils exposés (phase 2 complète) :
 
-1. `sec_filings_rag_tool` — ChromaDB, filtres 10-K / 10-Q / 8-K / **EARNINGS_CALL**
+1. `sec_filings_rag_tool` — ChromaDB, filtres 10-K / 10-Q / 8-K / 20-F / 6-K / **EARNINGS_CALL**
 2. `market_price_tool` — yfinance
-3. `validate_claims_tool` — recoupement déterministe affirmations ↔ extraits RAG
-4. `simulate_portfolio_tool` — allocation fictive contrôlée (NVDA/AMD/MSFT, pas d'exécution réelle)
+3. `validate_claims_tool` — juge NLI LLM borné aux extraits RAG
+4. `simulate_portfolio_tool` — allocation fictive contrôlée sur l'univers debug, pas d'exécution réelle
 5. `export_investment_report_tool` — fichiers dans `reports/`
 
 Scénario de démo reproductible et tableau MCP : voir [`PHASE2.md`](PHASE2.md).
