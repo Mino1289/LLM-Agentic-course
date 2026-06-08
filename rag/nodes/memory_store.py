@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from toon_format import encode as toon_encode
+
 
 @dataclass
 class ConversationMemory:
@@ -52,18 +54,30 @@ class MemoryStore:
 
 
 def format_memory_context(summary: str, window: list[dict[str, str]]) -> str:
-    parts = []
-    if summary:
-        parts.append(f"Resume memoire: {summary}")
-    if window:
-        turns = "\n".join(f"{t['role']}: {t['content']}" for t in window)
-        parts.append(f"Derniers echanges:\n{turns}")
-    return "\n\n".join(parts) if parts else "Aucun contexte memorise."
+    """Serialize memory context (summary + recent turns) as a TOON payload.
+
+    Saves ~30% tokens vs the legacy "Resume memoire: ...\\n\\nDerniers echanges: ..."
+    text format. The structure is roundtrippable: toon_format.decode() returns
+    {"summary": str, "turns": [{"role", "content"}, ...]}.
+
+    Empty input (no summary, no window) returns a French fallback verbatim
+    (it's a prompt-engineering signal, not a payload).
+    """
+    if not summary and not window:
+        return "Aucun contexte memorise."
+    return toon_encode({"summary": summary, "turns": list(window)})
 
 
 def format_chat_context(messages: list[dict[str, str]], keep_last: int = 6) -> str:
+    """Serialize recent chat history as a TOON payload.
+
+    Same shape as format_memory_context but for raw multi-turn chat (no summary).
+    Empty history returns a French fallback verbatim.
+    """
     if not messages:
         return "Aucun historique de chat."
     selected = messages[-keep_last:]
-    formatted = [f"{m.get('role', 'user')}: {m.get('content', '')}" for m in selected]
-    return "\n".join(formatted)
+    return toon_encode({"turns": [
+        {"role": str(m.get("role", "user")), "content": str(m.get("content", ""))}
+        for m in selected
+    ]})

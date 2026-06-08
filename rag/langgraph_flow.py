@@ -1,32 +1,24 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
 from functools import partial
+from typing import AsyncIterator
 
 from langgraph.graph import END, StateGraph
 
 from rag.hybrid_rag import HybridRAG
-from rag.nodes.decompose_node import decompose_query_node
-from rag.nodes.generation_node import (
-    answer_generate_node,
-    coverage_info_node,
-    general_chat_node,
-    off_topic_block_node,
-    synthesis_node,
+from rag.guards import guard_node, route_after_guard
+from rag.nodes.agent_nodes import (
+    agent_node,
+    finalize_from_agent_state,
+    route_after_agent,
 )
-from rag.nodes.intent_node import clarify_node, intent_scope_node, route_after_intent_node
-from rag.nodes.memory_nodes import context_prune_node, gc_node, memory_read_node, memory_write_node
+from rag.nodes.memory_nodes import gc_node, memory_read_node, memory_write_node
 from rag.nodes.memory_store import MemoryStore
 from rag.nodes.prepare_node import prepare_query_node
-from rag.nodes.retrieval_node import multi_retrieve_node
-from rag.nodes.rerank_node import rerank_node
-from rag.nodes.scope_node import query_scope_node
 from rag.nodes.state import GraphState
-from rag.nodes.tool_nodes import (
-    price_data_node,
-    route_after_tool_orchestrator_node,
-    tool_orchestrator_node,
-)
+from rag.nodes.tool_execution_node import tools_node
 from rag.nodes.tracing import traceable
 
 
@@ -38,84 +30,78 @@ class FinanceLangGraphAgent:
         summarize_every_n_turns: int = 6,
         max_context_chunks: int = 8,
         max_context_tokens: int = 3500,
-        decompose_query_count: int = 4,
+        decompose_query_count: int = 2,
         price_max_days: int = 180,
         price_max_points: int = 40,
         price_max_tickers: int = 3,
         price_default_days: int = 90,
         price_max_attempts: int = 2,
+        max_tool_iterations: int = 6,
     ):
         self.rag = rag
         self.memory_store = MemoryStore(window_size=memory_window_size)
         self.summarize_every_n_turns = max(4, summarize_every_n_turns)
         self.max_context_chunks = max(4, max_context_chunks)
         self.max_context_tokens = max(1200, max_context_tokens)
-        self.decompose_query_count = max(3, decompose_query_count)
+        self.decompose_query_count = max(1, decompose_query_count)
         self.price_max_days = max(30, price_max_days)
         self.price_max_points = max(10, price_max_points)
         self.price_max_tickers = max(1, price_max_tickers)
         self.price_default_days = max(15, min(price_default_days, self.price_max_days))
         self.price_max_attempts = max(1, price_max_attempts)
+        self.max_tool_iterations = max(2, max_tool_iterations)
         self.graph = self._build_graph()
 
     def _build_graph(self):
         graph = StateGraph(GraphState)
         graph.add_node("prepare_query_node", partial(prepare_query_node, self))
-        graph.add_node("intent_scope_node", partial(intent_scope_node, self))
-        graph.add_node("clarify_node", partial(clarify_node, self))
+        graph.add_node("guard_node", partial(guard_node, self))
         graph.add_node("memory_read_node", partial(memory_read_node, self))
-        graph.add_node("query_scope_node", partial(query_scope_node, self))
-        graph.add_node("tool_orchestrator_node", partial(tool_orchestrator_node, self))
-        graph.add_node("price_data_node", partial(price_data_node, self))
-        graph.add_node("decompose_query_node", partial(decompose_query_node, self))
-        graph.add_node("multi_retrieve_node", partial(multi_retrieve_node, self))
-        graph.add_node("rerank_node", partial(rerank_node, self))
-        graph.add_node("context_prune_node", partial(context_prune_node, self))
-        graph.add_node("answer_generate_node", partial(answer_generate_node, self))
-        graph.add_node("general_chat_node", partial(general_chat_node, self))
-        graph.add_node("off_topic_block_node", partial(off_topic_block_node, self))
-        graph.add_node("coverage_info_node", partial(coverage_info_node, self))
-        graph.add_node("synthesis_node", partial(synthesis_node, self))
+        graph.add_node("agent_node", partial(agent_node, self))
+        graph.add_node("tools_node", partial(tools_node, self))
+        graph.add_node("finalize_node", finalize_from_agent_state)
         graph.add_node("memory_write_node", partial(memory_write_node, self))
         graph.add_node("gc_node", partial(gc_node, self))
 
         graph.set_entry_point("prepare_query_node")
-        graph.add_edge("prepare_query_node", "intent_scope_node")
+        graph.add_edge("prepare_query_node", "memory_read_node")
+        graph.add_edge("memory_read_node", "guard_node")
         graph.add_conditional_edges(
-            "intent_scope_node",
-            route_after_intent_node,
+            "guard_node",
+            route_after_guard,
             {
-                "clarify": "clarify_node",
-                "continue": "memory_read_node",
-                "general_chat": "general_chat_node",
-                "reject_offtopic": "off_topic_block_node",
-                "coverage_info": "coverage_info_node",
+                "agent": "agent_node",
+                "finalize": "finalize_node",
             },
         )
-        graph.add_edge("clarify_node", END)
-        graph.add_edge("off_topic_block_node", END)
-        graph.add_edge("coverage_info_node", END)
-        graph.add_edge("general_chat_node", "memory_write_node")
-        graph.add_edge("memory_read_node", "query_scope_node")
-        graph.add_edge("query_scope_node", "tool_orchestrator_node")
         graph.add_conditional_edges(
-            "tool_orchestrator_node",
-            route_after_tool_orchestrator_node,
+            "agent_node",
+            route_after_agent,
             {
-                "call_price_tool": "price_data_node",
-                "continue": "decompose_query_node",
+                "tools": "tools_node",
+                "finalize": "finalize_node",
             },
         )
-        graph.add_edge("price_data_node", "tool_orchestrator_node")
-        graph.add_edge("decompose_query_node", "multi_retrieve_node")
-        graph.add_edge("multi_retrieve_node", "rerank_node")
-        graph.add_edge("rerank_node", "context_prune_node")
-        graph.add_edge("context_prune_node", "answer_generate_node")
-        graph.add_edge("answer_generate_node", "synthesis_node")
-        graph.add_edge("synthesis_node", "memory_write_node")
+        graph.add_edge("tools_node", "agent_node")
+        graph.add_edge("finalize_node", "memory_write_node")
         graph.add_edge("memory_write_node", "gc_node")
         graph.add_edge("gc_node", END)
         return graph.compile()
+
+    def _initial_state(
+        self,
+        query: str,
+        conversation_id: str | None,
+        messages: list[dict[str, str]] | None,
+    ) -> GraphState:
+        return {
+            "conversation_id": conversation_id or str(uuid.uuid4()),
+            "query": query,
+            "messages": messages or [],
+            "agent_iterations": 0,
+            "tool_events": [],
+            "report_artifacts": [],
+        }
 
     @traceable(name="finance_langgraph_run")
     def run(
@@ -124,10 +110,54 @@ class FinanceLangGraphAgent:
         conversation_id: str | None = None,
         messages: list[dict[str, str]] | None = None,
     ) -> GraphState:
-        convo_id = conversation_id or str(uuid.uuid4())
-        initial_state: GraphState = {
-            "conversation_id": convo_id,
-            "query": query,
-            "messages": messages or [],
-        }
-        return self.graph.invoke(initial_state)
+        try:
+            running_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = None
+        if running_loop is not None and running_loop.is_running():
+            raise RuntimeError(
+                "agent.run() ne peut pas être appelé depuis une boucle asyncio. "
+                "Utilisez 'await agent.arun(...)' à la place."
+            )
+        return asyncio.run(self.arun(query, conversation_id, messages))
+
+    async def arun(
+        self,
+        query: str,
+        conversation_id: str | None = None,
+        messages: list[dict[str, str]] | None = None,
+    ) -> GraphState:
+        initial_state = self._initial_state(query, conversation_id, messages)
+        return await self.graph.ainvoke(initial_state)
+
+    async def astream(
+        self,
+        query: str,
+        conversation_id: str | None = None,
+        messages: list[dict[str, str]] | None = None,
+    ) -> AsyncIterator[dict]:
+        initial_state = self._initial_state(query, conversation_id, messages)
+        last_state: GraphState | None = None
+        async for event in self.graph.astream_events(initial_state, version="v2"):
+            kind = event.get("event")
+            # Rename LangChain's on_chat_model_stream → on_llm_token (UI-friendly)
+            if kind == "on_chat_model_stream":
+                chunk = event.get("data", {}).get("chunk")
+                delta = ""
+                if chunk is not None:
+                    delta = getattr(chunk, "content", None) or ""
+                    if not delta and isinstance(chunk, dict):
+                        delta = chunk.get("content", "") or ""
+                if delta:
+                    yield {"event": "on_llm_token", "token": delta}
+                continue
+            # Track the latest state from each on_chain_end (cumulative)
+            if kind == "on_chain_end":
+                output = event.get("data", {}).get("output")
+                if isinstance(output, dict):
+                    last_state = output
+            yield event
+        # Emit a final event with the complete GraphState so the UI can
+        # render artifacts without a second `arun()` call.
+        if last_state is not None:
+            yield {"event": "on_graph_end", "state": last_state}

@@ -1,0 +1,307 @@
+from __future__ import annotations
+
+import json
+from typing import Any
+
+from rag.llm_provider import ToolCall
+from rag.nodes.state import GraphState
+from rag.nodes.tracing import traceable
+from rag.tool_executor import ToolExecutor, now_utc
+
+
+def _canonical_tool_args(raw_args: str | dict[str, Any]) -> str:
+    if isinstance(raw_args, dict):
+        parsed = raw_args
+    else:
+        try:
+            parsed = json.loads(raw_args or "{}")
+        except json.JSONDecodeError:
+            return str(raw_args or "").strip()
+        if not isinstance(parsed, dict):
+            return json.dumps(parsed, ensure_ascii=False, sort_keys=True)
+    return json.dumps(parsed, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _tool_signature(tool_name: str, raw_args: str | dict[str, Any]) -> str:
+    return f"{tool_name}:{_canonical_tool_args(raw_args)}"
+
+
+def _completed_tool_signatures(tool_events: list[dict[str, Any]]) -> set[str]:
+    signatures: set[str] = set()
+    for event in tool_events:
+        if event.get("status") != "completed":
+            continue
+        tool = str(event.get("tool", ""))
+        args = event.get("args")
+        if tool and isinstance(args, dict):
+            signatures.add(_tool_signature(tool, args))
+    return signatures
+
+
+def _skipped_duplicate_event(tool_call: ToolCall) -> dict[str, Any]:
+    return {
+        "tool": tool_call.name,
+        "status": "skipped",
+        "reason": "duplicate_tool_call",
+        "args": _safe_tool_args(tool_call.arguments),
+        "started_at": now_utc(),
+        "finished_at": now_utc(),
+    }
+
+
+def _safe_tool_args(arguments: str) -> dict[str, Any]:
+    try:
+        parsed = json.loads(arguments or "{}")
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _duplicate_tool_message(tool_call: ToolCall) -> dict[str, Any]:
+    return {
+        "role": "tool",
+        "tool_call_id": tool_call.id,
+        "name": tool_call.name,
+        "content": (
+            '{"skipped": true, "reason": "duplicate_tool_call", '
+            '"message": "This exact tool call was already executed successfully. '
+            'Use the previous tool result already present in the conversation."}'
+        ),
+    }
+
+
+def _rag_chunk_key(chunk: str, metadata: dict[str, Any]) -> tuple[str, str, str, str, str, str]:
+    return (
+        str(metadata.get("ticker", "")),
+        str(metadata.get("year", "")),
+        str(metadata.get("file_type", "")),
+        str(metadata.get("section", "")),
+        str(metadata.get("source", "")),
+        chunk,
+    )
+
+
+def _merge_rag_context(
+    existing_chunks: list[str],
+    existing_metadatas: list[dict[str, Any]],
+    new_chunks: list[str],
+    new_metadatas: list[dict[str, Any]],
+) -> tuple[list[str], list[dict[str, Any]]]:
+    merged_chunks: list[str] = []
+    merged_metadatas: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str, str, str, str]] = set()
+
+    pairs: list[tuple[str, dict[str, Any]]] = []
+    pairs.extend(
+        (
+            chunk,
+            existing_metadatas[index] if index < len(existing_metadatas) else {},
+        )
+        for index, chunk in enumerate(existing_chunks)
+    )
+    pairs.extend(
+        (
+            chunk,
+            new_metadatas[index] if index < len(new_metadatas) else {},
+        )
+        for index, chunk in enumerate(new_chunks)
+    )
+
+    for chunk, metadata in pairs:
+        key = _rag_chunk_key(chunk, metadata)
+        if key in seen:
+            continue
+        seen.add(key)
+        merged_chunks.append(chunk)
+        merged_metadatas.append(metadata)
+
+    return merged_chunks, merged_metadatas
+
+
+def _merge_count_dicts(
+    existing: dict[str, Any] | None,
+    incoming: dict[str, Any] | None,
+) -> dict[str, int]:
+    merged: dict[str, int] = {}
+    for source in (existing or {}, incoming or {}):
+        for key, value in source.items():
+            try:
+                count = int(value)
+            except (TypeError, ValueError):
+                continue
+            merged[str(key)] = merged.get(str(key), 0) + count
+    return merged
+
+
+def _merge_unique_list(existing: Any, incoming: Any) -> list[str]:
+    values: list[str] = []
+    for raw in (existing or []), (incoming or []):
+        if not isinstance(raw, list):
+            continue
+        for item in raw:
+            value = str(item)
+            if value and value not in values:
+                values.append(value)
+    return sorted(values)
+
+
+def _ticker_counts_from_metadatas(metadatas: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for metadata in metadatas:
+        ticker = str(metadata.get("ticker", "UNKNOWN"))
+        counts[ticker] = counts.get(ticker, 0) + 1
+    return counts
+
+
+def _merge_rag_stats(
+    stats: dict[str, Any],
+    tool_stats: dict[str, Any],
+    final_chunks: list[str],
+    final_metadatas: list[dict[str, Any]],
+) -> dict[str, Any]:
+    merged = dict(stats)
+    count_keys = {
+        "retrieval_candidate_ticker_counts",
+        "rerank_final_ticker_counts",
+    }
+    list_keys = {
+        "retrieval_scoped_tickers",
+        "retrieval_scoped_doc_types",
+    }
+    summed_scalar_keys = {
+        "decomposed_query_count",
+        "retrieval_candidate_count",
+    }
+
+    for key, value in tool_stats.items():
+        if key in count_keys or key in list_keys or key in summed_scalar_keys:
+            continue
+        merged[key] = value
+
+    for key in count_keys:
+        merged[key] = _merge_count_dicts(merged.get(key), tool_stats.get(key))
+
+    for key in list_keys:
+        merged[key] = _merge_unique_list(merged.get(key), tool_stats.get(key))
+
+    for key in summed_scalar_keys:
+        try:
+            existing = int(merged.get(key, 0) or 0)
+            incoming = int(tool_stats.get(key, 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        merged[key] = existing + incoming
+
+    # The final context may be deduplicated across multiple RAG tool calls.
+    merged["rerank_final_ticker_counts"] = _ticker_counts_from_metadatas(final_metadatas)
+    merged["rerank_final_count"] = len(final_chunks)
+    merged["chunks_used"] = len(final_chunks)
+    return merged
+
+
+def _merge_tool_side_effects(
+    tool_name: str,
+    result: dict[str, Any] | None,
+    *,
+    final_chunks: list[str],
+    final_metadatas: list[dict[str, Any]],
+    price_context: str,
+    report_artifacts: list[dict[str, Any]],
+    stats: dict[str, Any],
+) -> tuple[list[str], list[dict[str, Any]], str, list[dict[str, Any]], dict[str, Any]]:
+    if not result:
+        return final_chunks, final_metadatas, price_context, report_artifacts, stats
+
+    if tool_name == "sec_filings_rag_tool":
+        final_chunks, final_metadatas = _merge_rag_context(
+            final_chunks,
+            final_metadatas,
+            list(result.get("final_chunks") or []),
+            list(result.get("final_metadatas") or []),
+        )
+        stats = _merge_rag_stats(
+            stats,
+            result.get("stats") or {},
+            final_chunks,
+            final_metadatas,
+        )
+        stats["rag_tool_used"] = True
+
+    if tool_name == "market_price_tool" and result.get("price_context"):
+        price_context = result["price_context"]
+        stats["price_tool_used"] = True
+
+    if tool_name == "export_investment_report_tool" and result.get("path"):
+        report_artifacts.append(
+            {
+                "path": result["path"],
+                "filename": result.get("filename", ""),
+                "title": result.get("title", ""),
+                "format": result.get("format", "md"),
+            }
+        )
+        stats["report_exported"] = True
+
+    if tool_name == "validate_claims_tool":
+        stats["validate_tool_used"] = True
+        stats.update(result.get("stats") or {})
+
+    if tool_name == "simulate_portfolio_tool" and result.get("positions"):
+        stats["simulate_tool_used"] = True
+
+    return final_chunks, final_metadatas, price_context, report_artifacts, stats
+
+
+@traceable(name="tools_node")
+async def tools_node(agent: Any, state: GraphState) -> GraphState:
+    lc_messages = list(state.get("lc_messages") or [])
+    pending: list[ToolCall] = state.get("pending_tool_calls") or []
+    stats = dict(state.get("stats") or {})
+    final_chunks = list(state.get("final_chunks") or [])
+    final_metadatas = list(state.get("final_metadatas") or [])
+    price_context = state.get("price_context", "")
+    report_artifacts = list(state.get("report_artifacts") or [])
+    tool_events = list(state.get("tool_events") or [])
+    executor = ToolExecutor(agent=agent, state=state)
+    completed_signatures = _completed_tool_signatures(tool_events)
+
+    for tool_call in pending:
+        signature = _tool_signature(tool_call.name, tool_call.arguments)
+        if signature in completed_signatures:
+            tool_events.append(_skipped_duplicate_event(tool_call))
+            lc_messages.append(_duplicate_tool_message(tool_call))
+            stats["duplicate_tool_calls_skipped"] = stats.get("duplicate_tool_calls_skipped", 0) + 1
+            continue
+
+        outcome = await executor.execute(tool_call)
+        tool_events.append(outcome.event)
+        lc_messages.append(outcome.message)
+        if outcome.event.get("status") == "completed":
+            completed_signatures.add(signature)
+        (
+            final_chunks,
+            final_metadatas,
+            price_context,
+            report_artifacts,
+            stats,
+        ) = _merge_tool_side_effects(
+            outcome.tool_call.name,
+            outcome.result,
+            final_chunks=final_chunks,
+            final_metadatas=final_metadatas,
+            price_context=price_context,
+            report_artifacts=report_artifacts,
+            stats=stats,
+        )
+
+    return {
+        "lc_messages": lc_messages,
+        "tool_calls_pending": False,
+        "pending_tool_calls": [],
+        "final_chunks": final_chunks,
+        "final_metadatas": final_metadatas,
+        "price_context": price_context,
+        "report_artifacts": report_artifacts,
+        "tool_events": tool_events,
+        "stats": stats,
+    }

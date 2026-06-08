@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 from datetime import datetime, timedelta
 from typing import Any
@@ -9,8 +8,6 @@ from typing import Any
 import yfinance as yf
 
 from rag.nodes.prompt_context import format_universe_hint
-from rag.nodes.state import GraphState
-from rag.nodes.tracing import traceable
 
 
 def _extract_first_json_object(raw: str) -> dict[str, Any] | None:
@@ -257,137 +254,3 @@ def fetch_price_context(agent: Any, tickers: list[str], start_date: str, end_dat
         return ""
     return f"Fenetre prix: {start_date} -> {end_date}\n" + "\n".join(lines)
 
-
-def route_after_tool_orchestrator_node(state: GraphState) -> str:
-    return state.get("price_tool_decision", "continue")
-
-
-@traceable(name="tool_orchestrator_node")
-def tool_orchestrator_node(agent: Any, state: GraphState) -> GraphState:
-    query = state.get("normalized_query", "")
-    metadata_filter = state.get("metadata_filter", {})
-    messages = state.get("messages", [])
-    attempts = state.get("price_tool_attempts", 0)
-    current_price_context = state.get("price_context", "")
-
-    if os.getenv("PRICE_TOOL_ENABLED", "true").lower() in {"0", "false", "no"}:
-        stats = state.get("stats", {})
-        stats.update(
-            {
-                "price_tool_attempts": attempts,
-                "price_tool_decision": "disabled_by_config",
-                "price_tool_decision_source": "config",
-                "price_context_ready": False,
-                "price_tickers": [],
-            }
-        )
-        return {
-            "price_tool_decision": "continue",
-            "price_tickers": [],
-            "stats": stats,
-        }
-
-    enough_price_context = has_sufficient_price_context(current_price_context)
-    tickers = []
-    allowed_tickers = _allowed_tickers_from_universe(agent, max_items=20)
-    if metadata_filter.get("ticker"):
-        tickers.append(metadata_filter["ticker"].upper())
-    for ticker in (state.get("target_tickers") or []):
-        up = str(ticker).upper()
-        if up in allowed_tickers and up not in tickers:
-            tickers.append(up)
-    explicit_mentions = _extract_explicit_tickers(query, allowed_tickers, max_items=agent.price_max_tickers)
-    for up in explicit_mentions:
-        if up not in tickers:
-            tickers.append(up)
-    tickers = tickers[: agent.price_max_tickers]
-    should_try_price, decision_reason, llm_tickers, decision_source = llm_tool_decision(
-        agent=agent,
-        query=query,
-        metadata_filter=metadata_filter,
-        messages=messages,
-        enough_price_context=enough_price_context,
-        attempts=attempts,
-        fallback_tickers=tickers,
-    )
-    tickers = llm_tickers
-    start_date, end_date = extract_price_date_window(agent, query)
-    if attempts > 0 and not enough_price_context:
-        start_date, end_date = widen_price_window(agent, start_date, end_date)
-
-    decision = "continue"
-    reason = decision_reason if decision_reason else "not_needed"
-
-    if should_try_price and not enough_price_context:
-        if not tickers:
-            reason = "no_ticker"
-        elif attempts < agent.price_max_attempts:
-            decision = "call_price_tool"
-            reason = "need_more_price_context"
-        else:
-            reason = "max_attempts_reached"
-    elif should_try_price and enough_price_context:
-        reason = "price_context_ready"
-
-    stats = state.get("stats", {})
-    stats.update(
-        {
-            "price_tool_attempts": attempts,
-            "price_tool_decision": reason,
-            "price_tool_decision_source": decision_source,
-            "price_context_ready": enough_price_context,
-            "price_tickers": tickers,
-            "price_window_start": start_date,
-            "price_window_end": end_date,
-        }
-    )
-
-    return {
-        "price_tool_decision": decision,
-        "price_tickers": tickers,
-        "price_window_start": start_date,
-        "price_window_end": end_date,
-        "stats": stats,
-    }
-
-
-@traceable(name="price_data_node")
-def price_data_node(agent: Any, state: GraphState) -> GraphState:
-    attempts = state.get("price_tool_attempts", 0) + 1
-    tickers = state.get("price_tickers", [])
-    start_date = state.get("price_window_start")
-    end_date = state.get("price_window_end")
-
-    if not tickers or not start_date or not end_date:
-        stats = state.get("stats", {})
-        stats.update(
-            {
-                "price_tool_used": False,
-                "price_tool_reason": "orchestrator_missing_inputs",
-                "price_tool_attempts": attempts,
-            }
-        )
-        return {
-            "price_tool_used": False,
-            "price_context": state.get("price_context", ""),
-            "price_tool_attempts": attempts,
-            "stats": stats,
-        }
-
-    summary = fetch_price_context(agent, tickers, start_date, end_date)
-    stats = state.get("stats", {})
-    stats.update(
-        {
-            "price_tool_used": bool(summary),
-            "price_tickers": tickers,
-            "price_window_start": start_date,
-            "price_window_end": end_date,
-            "price_tool_attempts": attempts,
-        }
-    )
-    return {
-        "price_tool_used": bool(summary),
-        "price_context": summary or state.get("price_context", ""),
-        "price_tool_attempts": attempts,
-        "stats": stats,
-    }

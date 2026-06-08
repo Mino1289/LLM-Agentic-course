@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from typing import Any
@@ -38,7 +39,7 @@ def parse_query_list(raw: str) -> list[str]:
     ]
 
 
-def decompose_query(agent: Any, query: str) -> list[str]:
+async def decompose_query(agent: Any, query: str) -> list[str]:
     universe_hint = format_universe_hint(agent)
     prompt = (
         "You are a query decomposition planner for a finance RAG system.\n"
@@ -49,7 +50,10 @@ def decompose_query(agent: Any, query: str) -> list[str]:
         "Return STRICT JSON only (no prose):\n"
         f"- a JSON array with {agent.decompose_query_count} to {agent.decompose_query_count + 2} short strings."
     )
-    raw = agent.rag.provider.generate(prompt, temperature=0.0, max_tokens=350)
+    raw = await asyncio.to_thread(
+        agent.rag.provider.generate,
+        prompt, temperature=0.0, max_tokens=350,
+    )
     parsed = parse_query_list(raw)
     if not parsed:
         parsed = [query]
@@ -59,11 +63,11 @@ def decompose_query(agent: Any, query: str) -> list[str]:
 
 
 @traceable(name="decompose_query_node")
-def decompose_query_node(agent: Any, state: GraphState) -> GraphState:
+async def decompose_query_node(agent: Any, state: GraphState) -> GraphState:
     normalized_query = state["normalized_query"]
     metadata_filter = state.get("metadata_filter", {})
     if metadata_filter.get("ticker") and metadata_filter.get("year"):
         decomposed = [normalized_query]
     else:
-        decomposed = decompose_query(agent, normalized_query)
+        decomposed = await decompose_query(agent, normalized_query)
     return {"decomposed_queries": decomposed}

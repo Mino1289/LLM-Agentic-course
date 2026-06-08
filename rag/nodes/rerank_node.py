@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from rag.nodes.prepare_node import extract_query_tickers
@@ -21,7 +22,7 @@ def _ticker_counts(metadatas: list[dict[str, Any]]) -> dict[str, int]:
     return counts
 
 
-def _balanced_rerank_indices(agent: Any, state: GraphState, candidates: list[int]) -> list[int]:
+async def _balanced_rerank_indices(agent: Any, state: GraphState, candidates: list[int]) -> list[int]:
     target_tickers = [
         str(ticker).upper()
         for ticker in (state.get("target_tickers") or [])
@@ -32,7 +33,8 @@ def _balanced_rerank_indices(agent: Any, state: GraphState, candidates: list[int
             target_tickers.append(ticker)
     target_tickers = list(dict.fromkeys(target_tickers))
     if len(target_tickers) <= 1:
-        return agent.rag._rerank(
+        return await asyncio.to_thread(
+            agent.rag._rerank,
             state["normalized_query"],
             candidates,
             top_k=agent.max_context_chunks,
@@ -48,7 +50,8 @@ def _balanced_rerank_indices(agent: Any, state: GraphState, candidates: list[int
     }
     groups = {ticker: indices for ticker, indices in groups.items() if indices}
     if len(groups) <= 1:
-        return agent.rag._rerank(
+        return await asyncio.to_thread(
+            agent.rag._rerank,
             state["normalized_query"],
             candidates,
             top_k=agent.max_context_chunks,
@@ -61,7 +64,8 @@ def _balanced_rerank_indices(agent: Any, state: GraphState, candidates: list[int
         if not ticker_candidates:
             continue
         selected.extend(
-            agent.rag._rerank(
+            await asyncio.to_thread(
+                agent.rag._rerank,
                 state["normalized_query"],
                 ticker_candidates,
                 top_k=per_ticker_budget,
@@ -74,7 +78,8 @@ def _balanced_rerank_indices(agent: Any, state: GraphState, candidates: list[int
         selected_set = set(selected)
         remaining_candidates = [idx for idx in candidates if idx not in selected_set]
         selected.extend(
-            agent.rag._rerank(
+            await asyncio.to_thread(
+                agent.rag._rerank,
                 state["normalized_query"],
                 remaining_candidates,
                 top_k=remaining_budget,
@@ -85,12 +90,12 @@ def _balanced_rerank_indices(agent: Any, state: GraphState, candidates: list[int
 
 
 @traceable(name="rerank_node")
-def rerank_node(agent: Any, state: GraphState) -> GraphState:
+async def rerank_node(agent: Any, state: GraphState) -> GraphState:
     candidates = state.get("candidate_indices", [])
     if not candidates:
         return {"final_chunks": [], "final_metadatas": []}
 
-    top_indices = _balanced_rerank_indices(agent, state, candidates)
+    top_indices = await _balanced_rerank_indices(agent, state, candidates)
     final_chunks = [agent.rag.documents[idx] for idx in top_indices]
     final_meta = [agent.rag.doc_metadata[idx] for idx in top_indices]
     stats = state.get("stats", {})

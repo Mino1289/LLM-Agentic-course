@@ -30,12 +30,46 @@ HEADERS = {
     "Accept-Encoding": "gzip, deflate"
 }
 
-# Liste des tickers ciblés (univers debug volontairement limité).
-TICKERS = list(TRACKED_TICKERS)
+# Liste des tickers éligibles SEC (US + foreign issuers via ADR).
+# Exclut automatiquement les tickers Euronext (.PA) qui n'ont pas de CIK SEC.
+SEC_TICKERS = tuple(t for t in TRACKED_TICKERS if not t.endswith(".PA"))
+SKIPPED_TICKERS = tuple(t for t in TRACKED_TICKERS if t.endswith(".PA"))
+
+# Liste des tickers ciblés pour le téléchargement SEC.
+TICKERS = list(SEC_TICKERS)
+
+# Pacing SEC : 0.15s par défaut = 6.6 req/s, sous la limite 10 req/s imposée par la SEC.
+# Ajustable via env var SEC_INTER_TICKER_SLEEP pour tests ou stress.
+_SEC_DEFAULT_INTER_TICKER_SLEEP = 0.15
+_SEC_MIN_INTER_TICKER_SLEEP = 0.10
+_SEC_HARD_CAP_INTER_TICKER_SLEEP = 0.05
+
+
+def _get_inter_ticker_sleep() -> float:
+    """Read SEC inter-ticker sleep from env, with a safety floor (no <50ms)."""
+    raw = os.getenv("SEC_INTER_TICKER_SLEEP", str(_SEC_DEFAULT_INTER_TICKER_SLEEP))
+    try:
+        value = float(raw)
+    except ValueError:
+        return _SEC_DEFAULT_INTER_TICKER_SLEEP
+    if value < _SEC_HARD_CAP_INTER_TICKER_SLEEP:
+        return _SEC_HARD_CAP_INTER_TICKER_SLEEP
+    if value < _SEC_MIN_INTER_TICKER_SLEEP:
+        return _SEC_MIN_INTER_TICKER_SLEEP
+    return value
+
+
+_INTER_TICKER_SLEEP = _get_inter_ticker_sleep()
+
 
 def rate_limit_sleep():
-    """Garantit le respect de la limite de la SEC (max 10 req/sec)"""
-    time.sleep(0.15)
+    """Garantit le respect de la limite de la SEC (max 10 req/sec).
+
+    Le délai inter-ticker est paramétrable via SEC_INTER_TICKER_SLEEP
+    (défaut 0.15s). Un plancher de sécurité de 50ms est appliqué pour
+    éviter tout dépassement de quota.
+    """
+    time.sleep(_INTER_TICKER_SLEEP)
 
 def get_cik_mapping():
     """Récupère le dictionnaire officiel Ticker -> CIK de la SEC"""
@@ -55,29 +89,34 @@ def get_cik_mapping():
     return mapping
 
 def get_filings(ticker, cik, min_year, max_year):
-    """Cherche les formulaires 8-K (Item 2.02), 10-K et 10-Q de la plage demandée."""
+    """Cherche les formulaires SEC de la plage demandée.
+
+    Pour les émetteurs US (10-K, 10-Q, 8-K avec item 2.02).
+    Pour les foreign private issuers (20-F annuel, 6-K interim). Les 6-K
+    sont des rapports de résultats étrangers, on les inclut tous.
+    """
     print(f"\nRecherche des rapports pour {ticker} (CIK: {cik})...")
     url = f"https://data.sec.gov/submissions/CIK{cik}.json"
-    
+
     response = requests.get(url, headers=HEADERS)
     if response.status_code != 200:
         print(f"Impossible de récupérer les données pour {ticker}")
         return []
-    
+
     rate_limit_sleep()
     data = response.json()
     recent_filings = data.get("filings", {}).get("recent", {})
-    
+
     if not recent_filings:
         return []
-    
+
     filings_found = []
     # Parcourt les documents soumis
     for i in range(len(recent_filings["form"])):
         form = recent_filings["form"][i]
         filing_date_str = recent_filings["filingDate"][i]
         filing_year = int(filing_date_str.split("-")[0])
-        
+
         if not (min_year <= filing_year <= max_year):
             continue
 
@@ -88,24 +127,27 @@ def get_filings(ticker, cik, min_year, max_year):
             items_raw = filing_items[i] if i < len(filing_items) else ""
             items = items_raw if isinstance(items_raw, list) else str(items_raw).split(",")
             items = [item.strip() for item in items]
-            
+
             # 2.02 = Communiqué de presse sur les résultats financiers
             if "2.02" in items:
                 is_wanted = True
         elif form in {"10-K", "10-Q"}:
             is_wanted = True
-            
+        elif form in {"20-F", "6-K"}:
+            # Foreign private issuers : 20-F = rapport annuel, 6-K = interim.
+            is_wanted = True
+
         if is_wanted:
             accession_num = recent_filings["accessionNumber"][i]
             accession_clean = accession_num.replace("-", "")
             primary_doc = recent_filings["primaryDocument"][i]
-            
+
             # Reconstruction de l'URL vers la page d'index du dépôt
             index_url = f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{accession_clean}/{accession_num}-index.htm"
-            
+
             # Reconstruction du lien direct vers le corps principal
             doc_url = f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{accession_clean}/{primary_doc}"
-            
+
             filings_found.append({
                 "ticker": ticker,
                 "form": form,
@@ -114,7 +156,7 @@ def get_filings(ticker, cik, min_year, max_year):
                 "indexUrl": index_url,
                 "documentUrl": doc_url
             })
-                
+
     return filings_found
 
 def download_filing(ticker, form, date, url):
@@ -159,6 +201,18 @@ def parse_args():
 
 def main():
     args = parse_args()
+    if SKIPPED_TICKERS:
+        print(
+            f"⏭  {len(SKIPPED_TICKERS)} ticker(s) sans CIK SEC (Euronext), "
+            f"skip auto : {', '.join(SKIPPED_TICKERS)}"
+        )
+    print(
+        f"⏱  Pacing SEC : {_INTER_TICKER_SLEEP}s entre tickers "
+        f"(SEC_INTER_TICKER_SLEEP={os.getenv('SEC_INTER_TICKER_SLEEP', 'default')})"
+    )
+    print(
+        f"📋 Univers SEC : {len(TICKERS)} tickers ({len(SKIPPED_TICKERS)} skip)\n"
+    )
     # 1. Obtenir les identifiants SEC (CIK) des entreprises
     cik_map = get_cik_mapping()
     

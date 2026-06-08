@@ -13,6 +13,7 @@ services:
       - ./data:/app/data
       - ./rag/processed_data:/app/rag/processed_data
       - ./rag/chroma_db:/app/rag/chroma_db
+      - ./reports:/app/reports
     restart: "no"
 
   finance-rag-ui:
@@ -30,4 +31,5 @@ services:
       - ./data:/app/data
       - ./rag/processed_data:/app/rag/processed_data
       - ./rag/chroma_db:/app/rag/chroma_db
+      - ./reports:/app/reports
     restart: unless-stopped

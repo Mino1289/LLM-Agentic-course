@@ -14,8 +14,13 @@ import chromadb
 from dotenv import load_dotenv
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
+from rag.embedding_pipeline import (
+    BackoffConfig,
+    QuotaState,
+    with_exponential_backoff,
+)
 from rag.llm_provider import LLMProvider
-from rag.paths import CHROMA_DB_DIR, ENV_FILE, PROCESSED_DATA_DIR
+from rag.paths import CHROMA_DB_DIR, DATA_DIR, ENV_FILE, PROCESSED_DATA_DIR
 
 load_dotenv(ENV_FILE)
 
@@ -29,6 +34,7 @@ DEFAULT_DAILY_EMBEDDING_LIMIT = 0
 DEFAULT_EMBEDDING_RPM = 100
 DEFAULT_EMBEDDING_BATCH_SIZE = 32
 DEFAULT_EMBEDDING_RETRIES = 3
+DEFAULT_QUOTA_STATE_PATH = DATA_DIR / "embedding_quota_state.json"
 
 
 @dataclass
@@ -328,6 +334,19 @@ def extract_ticker_from_source(source: str) -> str:
 
 
 def extract_file_type_from_source(source: str) -> str:
+    lower = source.lower()
+    if re.search(r"20[-_]?f", lower):
+        return "20-F"
+    if re.search(r"6[-_]?k", lower):
+        return "6-K"
+    if re.search(r"10[-_]?k", lower):
+        return "10-K"
+    if re.search(r"10[-_]?q", lower):
+        return "10-Q"
+    if re.search(r"8[-_]?k", lower):
+        return "8-K"
+    if "earnings_call" in lower:
+        return "EARNINGS_CALL"
     ext = os.path.splitext(source)[1].lower().lstrip(".")
     return ext or "txt"
 
@@ -466,11 +485,13 @@ class HybridRAG:
         self,
         max_files: Optional[int] = None,
         max_new_embeddings: Optional[int] = None,
-        daily_quota_used: int = 0,
+        daily_quota_used: Optional[int] = None,
         daily_quota_limit: int = DEFAULT_DAILY_EMBEDDING_LIMIT,
         rpm_limit: int = DEFAULT_EMBEDDING_RPM,
         embedding_batch_size: int = DEFAULT_EMBEDDING_BATCH_SIZE,
         max_embedding_retries: int = DEFAULT_EMBEDDING_RETRIES,
+        quota_state_path: Optional[Path] = None,
+        backoff_config: Optional[BackoffConfig] = None,
         dry_run: bool = False,
     ) -> EmbeddingPlan:
         print(f"Loading and indexing data (chunk_strategy={self.chunk_strategy})...")
@@ -479,6 +500,13 @@ class HybridRAG:
         self.documents = all_chunks
         self.doc_metadata = all_metadata
         self.chunk_ids = all_ids
+
+        # PRD etape 3 — quota suivi granulaire à chaud, persistant entre runs.
+        state_path = quota_state_path or DEFAULT_QUOTA_STATE_PATH
+        quota_state = QuotaState(state_path)
+        if daily_quota_used is None:
+            daily_quota_used = quota_state.quota_used()
+            print(f"♻️  Reprise quota depuis l'état persisté : {daily_quota_used:,}")
 
         if not dry_run:
             removed = self.remove_stale_index_entries(all_ids)
@@ -535,7 +563,9 @@ class HybridRAG:
         )
 
         sleep_sec = embedding_sleep_seconds(rpm_limit)
+        config = backoff_config or BackoffConfig(max_retries=max_embedding_retries)
         embedded = 0
+        last_error: Optional[str] = None
         for batch_num, batch_indices in enumerate(
             iter_batches(indices_to_embed, embedding_batch_size), start=1
         ):
@@ -543,50 +573,48 @@ class HybridRAG:
             metadatas = [self.doc_metadata[idx] for idx in batch_indices]
             ids = [all_ids[idx] for idx in batch_indices]
 
-            embeddings: list[list[float]] | None = None
-            for attempt in range(1, max_embedding_retries + 1):
-                try:
-                    embeddings = self.provider.embed(texts)
-                    if len(embeddings) != len(texts):
-                        raise ValueError(
-                            f"Embedding response size mismatch: {len(embeddings)} vs {len(texts)}"
-                        )
-                    break
-                except Exception as e:
-                    if attempt >= max_embedding_retries:
-                        print(f"Error embedding batch {batch_num} after {attempt} tries: {e}")
-                        embeddings = None
-                        break
-                    backoff = min(8.0, 2 ** (attempt - 1))
-                    print(
-                        f"Embedding batch {batch_num} failed (attempt {attempt}/{max_embedding_retries}): {e}. "
-                        f"Retry in {backoff:.1f}s..."
+            try:
+                embeddings = with_exponential_backoff(
+                    lambda t=texts: self.provider.embed(t),
+                    config=config,
+                )
+                if len(embeddings) != len(texts):
+                    raise ValueError(
+                        f"Embedding response size mismatch: {len(embeddings)} vs {len(texts)}"
                     )
-                    time.sleep(backoff)
-
-            if embeddings is None:
+            except Exception as e:
+                last_error = f"batch {batch_num}: {e}"
+                print(f"❌ Batch {batch_num} abandonné : {e}")
+                quota_state.update(batch_size=0, last_error=last_error)
                 break
 
             try:
-                self.collection.upsert(
-                    documents=texts,
-                    embeddings=embeddings,
-                    metadatas=metadatas,
-                    ids=ids,
+                with_exponential_backoff(
+                    lambda t=texts, e=embeddings, m=metadatas, i=ids: self.collection.upsert(
+                        documents=t, embeddings=e, metadatas=m, ids=i
+                    ),
+                    config=config,
                 )
-                embedded += len(batch_indices)
-                if batch_num % 5 == 0 or embedded == len(indices_to_embed):
-                    print(f"  Progression : {embedded}/{len(indices_to_embed)}")
-                time.sleep(sleep_sec)
             except Exception as e:
-                print(f"Error writing batch {batch_num} to ChromaDB: {e}")
+                last_error = f"batch {batch_num} upsert: {e}"
+                print(f"❌ Écriture ChromaDB batch {batch_num} échouée : {e}")
+                quota_state.update(batch_size=0, last_error=last_error)
                 break
+
+            embedded += len(batch_indices)
+            quota_state.update(batch_size=len(batch_indices), last_error=None)
+            if batch_num % 5 == 0 or embedded == len(indices_to_embed):
+                print(
+                    f"  Progression : {embedded}/{len(indices_to_embed)} "
+                    f"(quota-used={quota_state.quota_used():,})"
+                )
+            time.sleep(sleep_sec)
 
         print(f"Vector indexing complete. Total in DB: {self.collection.count()}")
         if plan.deferred_chunks > 0:
             print(
                 f"⏳ {plan.deferred_chunks} chunks restants — "
-                f"relancez demain avec --quota-used mis à jour."
+                f"l'état quota est persisté dans {state_path}."
             )
         return plan
 
@@ -788,8 +816,15 @@ if __name__ == "__main__":
     parser.add_argument(
         "--quota-used",
         type=int,
-        default=int(os.getenv("EMBEDDING_DAILY_USED", "0")),
-        help="Embeddings déjà consommés aujourd'hui (ex: 269).",
+        default=None,
+        help="Embeddings déjà consommés aujourd'hui (ex: 269). "
+        "Si omis, repris automatiquement depuis --quota-state.",
+    )
+    parser.add_argument(
+        "--quota-state",
+        type=Path,
+        default=Path(os.getenv("EMBEDDING_QUOTA_STATE_PATH", str(DEFAULT_QUOTA_STATE_PATH))),
+        help="Fichier JSON d'état du quota (reprise entre runs).",
     )
     parser.add_argument(
         "--quota-limit",
@@ -834,6 +869,8 @@ if __name__ == "__main__":
         rpm_limit=args.rpm,
         embedding_batch_size=args.batch_size,
         max_embedding_retries=args.retries,
+        quota_state_path=args.quota_state,
+        backoff_config=BackoffConfig.from_env(),
         dry_run=args.plan and not args.embed,
     )
 
@@ -841,5 +878,5 @@ if __name__ == "__main__":
         print(
             "\nPour lancer l'embedding : "
             f"python3 rag/hybrid_rag.py --embed --strategy {args.strategy} "
-            f"--quota-used {args.quota_used}"
+            f"--quota-state {args.quota_state}"
         )
