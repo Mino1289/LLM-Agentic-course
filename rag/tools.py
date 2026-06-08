@@ -6,6 +6,7 @@ import logging
 import re
 import time
 from datetime import UTC, datetime
+from html import escape
 from typing import Any
 
 from pydantic import BaseModel
@@ -46,7 +47,7 @@ MARKET_PRICE_DESCRIPTION = (
 
 EXPORT_REPORT_DESCRIPTION = (
     "Save an investment report to the reports/ folder. "
-    "Supported formats: md (default). Returns the file path."
+    "Supported formats: md (default) and pdf. Returns the file path."
 )
 
 VALIDATE_CLAIMS_DESCRIPTION = (
@@ -532,6 +533,56 @@ def run_simulate_portfolio(
     }
 
 
+def _markdown_line_to_pdf_flowable(line: str, styles: Any) -> Any:
+    from reportlab.platypus import Paragraph, Spacer
+
+    stripped = line.strip()
+    if not stripped:
+        return Spacer(1, 8)
+
+    if stripped.startswith("### "):
+        return Paragraph(escape(stripped[4:]), styles["Heading3"])
+    if stripped.startswith("## "):
+        return Paragraph(escape(stripped[3:]), styles["Heading2"])
+    if stripped.startswith("# "):
+        return Paragraph(escape(stripped[2:]), styles["Heading1"])
+    if stripped.startswith("- "):
+        return Paragraph(f"• {escape(stripped[2:])}", styles["BodyText"])
+
+    # Keep basic Markdown emphasis readable without trying to implement a full parser.
+    text = escape(stripped)
+    text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
+    text = re.sub(r"`(.+?)`", r"<font name='Courier'>\1</font>", text)
+    return Paragraph(text, styles["BodyText"])
+
+
+def _write_pdf_report(path: Any, title: str, content: str) -> None:
+    try:
+        from reportlab.lib.pagesizes import letter
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.platypus import SimpleDocTemplate, Spacer
+    except ImportError as exc:
+        raise RuntimeError(
+            "PDF export requires reportlab. Install dependencies with: "
+            ".venv/bin/pip install -r requirements.txt"
+        ) from exc
+
+    styles = getSampleStyleSheet()
+    doc = SimpleDocTemplate(
+        str(path),
+        pagesize=letter,
+        rightMargin=48,
+        leftMargin=48,
+        topMargin=48,
+        bottomMargin=48,
+        title=title,
+    )
+    story = [_markdown_line_to_pdf_flowable(f"# {title}", styles), Spacer(1, 12)]
+    for line in content.splitlines():
+        story.append(_markdown_line_to_pdf_flowable(line, styles))
+    doc.build(story)
+
+
 def run_export_investment_report(args: ExportReportArgs) -> dict[str, Any]:
     ensure_dir(REPORTS_DIR)
     title = args.title
@@ -544,13 +595,12 @@ def run_export_investment_report(args: ExportReportArgs) -> dict[str, Any]:
     path = REPORTS_DIR / filename
 
     if extension == "pdf":
-        path = REPORTS_DIR / f"{safe_title}_{timestamp}.md"
-        path.write_text(f"# {title}\n\n{content}", encoding="utf-8")
+        _write_pdf_report(path, title, content)
         return {
-            "text": "PDF not available in this build; saved as Markdown instead.",
+            "text": f"PDF report saved to {path}",
             "path": str(path),
             "filename": path.name,
-            "format": "md",
+            "format": "pdf",
             "title": title,
         }
 

@@ -128,11 +128,17 @@ def render_report_downloads(report_artifacts: list[dict[str, Any]], key_prefix: 
             st.warning(f"Fichier introuvable: {path}")
             continue
         data = path.read_bytes()
+        if path.suffix == ".md":
+            mime = "text/markdown"
+        elif path.suffix == ".pdf":
+            mime = "application/pdf"
+        else:
+            mime = "application/octet-stream"
         st.download_button(
             label=f"Télécharger {artifact.get('filename', path.name)}",
             data=data,
             file_name=artifact.get("filename", path.name),
-            mime="text/markdown" if path.suffix == ".md" else "application/octet-stream",
+            mime=mime,
             key=f"{key_prefix}_report_{idx}",
         )
 

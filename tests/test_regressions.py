@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import os
 import unittest
 from pathlib import Path
@@ -393,6 +394,26 @@ class ConfigurationTests(unittest.TestCase):
             path = Path(result["path"])
             self.assertTrue(path.is_file())
             self.assertIn("# Test Report", path.read_text(encoding="utf-8"))
+            path.unlink(missing_ok=True)
+
+    @unittest.skipIf(importlib.util.find_spec("reportlab") is None, "reportlab not installed")
+    def test_export_report_writes_pdf_file(self):
+        with patch("rag.tools.REPORTS_DIR", Path(os.getenv("TMPDIR", "/tmp")) / "finance_rag_test_reports"):
+            from rag import tools as tools_module
+
+            tools_module.REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+            result = run_export_investment_report(
+                ExportReportArgs(
+                    title="Test PDF Report",
+                    content="## Section\nContent",
+                    format="pdf",
+                )
+            )
+            path = Path(result["path"])
+            self.assertTrue(path.is_file())
+            self.assertEqual(path.suffix, ".pdf")
+            self.assertEqual(result["format"], "pdf")
+            self.assertGreater(path.stat().st_size, 100)
             path.unlink(missing_ok=True)
 
     def test_normalize_github_model_id_strips_openai_prefix(self):

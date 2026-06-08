@@ -18,6 +18,8 @@ Tool usage guidelines:
 - validate_claims_tool: after RAG retrieval, verify key factual claims against excerpts (supported/partial/unsupported).
 - simulate_portfolio_tool: fictional allocation/rebalance across tracked tickers only, no real trades.
 - export_investment_report_tool: when the user asks to save/generate a report file.
+- Do not call the same tool twice with the same arguments. If a tool result is already present
+  in the conversation, use that result to answer or continue with the next distinct tool.
 
 For complex tasks (e.g. compare two tracked companies with 2024 SEC risks and
 6-month performance then save):

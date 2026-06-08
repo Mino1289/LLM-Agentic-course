@@ -28,6 +28,139 @@ async def _inline_to_thread(func, *args, **kwargs):
 
 
 class ToolEventLifecycleTests(unittest.TestCase):
+    def test_duplicate_tool_calls_are_skipped_after_first_success(self) -> None:
+        from rag.llm_provider import ToolCall
+        from rag.nodes.tool_execution_node import tools_node
+
+        agent = MagicMock()
+        state = _build_state(
+            pending_tool_calls=[
+                ToolCall(
+                    id="call_1",
+                    name="simulate_portfolio_tool",
+                    arguments=json.dumps(
+                        {
+                            "allocations": {"NVDA": 40, "AMD": 30, "MSFT": 30},
+                            "notional_usd": 100000,
+                        }
+                    ),
+                ),
+                ToolCall(
+                    id="call_2",
+                    name="simulate_portfolio_tool",
+                    arguments=json.dumps(
+                        {
+                            "notional_usd": 100000,
+                            "allocations": {"NVDA": 40, "AMD": 30, "MSFT": 30},
+                        }
+                    ),
+                ),
+            ]
+        )
+
+        with patch("rag.tool_executor.execute_tool") as mock_execute, \
+             patch("rag.tool_executor.asyncio.to_thread", side_effect=_inline_to_thread):
+            mock_execute.return_value = {
+                "text": "simulated",
+                "positions": [{"ticker": "NVDA"}],
+            }
+            result = asyncio.run(tools_node(agent, state))
+
+        mock_execute.assert_called_once()
+        self.assertEqual([msg["tool_call_id"] for msg in result["lc_messages"]], ["call_1", "call_2"])
+        self.assertEqual(result["tool_events"][-1]["status"], "skipped")
+        self.assertEqual(result["tool_events"][-1]["reason"], "duplicate_tool_call")
+        self.assertEqual(result["stats"]["duplicate_tool_calls_skipped"], 1)
+
+    def test_rag_tool_results_are_accumulated_and_deduplicated(self) -> None:
+        from rag.nodes.tool_execution_node import _merge_tool_side_effects
+
+        stats: dict[str, Any] = {}
+        chunks: list[str] = []
+        metadatas: list[dict[str, Any]] = []
+        price_context = ""
+        artifacts: list[dict[str, Any]] = []
+
+        chunks, metadatas, price_context, artifacts, stats = _merge_tool_side_effects(
+            "sec_filings_rag_tool",
+            {
+                "final_chunks": ["nvda risk"],
+                "final_metadatas": [
+                    {
+                        "ticker": "NVDA",
+                        "year": "2024",
+                        "file_type": "10-K",
+                        "section": "Item_1A",
+                        "source": "nvda-10-k_2024.htm",
+                    }
+                ],
+                "stats": {
+                    "retrieval_candidate_count": 1,
+                    "retrieval_candidate_ticker_counts": {"NVDA": 1},
+                },
+            },
+            final_chunks=chunks,
+            final_metadatas=metadatas,
+            price_context=price_context,
+            report_artifacts=artifacts,
+            stats=stats,
+        )
+
+        chunks, metadatas, price_context, artifacts, stats = _merge_tool_side_effects(
+            "sec_filings_rag_tool",
+            {
+                "final_chunks": ["amd risk"],
+                "final_metadatas": [
+                    {
+                        "ticker": "AMD",
+                        "year": "2024",
+                        "file_type": "10-K",
+                        "section": "Item_1A",
+                        "source": "amd-10-k_2024.htm",
+                    }
+                ],
+                "stats": {
+                    "retrieval_candidate_count": 1,
+                    "retrieval_candidate_ticker_counts": {"AMD": 1},
+                },
+            },
+            final_chunks=chunks,
+            final_metadatas=metadatas,
+            price_context=price_context,
+            report_artifacts=artifacts,
+            stats=stats,
+        )
+
+        chunks, metadatas, price_context, artifacts, stats = _merge_tool_side_effects(
+            "sec_filings_rag_tool",
+            {
+                "final_chunks": ["nvda risk"],
+                "final_metadatas": [
+                    {
+                        "ticker": "NVDA",
+                        "year": "2024",
+                        "file_type": "10-K",
+                        "section": "Item_1A",
+                        "source": "nvda-10-k_2024.htm",
+                    }
+                ],
+                "stats": {
+                    "retrieval_candidate_count": 1,
+                    "retrieval_candidate_ticker_counts": {"NVDA": 1},
+                },
+            },
+            final_chunks=chunks,
+            final_metadatas=metadatas,
+            price_context=price_context,
+            report_artifacts=artifacts,
+            stats=stats,
+        )
+
+        self.assertEqual([m["ticker"] for m in metadatas], ["NVDA", "AMD"])
+        self.assertEqual(chunks, ["nvda risk", "amd risk"])
+        self.assertEqual(stats["rerank_final_ticker_counts"], {"NVDA": 1, "AMD": 1})
+        self.assertEqual(stats["chunks_used"], 2)
+
     def test_running_then_completed(self) -> None:
         from rag.llm_provider import ToolCall
         from rag.nodes.tool_execution_node import tools_node

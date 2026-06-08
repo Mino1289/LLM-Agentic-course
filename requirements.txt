@@ -11,6 +11,7 @@ pydantic>=2.0
 python-dotenv
 rank_bm25
 requests
+reportlab
 sentence-transformers
 streamlit
 torchvision
