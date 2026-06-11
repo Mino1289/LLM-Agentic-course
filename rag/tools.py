@@ -19,10 +19,15 @@ from rag.nodes.retrieval_node import multi_retrieve_node
 from rag.nodes.tool_nodes import fetch_price_context
 from rag.paths import REPORTS_DIR, ensure_dir
 from rag.tool_schemas import (
+    AccountActivityArgs,
+    ClosePositionArgs,
     ExportReportArgs,
+    GetNewsArgs,
     MarketPriceArgs,
+    PlaceTradeArgs,
+    PortfolioHistoryArgs,
+    PortfolioInfoArgs,
     SecFilingsRAGArgs,
-    SimulatePortfolioArgs,
     ValidateClaimsArgs,
     ValidateClaimsLLMArgs,
 )
@@ -55,13 +60,39 @@ VALIDATE_CLAIMS_DESCRIPTION = (
     "Call after sec_filings_rag_tool. Returns supported/partial/unsupported per claim with source refs."
 )
 
-SIMULATE_PORTFOLIO_DESCRIPTION = (
-    "Simulate a fictional portfolio allocation (no real trades). "
-    f"Weights must sum to 100% across tracked tickers ({_tracked_tickers_text()}). Max 3 positions."
+PORTFOLIO_INFO_DESCRIPTION = (
+    "View your Alpaca paper trading account: cash balance, equity, buying power, "
+    f"unrealized P&L, and all open positions. Restricted to {_tracked_tickers_text()}."
 )
 
-_MAX_NOTIONAL_USD = 1_000_000
-_WEIGHT_TOLERANCE = 0.01
+PLACE_TRADE_DESCRIPTION = (
+    "Submit a real paper trade on Alpaca. "
+    f"Support tickers: {_tracked_tickers_text()}. "
+    "Supports market, limit, stop, and stop-limit orders. "
+    f"Max notional per order: $10,000."
+)
+
+CLOSE_POSITION_DESCRIPTION = (
+    "Close a specific position by ticker or liquidate all positions "
+    "on your Alpaca paper trading account."
+)
+
+GET_NEWS_DESCRIPTION = (
+    "Fetch latest news articles for one or more tickers from Alpaca News API. "
+    f"Supports {_tracked_tickers_text()} and other US-traded symbols. "
+    "Returns headlines, source, summary, date, and URL."
+)
+
+PORTFOLIO_HISTORY_DESCRIPTION = (
+    "Get equity and P&L history for your Alpaca paper account over a period. "
+    "Defaults to 1 month. Supports 1D, 1W, 1M, 1A periods with configurable timeframe."
+)
+
+ACCOUNT_ACTIVITY_DESCRIPTION = (
+    "Retrieve account activity (fills, dividends, deposits, withdrawals, fees) "
+    "from your Alpaca paper account. Filter by activity type, date range, and sort direction."
+)
+
 _LOGGER = logging.getLogger("rag.tools")
 
 
@@ -456,81 +487,52 @@ def run_validate_claims(
     return {"text": "\n".join(lines), "validations": validations}
 
 
-def _normalize_allocations(allocations: Any) -> dict[str, float]:
-    if not isinstance(allocations, dict):
-        return {}
-    result: dict[str, float] = {}
-    for key, value in allocations.items():
-        ticker = str(key).upper().strip()
-        if ticker not in TRACKED_TICKERS:
-            continue
-        try:
-            weight = float(value)
-        except (TypeError, ValueError):
-            continue
-        if weight < 0:
-            continue
-        result[ticker] = weight
-    return result
-
-
-def run_simulate_portfolio(
-    args: SimulatePortfolioArgs,
+def run_portfolio_info(
+    args: PortfolioInfoArgs,
 ) -> dict[str, Any]:
-    normalized = _normalize_allocations(args.allocations)
-    notional_usd = args.notional_usd
-    if not normalized:
-        return {
-            "text": f"Allocations invalides. Utilisez {_tracked_tickers_text()} avec des poids >= 0.",
-            "positions": [],
-            "error": "invalid_tickers",
-        }
+    from rag.alpaca_tools import run_portfolio_info as _run
 
-    if len(normalized) > 3:
-        return {
-            "text": "Maximum 3 positions simulées.",
-            "positions": [],
-            "error": "too_many_positions",
-        }
+    return _run(args)
 
-    weight_sum = sum(normalized.values())
-    if abs(weight_sum - 100.0) > _WEIGHT_TOLERANCE:
-        return {
-            "text": f"Les poids doivent totaliser 100% (actuel: {weight_sum:.2f}%).",
-            "positions": [],
-            "error": "invalid_weights",
-        }
 
-    try:
-        notional = float(notional_usd)
-    except (TypeError, ValueError):
-        notional = 100_000.0
-    notional = max(1_000.0, min(notional, _MAX_NOTIONAL_USD))
+def run_place_trade(
+    args: PlaceTradeArgs,
+) -> dict[str, Any]:
+    from rag.alpaca_tools import run_place_trade as _run
 
-    positions: list[dict[str, Any]] = []
-    lines = [
-        "## Simulation de portefeuille (pédagogique — aucun ordre réel)",
-        f"Capital notionnel: ${notional:,.0f} USD",
-        "",
-    ]
-    for ticker, weight_pct in sorted(normalized.items()):
-        amount = notional * (weight_pct / 100.0)
-        positions.append(
-            {"ticker": ticker, "weight_pct": weight_pct, "notional_usd": round(amount, 2)}
-        )
-        lines.append(f"- **{ticker}**: {weight_pct:.1f}% → ${amount:,.2f}")
+    return _run(args)
 
-    lines.append("")
-    lines.append(
-        f"_Simulation contrôlée: tickers limités à {_tracked_tickers_text()}, pas d'exécution sur marché._"
-    )
 
-    return {
-        "text": "\n".join(lines),
-        "positions": positions,
-        "notional_usd": notional,
-        "disclaimer": "pedagogical_simulation_no_execution",
-    }
+def run_close_position(
+    args: ClosePositionArgs,
+) -> dict[str, Any]:
+    from rag.alpaca_tools import run_close_position as _run
+
+    return _run(args)
+
+
+def run_get_news(
+    args: GetNewsArgs,
+) -> dict[str, Any]:
+    from rag.alpaca_tools import run_get_news as _run
+
+    return _run(args)
+
+
+def run_portfolio_history(
+    args: PortfolioHistoryArgs,
+) -> dict[str, Any]:
+    from rag.alpaca_tools import run_portfolio_history as _run
+
+    return _run(args)
+
+
+def run_account_activity(
+    args: AccountActivityArgs,
+) -> dict[str, Any]:
+    from rag.alpaca_tools import run_account_activity as _run
+
+    return _run(args)
 
 
 def _markdown_line_to_pdf_flowable(line: str, styles: Any) -> Any:
@@ -697,22 +699,166 @@ def get_tool_definitions() -> list[dict[str, Any]]:
         {
             "type": "function",
             "function": {
-                "name": "simulate_portfolio_tool",
-                "description": SIMULATE_PORTFOLIO_DESCRIPTION,
+                "name": "portfolio_info_tool",
+                "description": PORTFOLIO_INFO_DESCRIPTION,
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "place_trade_tool",
+                "description": PLACE_TRADE_DESCRIPTION,
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "allocations": {
-                            "type": "object",
-                            "additionalProperties": {"type": "number"},
-                            "description": "Ticker to weight percent, e.g. {'MSFT': 50, 'NVDA': 50}.",
+                        "ticker": {
+                            "type": "string",
+                            "description": f"Ticker: {_tracked_tickers_text()}.",
                         },
-                        "notional_usd": {
+                        "side": {
+                            "type": "string",
+                            "enum": ["buy", "sell"],
+                            "description": "Buy or sell.",
+                        },
+                        "qty": {
                             "type": "number",
-                            "description": "Simulated capital in USD (default 100000, max 1000000).",
+                            "description": "Number of shares (fractional allowed).",
+                        },
+                        "order_type": {
+                            "type": "string",
+                            "enum": ["market", "limit", "stop", "stop_limit"],
+                            "description": "Default: market.",
+                        },
+                        "limit_price": {
+                            "type": "number",
+                            "description": "Limit price (required for limit / stop_limit).",
+                        },
+                        "stop_price": {
+                            "type": "number",
+                            "description": "Stop price (required for stop / stop_limit).",
                         },
                     },
-                    "required": ["allocations"],
+                    "required": ["ticker", "side", "qty"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "close_position_tool",
+                "description": CLOSE_POSITION_DESCRIPTION,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "ticker": {
+                            "type": "string",
+                            "description": "Ticker to close (leave empty if all=true).",
+                        },
+                        "all": {
+                            "type": "boolean",
+                            "description": "Set to true to liquidate all positions.",
+                        },
+                    },
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_news_tool",
+                "description": GET_NEWS_DESCRIPTION,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "symbols": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Tickers to get news for.",
+                        },
+                        "start": {
+                            "type": "string",
+                            "description": "Start date YYYY-MM-DD (optional).",
+                        },
+                        "end": {
+                            "type": "string",
+                            "description": "End date YYYY-MM-DD (optional).",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Max articles (default 10, max 50).",
+                        },
+                        "include_content": {
+                            "type": "boolean",
+                            "description": "Include full article content.",
+                        },
+                    },
+                    "required": ["symbols"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "portfolio_history_tool",
+                "description": PORTFOLIO_HISTORY_DESCRIPTION,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "period": {
+                            "type": "string",
+                            "description": "Duration: 1D, 1W, 1M (default), 1A.",
+                        },
+                        "timeframe": {
+                            "type": "string",
+                            "description": "Resolution: 1Min, 5Min, 15Min, 1H, 1D.",
+                        },
+                        "extended_hours": {
+                            "type": "boolean",
+                            "description": "Include extended hours.",
+                        },
+                    },
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "account_activity_tool",
+                "description": ACCOUNT_ACTIVITY_DESCRIPTION,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "activity_types": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Filter: FILL, DIV, CSD, CSW, INT, FEE, etc.",
+                        },
+                        "date": {
+                            "type": "string",
+                            "description": "Date filter YYYY-MM-DD.",
+                        },
+                        "after": {
+                            "type": "string",
+                            "description": "After this date YYYY-MM-DD.",
+                        },
+                        "until": {
+                            "type": "string",
+                            "description": "Before this date YYYY-MM-DD.",
+                        },
+                        "page_size": {
+                            "type": "integer",
+                            "description": "Max entries (default 20, max 100).",
+                        },
+                        "direction": {
+                            "type": "string",
+                            "enum": ["asc", "desc"],
+                            "description": "Sort direction.",
+                        },
+                    },
                 },
             },
         },
@@ -743,6 +889,16 @@ def execute_tool(
         else:
             full = args
         return run_validate_claims(full, agent=agent)
-    if name == "simulate_portfolio_tool":
-        return run_simulate_portfolio(args)
+    if name == "portfolio_info_tool":
+        return run_portfolio_info(args)
+    if name == "place_trade_tool":
+        return run_place_trade(args)
+    if name == "close_position_tool":
+        return run_close_position(args)
+    if name == "get_news_tool":
+        return run_get_news(args)
+    if name == "portfolio_history_tool":
+        return run_portfolio_history(args)
+    if name == "account_activity_tool":
+        return run_account_activity(args)
     return {"text": f"Unknown tool: {name}"}

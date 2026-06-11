@@ -37,23 +37,13 @@ class ToolEventLifecycleTests(unittest.TestCase):
             pending_tool_calls=[
                 ToolCall(
                     id="call_1",
-                    name="simulate_portfolio_tool",
-                    arguments=json.dumps(
-                        {
-                            "allocations": {"NVDA": 40, "AMD": 30, "MSFT": 30},
-                            "notional_usd": 100000,
-                        }
-                    ),
+                    name="portfolio_info_tool",
+                    arguments=json.dumps({}),
                 ),
                 ToolCall(
                     id="call_2",
-                    name="simulate_portfolio_tool",
-                    arguments=json.dumps(
-                        {
-                            "notional_usd": 100000,
-                            "allocations": {"NVDA": 40, "AMD": 30, "MSFT": 30},
-                        }
-                    ),
+                    name="portfolio_info_tool",
+                    arguments=json.dumps({}),
                 ),
             ]
         )
@@ -61,8 +51,9 @@ class ToolEventLifecycleTests(unittest.TestCase):
         with patch("rag.tool_executor.execute_tool") as mock_execute, \
              patch("rag.tool_executor.asyncio.to_thread", side_effect=_inline_to_thread):
             mock_execute.return_value = {
-                "text": "simulated",
-                "positions": [{"ticker": "NVDA"}],
+                "text": "Portfolio info",
+                "account": {"cash": 100000},
+                "positions": [],
             }
             result = asyncio.run(tools_node(agent, state))
 

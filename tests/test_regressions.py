@@ -31,12 +31,26 @@ from rag.llm_provider import (
 )
 from rag.nodes.agent_nodes import agent_node
 from rag.nodes.tool_execution_node import tools_node
-from rag.tool_schemas import ExportReportArgs, SimulatePortfolioArgs
+from rag.tool_schemas import (
+    ClosePositionArgs,
+    ExportReportArgs,
+    GetNewsArgs,
+    PlaceTradeArgs,
+    PortfolioHistoryArgs,
+    PortfolioInfoArgs,
+)
 from rag.tools import (
     _normalize_doc_types,
+    run_close_position,
     run_export_investment_report,
-    run_simulate_portfolio,
+    run_place_trade,
+    run_portfolio_info,
     run_validate_claims,
+)
+from rag.tools import (
+    run_account_activity,
+    run_get_news,
+    run_portfolio_history,
 )
 from rag.preprocess import SECTION_SPECS, _extract_between, is_in_year_range
 
@@ -441,7 +455,9 @@ class ConfigurationTests(unittest.TestCase):
     def test_tool_definitions_count(self):
         from rag.tools import get_tool_definitions
 
-        self.assertEqual(len(get_tool_definitions()), 5)
+        # 10 tools: sec_filings_rag, market_price, export_report, validate_claims,
+        # portfolio_info, place_trade, close_position, get_news, portfolio_history, account_activity
+        self.assertEqual(len(get_tool_definitions()), 10)
 
     def test_parse_openai_tool_calls(self):
         raw = [
@@ -530,17 +546,56 @@ class AgentToolsTests(unittest.TestCase):
         agent.rag.provider.generate.assert_not_called()
         self.assertEqual(result["stats"]["validate_nli_used"], False)
 
-    def test_simulate_portfolio_rejects_invalid_weights(self):
-        bad_sum = run_simulate_portfolio(SimulatePortfolioArgs(allocations={"MSFT": 40, "NVDA": 40}))
-        self.assertEqual(bad_sum.get("error"), "invalid_weights")
+    def test_place_trade_rejects_invalid_ticker(self):
+        from unittest.mock import patch
 
-        bad_ticker = run_simulate_portfolio(SimulatePortfolioArgs(allocations={"ZZZZ": 100}))
-        self.assertEqual(bad_ticker.get("error"), "invalid_tickers")
+        with patch("rag.alpaca_tools.get_alpaca_client", return_value=None):
+            result = run_place_trade(
+                PlaceTradeArgs(ticker="ZZZZ", side="buy", qty=10)
+            )
+        # Ticker validation happens before API call
+        self.assertEqual(result.get("error"), "invalid_ticker")
 
-    def test_simulate_portfolio_valid_allocation(self):
-        result = run_simulate_portfolio(SimulatePortfolioArgs(allocations={"MSFT": 50, "NVDA": 50}, notional_usd=10_000))
-        self.assertEqual(len(result["positions"]), 2)
-        self.assertAlmostEqual(sum(p["notional_usd"] for p in result["positions"]), 10_000, places=0)
+    def test_place_trade_rejects_invalid_side(self):
+        from pydantic import ValidationError
+
+        with self.assertRaises(ValidationError):
+            PlaceTradeArgs.model_validate({"ticker": "NVDA", "side": "hold", "qty": 10})
+
+    def test_portfolio_info_graceful_when_not_configured(self):
+        from unittest.mock import patch
+
+        with patch("rag.alpaca_tools.get_alpaca_client", return_value=None):
+            result = run_portfolio_info(PortfolioInfoArgs())
+        self.assertEqual(result.get("error"), "alpaca_not_configured")
+
+    def test_close_position_graceful_when_not_configured(self):
+        from unittest.mock import patch
+
+        with patch("rag.alpaca_tools.get_alpaca_client", return_value=None):
+            result = run_close_position(ClosePositionArgs(ticker="NVDA"))
+        self.assertEqual(result.get("error"), "alpaca_not_configured")
+
+    def test_get_news_graceful_when_not_configured(self):
+        from unittest.mock import patch
+
+        with patch("rag.alpaca_tools.get_news_client", return_value=None):
+            from rag.tools import run_get_news
+            from rag.tool_schemas import GetNewsArgs
+
+            result = run_get_news(GetNewsArgs(symbols=["NVDA"]))
+        self.assertEqual(result.get("error"), "alpaca_not_configured")
+
+    def test_portfolio_history_graceful_when_not_configured(self):
+        from unittest.mock import patch
+
+        with patch("rag.alpaca_tools.get_alpaca_client", return_value=None):
+            from rag.tools import run_portfolio_history
+            from rag.tool_schemas import PortfolioHistoryArgs
+
+            result = run_portfolio_history(PortfolioHistoryArgs())
+        self.assertEqual(result.get("error"), "alpaca_not_configured")
+        self.assertEqual(result.get("error"), "alpaca_not_configured")
 
     def test_agent_tool_loop_mocked(self):
         agent = SimpleNamespace(max_tool_iterations=6, rag=SimpleNamespace(provider=MagicMock()))

@@ -246,8 +246,8 @@ def _merge_tool_side_effects(
         stats["validate_tool_used"] = True
         stats.update(result.get("stats") or {})
 
-    if tool_name == "simulate_portfolio_tool" and result.get("positions"):
-        stats["simulate_tool_used"] = True
+    if tool_name in ("portfolio_info_tool", "place_trade_tool", "close_position_tool"):
+        stats["alpaca_tool_used"] = True
 
     return final_chunks, final_metadatas, price_context, report_artifacts, stats
 

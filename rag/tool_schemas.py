@@ -52,9 +52,61 @@ class ValidateClaimsArgs(BaseModel):
     metadatas: list[dict[str, Any]] = Field(default_factory=list)
 
 
-class SimulatePortfolioArgs(BaseModel):
-    allocations: dict[str, float] = Field(..., min_length=1)
-    notional_usd: float = Field(default=100_000, gt=0, le=1_000_000)
+class PortfolioInfoArgs(BaseModel):
+    pass
+
+
+class PlaceTradeArgs(BaseModel):
+    ticker: str = Field(..., min_length=1, description="Ticker to trade (NVDA, ASML, AMD, ARM, MSFT).")
+    side: Literal["buy", "sell"] = Field(..., description="Buy or sell.")
+    qty: float = Field(..., gt=0, description="Number of shares (can be fractional for paper).")
+    order_type: Literal["market", "limit", "stop", "stop_limit"] | None = Field(
+        default="market", description="Order type. Default market."
+    )
+    limit_price: float | None = Field(
+        default=None, gt=0, description="Limit price (required for limit / stop_limit)."
+    )
+    stop_price: float | None = Field(
+        default=None, gt=0, description="Stop price (required for stop / stop_limit)."
+    )
+
+
+class ClosePositionArgs(BaseModel):
+    ticker: str | None = Field(default=None, min_length=1, description="Ticker to close.")
+    all: bool = Field(default=False, description="Close all positions.")
+
+
+class GetNewsArgs(BaseModel):
+    symbols: list[str] = Field(..., min_length=1, description="Tickers to get news for.")
+    start: str | None = Field(default=None, description="Start date YYYY-MM-DD (optional).")
+    end: str | None = Field(default=None, description="End date YYYY-MM-DD (optional).")
+    limit: int = Field(default=10, gt=0, le=50, description="Max articles (default 10, max 50).")
+    include_content: bool = Field(default=False, description="Include full article content.")
+
+
+class PortfolioHistoryArgs(BaseModel):
+    period: str | None = Field(default="1M", description="Duration: 1D, 1W, 1M (default), 1A.")
+    timeframe: str | None = Field(default=None, description="Resolution: 1Min, 5Min, 15Min, 1H, 1D.")
+    extended_hours: bool = Field(default=False, description="Include extended hours.")
+    start: str | None = Field(default=None, description="Start timestamp (RFC3339).")
+    end: str | None = Field(default=None, description="End timestamp (RFC3339).")
+
+
+class AccountActivityArgs(BaseModel):
+    activity_types: list[str] | None = Field(
+        default=None,
+        description="Filter: FILL, DIV, CSD, CSW, INT, FEE, etc. Comma-separated or list.",
+    )
+    date: str | None = Field(default=None, description="Date filter YYYY-MM-DD.")
+    after: str | None = Field(default=None, description="Activities after this date YYYY-MM-DD.")
+    until: str | None = Field(default=None, description="Activities before this date YYYY-MM-DD.")
+    page_size: int = Field(default=20, gt=0, le=100, description="Max entries (default 20, max 100).")
+    direction: Literal["asc", "desc"] | None = Field(default="desc", description="Sort direction.")
+
+    @field_validator("activity_types", mode="before")
+    @classmethod
+    def _coerce_csv(cls, value: Any) -> Any:
+        return _split_csv(value)
 
 
 class ExportReportArgs(BaseModel):
@@ -68,6 +120,11 @@ __all__ = [
     "MarketPriceArgs",
     "ValidateClaimsLLMArgs",
     "ValidateClaimsArgs",
-    "SimulatePortfolioArgs",
+    "PortfolioInfoArgs",
+    "PlaceTradeArgs",
+    "ClosePositionArgs",
+    "GetNewsArgs",
+    "PortfolioHistoryArgs",
+    "AccountActivityArgs",
     "ExportReportArgs",
 ]

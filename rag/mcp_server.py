@@ -17,10 +17,15 @@ from rag.llm_provider import ToolCall
 from rag.paths import ENV_FILE
 from rag.tool_executor import ToolExecutor
 from rag.tools import (
+    ACCOUNT_ACTIVITY_DESCRIPTION,
+    CLOSE_POSITION_DESCRIPTION,
     EXPORT_REPORT_DESCRIPTION,
+    GET_NEWS_DESCRIPTION,
     MARKET_PRICE_DESCRIPTION,
+    PLACE_TRADE_DESCRIPTION,
+    PORTFOLIO_HISTORY_DESCRIPTION,
+    PORTFOLIO_INFO_DESCRIPTION,
     SEC_FILINGS_RAG_DESCRIPTION,
-    SIMULATE_PORTFOLIO_DESCRIPTION,
     VALIDATE_CLAIMS_DESCRIPTION,
 )
 
@@ -172,17 +177,102 @@ def create_mcp_server() -> Any:
             },
         )
 
-    @mcp.tool(description=SIMULATE_PORTFOLIO_DESCRIPTION)
-    async def simulate_portfolio_tool(
-        allocations: dict[str, float],
-        notional_usd: float = 100000,
+    @mcp.tool(description=PORTFOLIO_INFO_DESCRIPTION)
+    async def portfolio_info_tool() -> dict[str, Any]:
+        """View Alpaca paper account info and open positions."""
+        return await execute_mcp_tool("portfolio_info_tool", {})
+
+    @mcp.tool(description=PLACE_TRADE_DESCRIPTION)
+    async def place_trade_tool(
+        ticker: str,
+        side: str,
+        qty: float,
+        order_type: str | None = "market",
+        limit_price: float | None = None,
+        stop_price: float | None = None,
     ) -> dict[str, Any]:
-        """Simulate a fictional allocation over the tracked universe."""
+        """Submit a paper trade on Alpaca."""
         return await execute_mcp_tool(
-            "simulate_portfolio_tool",
+            "place_trade_tool",
             {
-                "allocations": allocations,
-                "notional_usd": notional_usd,
+                "ticker": ticker,
+                "side": side,
+                "qty": qty,
+                "order_type": order_type,
+                "limit_price": limit_price,
+                "stop_price": stop_price,
+            },
+        )
+
+    @mcp.tool(description=CLOSE_POSITION_DESCRIPTION)
+    async def close_position_tool(
+        ticker: str | None = None,
+        all: bool = False,
+    ) -> dict[str, Any]:
+        """Close a position or liquidate all on Alpaca paper."""
+        return await execute_mcp_tool(
+            "close_position_tool",
+            {
+                "ticker": ticker,
+                "all": all,
+            },
+        )
+
+    @mcp.tool(description=GET_NEWS_DESCRIPTION)
+    async def get_news_tool(
+        symbols: list[str],
+        start: str | None = None,
+        end: str | None = None,
+        limit: int = 10,
+        include_content: bool = False,
+    ) -> dict[str, Any]:
+        """Fetch news articles for one or more tickers."""
+        return await execute_mcp_tool(
+            "get_news_tool",
+            {
+                "symbols": symbols,
+                "start": start,
+                "end": end,
+                "limit": limit,
+                "include_content": include_content,
+            },
+        )
+
+    @mcp.tool(description=PORTFOLIO_HISTORY_DESCRIPTION)
+    async def portfolio_history_tool(
+        period: str | None = "1M",
+        timeframe: str | None = None,
+        extended_hours: bool = False,
+    ) -> dict[str, Any]:
+        """Get equity and P&L history for your Alpaca paper account."""
+        return await execute_mcp_tool(
+            "portfolio_history_tool",
+            {
+                "period": period,
+                "timeframe": timeframe,
+                "extended_hours": extended_hours,
+            },
+        )
+
+    @mcp.tool(description=ACCOUNT_ACTIVITY_DESCRIPTION)
+    async def account_activity_tool(
+        activity_types: list[str] | None = None,
+        date: str | None = None,
+        after: str | None = None,
+        until: str | None = None,
+        page_size: int = 20,
+        direction: str | None = "desc",
+    ) -> dict[str, Any]:
+        """Retrieve account activity (fills, dividends, transfers, fees)."""
+        return await execute_mcp_tool(
+            "account_activity_tool",
+            {
+                "activity_types": activity_types,
+                "date": date,
+                "after": after,
+                "until": until,
+                "page_size": page_size,
+                "direction": direction,
             },
         )
 

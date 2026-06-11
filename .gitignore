@@ -225,3 +225,6 @@ __marimo__/
 **/processed_data
 **/*db
 reports/
+
+skills-lock.json
+.agents

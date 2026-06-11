@@ -12,10 +12,15 @@ from pydantic import BaseModel, ValidationError
 from rag.llm_provider import ToolCall
 from rag.nodes.state import GraphState, ToolEvent
 from rag.tool_schemas import (
+    AccountActivityArgs,
+    ClosePositionArgs,
     ExportReportArgs,
+    GetNewsArgs,
     MarketPriceArgs,
+    PlaceTradeArgs,
+    PortfolioHistoryArgs,
+    PortfolioInfoArgs,
     SecFilingsRAGArgs,
-    SimulatePortfolioArgs,
     ValidateClaimsArgs,
     ValidateClaimsLLMArgs,
 )
@@ -49,8 +54,19 @@ def summarize_tool_args(name: str, arguments: str) -> str:
     if name == "validate_claims_tool":
         claims = args.get("claims") or []
         return f"claims_count={len(claims) if isinstance(claims, list) else 1}"
-    if name == "simulate_portfolio_tool":
-        return f"allocations={args.get('allocations')}, notional={args.get('notional_usd', 100000)}"
+    if name == "portfolio_info_tool":
+        return "portfolio_info"
+    if name == "place_trade_tool":
+        return f"ticker={args.get('ticker')}, side={args.get('side')}, qty={args.get('qty')}, type={args.get('order_type', 'market')}"
+    if name == "close_position_tool":
+        ticker = args.get("ticker")
+        return f"close_all={args.get('all', False)} ticker={ticker}" if ticker else f"close_all={args.get('all', False)}"
+    if name == "get_news_tool":
+        return f"symbols={args.get('symbols')}, limit={args.get('limit', 10)}"
+    if name == "portfolio_history_tool":
+        return f"period={args.get('period', '1M')}, timeframe={args.get('timeframe', 'auto')}"
+    if name == "account_activity_tool":
+        return f"types={args.get('activity_types')}, page_size={args.get('page_size', 20)}"
     return str(args)[:120]
 
 
@@ -86,8 +102,18 @@ class ToolExecutor:
             return SecFilingsRAGArgs.model_validate(llm_args)
         if tool_name == "market_price_tool":
             return MarketPriceArgs.model_validate(llm_args)
-        if tool_name == "simulate_portfolio_tool":
-            return SimulatePortfolioArgs.model_validate(llm_args)
+        if tool_name == "portfolio_info_tool":
+            return PortfolioInfoArgs.model_validate(llm_args)
+        if tool_name == "place_trade_tool":
+            return PlaceTradeArgs.model_validate(llm_args)
+        if tool_name == "close_position_tool":
+            return ClosePositionArgs.model_validate(llm_args)
+        if tool_name == "get_news_tool":
+            return GetNewsArgs.model_validate(llm_args)
+        if tool_name == "portfolio_history_tool":
+            return PortfolioHistoryArgs.model_validate(llm_args)
+        if tool_name == "account_activity_tool":
+            return AccountActivityArgs.model_validate(llm_args)
         if tool_name == "export_investment_report_tool":
             return ExportReportArgs.model_validate(llm_args)
         raise ValueError(f"Unknown tool: {tool_name}")

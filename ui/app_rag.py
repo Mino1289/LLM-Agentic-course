@@ -231,7 +231,7 @@ def render_debug(message: dict[str, Any], key_prefix: str) -> None:
                 "rag_tool_used": stats.get("rag_tool_used"),
                 "price_tool_used": stats.get("price_tool_used"),
                 "validate_tool_used": stats.get("validate_tool_used"),
-                "simulate_tool_used": stats.get("simulate_tool_used"),
+                "alpaca_tool_used": stats.get("alpaca_tool_used"),
                 "report_exported": stats.get("report_exported"),
             }
             st.json({k: v for k, v in pipeline_rows.items() if v not in (None, "", [])})
