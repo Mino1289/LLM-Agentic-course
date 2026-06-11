@@ -20,11 +20,11 @@ Routes:
 - continue: the finance agent should handle the request using RAG/tools if useful.
 - clarify: the request is finance-related but too vague to answer safely.
 - coverage_info: the user asks what companies/tickers are covered.
-- reject_offtopic: the request is clearly outside finance/RAG/market analysis.
+- reject_offtopic: the request is clearly outside finance/RAG/market/Alpaca analysis.
 - general_chat: harmless greeting or small talk that does not require tools.
 
 Priority:
-1) Prefer continue for finance, market, company, portfolio, report, SEC, risk, or price questions.
+1) Prefer continue for finance, market, company, portfolio, Alpaca (trading, account, orders, positions, news, history), report, SEC, risk, or price questions.
 2) Use clarify only when a finance request lacks enough scope and no reasonable assumption is possible.
 3) Use coverage_info only for explicit coverage/universe questions.
 4) Use reject_offtopic only when the request is clearly non-finance.

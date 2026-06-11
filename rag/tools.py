@@ -5,7 +5,7 @@ import json
 import logging
 import re
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from html import escape
 from typing import Any
 
@@ -47,7 +47,9 @@ SEC_FILINGS_RAG_DESCRIPTION = (
 
 MARKET_PRICE_DESCRIPTION = (
     f"Fetch stock price performance for tracked tickers ({_tracked_tickers_text()}) "
-    "between start_date and end_date (YYYY-MM-DD)."
+    "between start_date and end_date (YYYY-MM-DD). "
+    "Use a WIDER date range (at least 5 trading days) to ensure data is returned — "
+    "single-day queries often return nothing due to market hours and yfinance behavior."
 )
 
 EXPORT_REPORT_DESCRIPTION = (
@@ -300,14 +302,29 @@ async def run_sec_filings_rag(
     }
 
 
+def _widen_single_day(start_date: str, end_date: str, padding_days: int = 5) -> tuple[str, str]:
+    """Widen a single-day or too-narrow range so yfinance returns data."""
+    try:
+        start = datetime.strptime(start_date, "%Y-%m-%d").date()
+        end = datetime.strptime(end_date, "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return start_date, end_date
+    span = (end - start).days
+    if span < padding_days:
+        mid = start + (end - start) / 2
+        new_start = mid - timedelta(days=padding_days // 2)
+        new_end = mid + timedelta(days=padding_days // 2)
+        return new_start.isoformat(), new_end.isoformat()
+    return start_date, end_date
+
+
 def run_market_price_tool(
     args: MarketPriceArgs,
     *,
     agent: Any,
 ) -> dict[str, Any]:
     normalized = _normalize_tickers(args.tickers)
-    start_date = args.start_date
-    end_date = args.end_date
+    start_date, end_date = _widen_single_day(args.start_date, args.end_date)
     if not normalized:
         return {"text": f"No valid tickers provided. Use {_tracked_tickers_text()}.", "price_context": ""}
     summary = fetch_price_context(agent, normalized, start_date, end_date)

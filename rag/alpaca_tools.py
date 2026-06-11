@@ -58,7 +58,7 @@ def run_portfolio_info(args: PortfolioInfoArgs) -> dict[str, Any]:
         f"Solde: {_fmt_usd(float(account.cash))}",
         f"Equity: {_fmt_usd(float(account.equity))}",
         f"Buying Power: {_fmt_usd(float(account.buying_power))}",
-        f"P&L non réalisé: {_fmt_usd(float(account.unrealized_pl))}",
+        f"P&L non réalisé (intraday): {_fmt_usd(float(account.equity) - float(account.last_equity or account.equity))}",
         "",
     ]
 
@@ -97,7 +97,7 @@ def run_portfolio_info(args: PortfolioInfoArgs) -> dict[str, Any]:
             "cash": round(float(account.cash), 2),
             "equity": round(float(account.equity), 2),
             "buying_power": round(float(account.buying_power), 2),
-            "unrealized_pl": round(float(account.unrealized_pl), 2),
+            "unrealized_pl": round(float(account.equity) - float(account.last_equity or account.equity), 2),
         },
         "positions": pos_list,
         "position_count": len(pos_list),
@@ -209,12 +209,12 @@ def run_place_trade(args: PlaceTradeArgs) -> dict[str, Any]:
             f"\n*Ordre exécuté sur le compte Paper Alpaca — aucun capital réel engagé.*"
         ),
         "order": {
-            "id": order.id,
+            "id": str(order.id),
             "symbol": ticker,
             "side": side,
             "qty": qty,
             "order_type": order_type,
-            "status": order.status,
+            "status": str(order.status),
             "submitted_at": str(order.submitted_at),
         },
     }

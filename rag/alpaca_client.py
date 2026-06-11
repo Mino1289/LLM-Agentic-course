@@ -7,6 +7,11 @@ from functools import lru_cache
 from typing import Any
 
 import httpx
+from dotenv import load_dotenv
+
+from rag.paths import ENV_FILE
+
+load_dotenv(ENV_FILE)
 
 _LOGGER = logging.getLogger("rag.alpaca_client")
 
