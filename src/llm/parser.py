@@ -1,6 +1,7 @@
 """Parsing des tool calls depuis les réponses des différents providers."""
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Any
 
@@ -38,7 +39,7 @@ def _parse_gemini_tool_calls(response: Any) -> list[ToolCall]:
             ToolCall(
                 id=str(uuid.uuid4()),
                 name=getattr(fc, "name", "") or "",
-                arguments=__import__('json').dumps(dict(args)),
+                arguments=json.dumps(dict(args)),
                 thought_signature=ts,
             )
         )

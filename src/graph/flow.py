@@ -65,7 +65,7 @@ class FinanceLangGraphAgent:
         builder.add_node("finalize", finalize_from_agent_state)
         builder.set_entry_point("prepare")
         builder.add_edge("prepare", "guard")
-        builder.add_conditional_edges("guard", route_after_guard, {"retrieve": "retrieve", "agent": "agent", "finalize": "finalize", END: END})
+        builder.add_conditional_edges("guard", route_after_guard, {"agent": "agent", "finalize": "finalize", END: END})
         builder.add_edge("retrieve", "rerank")
         builder.add_edge("rerank", "memory")
         builder.add_edge("memory", "agent")

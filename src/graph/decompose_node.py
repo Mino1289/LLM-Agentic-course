@@ -22,7 +22,7 @@ def parse_query_list(raw: str) -> list[str]:
         data = json.loads(text)
         if isinstance(data, list):
             return [str(item).strip() for item in data if str(item).strip()]
-    except Exception:
+    except json.JSONDecodeError:
         pass
     array_match = re.search(r"\[[\s\S]*\]", text)
     if array_match:
@@ -30,7 +30,7 @@ def parse_query_list(raw: str) -> list[str]:
             data = json.loads(array_match.group(0))
             if isinstance(data, list):
                 return [str(item).strip() for item in data if str(item).strip()]
-        except Exception:
+        except json.JSONDecodeError:
             pass
     lines = [ln.strip("-• \t") for ln in text.splitlines()]
     return [

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import yfinance as yf
@@ -116,7 +116,7 @@ def llm_tool_decision(agent: Any, query: str, metadata_filter: dict[str, str],
 
 
 def extract_price_date_window(agent: Any, query: str) -> tuple[str, str]:
-    today = datetime.utcnow().date()
+    today = datetime.now(timezone.utc).date()
     default_start = today - timedelta(days=agent.price_default_days)
     start_date = default_start
     end_date = today

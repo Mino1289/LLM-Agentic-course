@@ -29,11 +29,13 @@ class HybridRAG:
         use_reranking: bool = True,
         reranker_model: str = DEFAULT_RERANKER,
         collection_name: Optional[str] = None,
+        max_candidate_cap: int = 30,
     ):
         self.chunk_strategy = chunk_strategy
         self.search_mode = search_mode
         self.use_reranking = use_reranking
         self.reranker_model = reranker_model
+        self.max_candidate_cap = max_candidate_cap
 
         self.documents: list[str] = []
         self.doc_metadata: list[dict] = []
@@ -95,7 +97,7 @@ class HybridRAG:
             self.chunk_ids,
             self.doc_metadata,
             query,
-            top_k=min(candidate_pool, 30),
+            top_k=min(candidate_pool, self.max_candidate_cap),
             metadata_filter=metadata_filter,
         )
 

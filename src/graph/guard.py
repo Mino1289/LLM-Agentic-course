@@ -43,7 +43,7 @@ def _extract_first_json_object(raw: str) -> dict[str, Any] | None:
     try:
         parsed = json.loads(text)
         return parsed if isinstance(parsed, dict) else None
-    except Exception:
+    except json.JSONDecodeError:
         pass
     match = re.search(r"\{.*\}", text, flags=re.DOTALL)
     if not match:
@@ -51,7 +51,7 @@ def _extract_first_json_object(raw: str) -> dict[str, Any] | None:
     try:
         parsed = json.loads(match.group(0))
         return parsed if isinstance(parsed, dict) else None
-    except Exception:
+    except json.JSONDecodeError:
         return None
 
 

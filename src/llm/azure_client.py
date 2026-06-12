@@ -1,7 +1,7 @@
 """Client Azure OpenAI pour les appels LLM."""
 from __future__ import annotations
 
-from typing import Any, AsyncIterator, Optional
+from typing import Any, Optional
 
 from openai import AzureOpenAI, AsyncAzureOpenAI
 

@@ -101,8 +101,8 @@ def _merge_unique_list(existing, incoming) -> list[str]:
     return sorted(values)
 
 
-def _ticker_counts_from_metadatas(metadatas):
-    counts = {}
+def _ticker_counts_from_metadatas(metadatas: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
     for metadata in metadatas:
         ticker = str(metadata.get("ticker", "UNKNOWN"))
         counts[ticker] = counts.get(ticker, 0) + 1

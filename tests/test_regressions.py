@@ -92,6 +92,7 @@ class ChunkingTests(unittest.TestCase):
 class RetrievalTests(unittest.TestCase):
     def test_vector_search_applies_metadata_filter_inside_chroma(self):
         rag = object.__new__(HybridRAG)
+        rag.max_candidate_cap = 30
         rag.documents = ["amd text", "nvda text"]
         rag.doc_metadata = [
             {"ticker": "AMD", "year": "2024"},

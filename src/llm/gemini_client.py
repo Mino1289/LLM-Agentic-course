@@ -1,6 +1,8 @@
 """Client Gemini pour les appels LLM et streaming."""
 from __future__ import annotations
 
+import json
+import uuid
 from typing import Any, AsyncIterator, Optional
 
 from src.llm.types import LLMToolResponse, LLMStreamChunk
@@ -137,9 +139,9 @@ class GeminiClient:
                         tool_deltas.append(
                             {
                                 "index": index_counter,
-                                "id": str(__import__('uuid').uuid4()),
+                                "id": str(uuid.uuid4()),
                                 "name": getattr(fc, "name", "") or "",
-                                "arguments": __import__('json').dumps(dict(getattr(fc, "args", None) or {})),
+                                "arguments": json.dumps(dict(getattr(fc, "args", None) or {})),
                                 "thought_signature": ts,
                             }
                         )

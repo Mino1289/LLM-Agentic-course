@@ -26,7 +26,7 @@ def read_text_file(file_path: str) -> str:
     raise UnicodeDecodeError("Unable to decode text file", file_path, 0, 1, "unknown")
 
 
-def table_to_markdown(table) -> str:
+def table_to_markdown(table: Any) -> str:
     rows = []
     for tr in table.find_all("tr"):
         cells = [

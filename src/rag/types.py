@@ -90,6 +90,3 @@ class RetrievalResult:
 def embedding_sleep_seconds(rpm_limit: int = DEFAULT_EMBEDDING_RPM) -> float:
     return 60.0 / max(rpm_limit, 1)
 
-
-def estimate_tokens(text: str) -> int:
-    return max(1, len(text) // 4)

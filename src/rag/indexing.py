@@ -27,7 +27,7 @@ def iter_batches(items: list[int], batch_size: int):
         yield items[start: start + size]
 
 
-def remove_stale_index_entries(collection, valid_ids: list[str]) -> int:
+def remove_stale_index_entries(collection: Any, valid_ids: list[str]) -> int:
     existing_ids = set(collection.get()["ids"])
     stale_ids = sorted(existing_ids - set(valid_ids))
     if stale_ids:
