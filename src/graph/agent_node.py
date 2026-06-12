@@ -1,6 +1,7 @@
 """Noeud agent — appel LLM avec outils, routage après réponse."""
 from __future__ import annotations
 
+import json
 import logging
 import time
 from datetime import UTC, datetime
@@ -47,15 +48,24 @@ async def agent_node(agent: Any, state: GraphState) -> GraphState:
                 else:
                     tc_key = tc_index
                 if tc_key not in tool_calls_dict:
-                    tool_calls_dict[tc_key] = {"id": tc_delta.get("id") or f"tc_{tc_key}", "name": tc_delta.get("name") or "", "arguments_parts": []}
+                    tool_calls_dict[tc_key] = {"id": tc_delta.get("id") or f"tc_{tc_key}", "name": tc_delta.get("name") or "", "arguments_parts": [], "thought_signature": None}
                 if tc_delta.get("id"):
                     tool_calls_dict[tc_key]["id"] = tc_delta["id"]
                 if tc_delta.get("name"):
                     tool_calls_dict[tc_key]["name"] = tc_delta["name"]
+                if tc_delta.get("thought_signature"):
+                    tool_calls_dict[tc_key]["thought_signature"] = tc_delta["thought_signature"]
                 if tc_delta.get("arguments"):
-                    tool_calls_dict[tc_key]["arguments_parts"].append(tc_delta["arguments"])
+                    try:
+                        parsed = json.loads(tc_delta["arguments"])
+                        if isinstance(parsed, dict):
+                            tool_calls_dict[tc_key]["arguments_parts"] = [tc_delta["arguments"]]
+                        else:
+                            tool_calls_dict[tc_key]["arguments_parts"].append(tc_delta["arguments"])
+                    except json.JSONDecodeError:
+                        tool_calls_dict[tc_key]["arguments_parts"].append(tc_delta["arguments"])
     final_text = "".join(text_parts)
-    final_tool_calls = [ToolCall(id=tc["id"], name=tc["name"], arguments="".join(tc["arguments_parts"])) for tc in tool_calls_dict.values() if tc["name"]]
+    final_tool_calls = [ToolCall(id=tc["id"], name=tc["name"], arguments="".join(tc["arguments_parts"]), thought_signature=tc.get("thought_signature")) for tc in tool_calls_dict.values() if tc["name"]]
     stats = dict(state.get("stats") or {})
     stats["agent_iterations"] = iterations + 1
     if final_tool_calls:

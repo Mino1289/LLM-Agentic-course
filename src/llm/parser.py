@@ -33,11 +33,13 @@ def _parse_gemini_tool_calls(response: Any) -> list[ToolCall]:
         if not fc:
             continue
         args = getattr(fc, "args", None) or {}
+        ts = getattr(part, "thought_signature", None) or getattr(fc, "thought_signature", None)
         parsed.append(
             ToolCall(
                 id=str(uuid.uuid4()),
                 name=getattr(fc, "name", "") or "",
                 arguments=__import__('json').dumps(dict(args)),
+                thought_signature=ts,
             )
         )
     return parsed

@@ -10,6 +10,7 @@ class ToolCall:
     id: str
     name: str
     arguments: str
+    thought_signature: Optional[str] = None
 
 
 @dataclass

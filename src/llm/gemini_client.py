@@ -101,13 +101,14 @@ class GeminiClient:
             yield LLMStreamChunk(
                 delta=full.content or "",
                 tool_call_delta=[
-                    {"id": tc.id, "name": tc.name, "arguments": tc.arguments}
+                    {"id": tc.id, "name": tc.name, "arguments": tc.arguments, "thought_signature": tc.thought_signature}
                     for tc in full.tool_calls
                 ] or None,
                 finish_reason="stop",
             )
             return
 
+        index_counter = 0
         async for raw_chunk in response:
             text_parts: list[str] = []
             tool_deltas: list[dict[str, Any]] = []
@@ -117,13 +118,17 @@ class GeminiClient:
                         text_parts.append(part.text)
                     fc = getattr(part, "function_call", None)
                     if fc:
+                        ts = getattr(part, "thought_signature", None)
                         tool_deltas.append(
                             {
+                                "index": index_counter,
                                 "id": str(__import__('uuid').uuid4()),
                                 "name": getattr(fc, "name", "") or "",
                                 "arguments": __import__('json').dumps(dict(getattr(fc, "args", None) or {})),
+                                "thought_signature": ts,
                             }
                         )
+                        index_counter += 1
             delta = "".join(text_parts)
             chunk = LLMStreamChunk(
                 delta=delta,

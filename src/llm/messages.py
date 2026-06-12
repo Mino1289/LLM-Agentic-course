@@ -61,11 +61,20 @@ def _gemini_contents_from_messages(messages: list[dict[str, Any]]) -> tuple[Opti
                 parts.append(types.Part(text=str(msg.get("content"))))
             for tc in msg.get("tool_calls") or []:
                 if isinstance(tc, ToolCall):
-                    args = json.loads(tc.arguments or "{}")
-                    parts.append(types.Part.from_function_call(name=tc.name, args=args))
+                    try:
+                        args = json.loads(tc.arguments or "{}")
+                    except json.JSONDecodeError:
+                        args = {}
+                    part = types.Part.from_function_call(name=tc.name, args=args)
+                    if getattr(tc, "thought_signature", None):
+                        part.thought_signature = tc.thought_signature
+                    parts.append(part)
                 elif isinstance(tc, dict):
                     fn = tc.get("function", {})
-                    args = json.loads(fn.get("arguments", " {}") or "{}")
+                    try:
+                        args = json.loads(fn.get("arguments", " {}") or "{}")
+                    except json.JSONDecodeError:
+                        args = {}
                     parts.append(types.Part.from_function_call(name=fn.get("name", ""), args=args))
             if parts:
                 contents.append(types.Content(role="model", parts=parts))
