@@ -21,7 +21,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Optional
 
-from rag.llm_provider import token_sink
+from src.llm.sinks import token_sink
 
 WORD_SEPARATORS = (" ", "\n", ".", ",", ";", ":", "!", "?")
 

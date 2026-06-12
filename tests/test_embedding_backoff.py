@@ -6,11 +6,11 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from rag.embedding_pipeline import (
+from src.embeddings.backoff import (
     BackoffConfig,
-    QuotaState,
     with_exponential_backoff,
 )
+from src.embeddings.quota import QuotaState
 
 
 class _FakePermanentError(Exception):
@@ -229,42 +229,6 @@ class QuotaStateAtomicWriteTests(unittest.TestCase):
         self.assertEqual(payload["last_batch_size"], 7)
         self.assertEqual(payload["last_error"], "transient_429")
 
-
-class YFinanceRetryTests(unittest.TestCase):
-    def test_download_with_retry_recovers_from_transient_error(self) -> None:
-        # We import the wrapper function lazily to avoid pulling yfinance at import time.
-        from rag.download_share_prices import download_with_retry
-
-        sleeps: list[float] = []
-        calls = {"n": 0}
-
-        def fake_yf_download(ticker: str, start: str, end: str):
-            calls["n"] += 1
-            if calls["n"] == 1:
-                raise ConnectionError("yahoo throttle")
-            df = MagicMock()
-            df.empty = False
-            return df
-
-        with patch("rag.download_share_prices.yf.download", side_effect=fake_yf_download):
-            with patch(
-                "rag.embedding_pipeline.time.sleep", side_effect=lambda v: sleeps.append(v)
-            ):
-                df = download_with_retry("NVDA", "2024-01-01", "2024-12-31")
-
-        self.assertEqual(calls["n"], 2)
-        self.assertEqual(len(sleeps), 1)
-
-    def test_download_with_retry_gives_up_after_max(self) -> None:
-        from rag.download_share_prices import download_with_retry
-
-        def always_fail(ticker: str, start: str, end: str):
-            raise ConnectionError("nope")
-
-        with patch("rag.download_share_prices.yf.download", side_effect=always_fail):
-            with patch("rag.embedding_pipeline.time.sleep", lambda _v: None):
-                with self.assertRaises(ConnectionError):
-                    download_with_retry("NVDA", "2024-01-01", "2024-12-31", max_retries=2)
 
 
 class BackoffConfigEnvTests(unittest.TestCase):

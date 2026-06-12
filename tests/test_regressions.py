@@ -12,26 +12,26 @@ import chromadb
 
 os.environ["LANGSMITH_TRACING"] = "false"
 
-from rag.hybrid_rag import HybridRAG, build_chunk_id, chunk_text_semantic
-from rag.nodes.decompose_node import parse_query_list
-from rag.nodes._v1_legacy.generation_node import format_retrieved_excerpts, synthesis_node
-from rag.nodes.memory_nodes import context_prune_node
-from rag.nodes.prepare_node import extract_metadata_filter, prepare_query_node
-from rag.nodes.prompt_context import get_known_tickers
-from rag.nodes.rerank_node import rerank_node
-from rag.nodes.retrieval_node import multi_retrieve_node
-from rag.nodes._v1_legacy.scope_node import query_scope_node
-from rag.llm_provider import (
-    LLMConfig,
+from src.rag.core import HybridRAG
+from src.rag.metadata.build import build_chunk_id
+from src.rag.chunk.semantic import chunk_text_semantic
+from src.graph.decompose_node import parse_query_list
+# V1 synthesis_node no longer exists
+from src.graph.prepare_node import extract_metadata_filter, prepare_query_node
+from src.graph.prompt_context import get_known_tickers
+from src.graph.rerank_node import rerank_node
+from src.graph.retrieval_node import multi_retrieve_node
+# V1 query_scope_node no longer exists
+from src.llm.types import LLMConfig, ToolCall
+from src.llm.provider import (
     LLMProvider,
     LLMToolResponse,
-    ToolCall,
-    _normalize_github_model_id,
-    _parse_openai_tool_calls,
 )
-from rag.nodes.agent_nodes import agent_node
-from rag.nodes.tool_execution_node import tools_node
-from rag.tool_schemas import (
+from src.llm.config_builder import _normalize_github_model_id
+from src.llm.parser import _parse_openai_tool_calls
+from src.graph.agent_node import agent_node
+from src.graph.tool_execution_node import tools_node
+from src.tools.schemas import (
     ClosePositionArgs,
     ExportReportArgs,
     GetNewsArgs,
@@ -39,20 +39,14 @@ from rag.tool_schemas import (
     PortfolioHistoryArgs,
     PortfolioInfoArgs,
 )
-from rag.tools import (
-    _normalize_doc_types,
-    run_close_position,
-    run_export_investment_report,
-    run_place_trade,
-    run_portfolio_info,
-    run_validate_claims,
-)
-from rag.tools import (
-    run_account_activity,
-    run_get_news,
-    run_portfolio_history,
-)
-from rag.preprocess import SECTION_SPECS, _extract_between, is_in_year_range
+from src.tools.descriptions import _normalize_doc_types
+from src.tools.trading import run_place_trade, run_close_position
+from src.tools.portfolio import run_portfolio_info, run_portfolio_history, run_account_activity
+from src.tools.export_report import run_export_investment_report
+from src.tools.validate_claims import run_validate_claims
+from src.tools.news import run_get_news
+from src.preprocess.sections import SECTION_SPECS, _extract_between
+from src.preprocess.classify import is_in_year_range
 
 
 async def _inline_to_thread(func, *args, **kwargs):
@@ -144,7 +138,7 @@ class RetrievalTests(unittest.TestCase):
             "stats": {},
         }
 
-        with patch("rag.nodes.retrieval_node.asyncio.to_thread", side_effect=_inline_to_thread):
+        with patch("src.graph.retrieval_node.asyncio.to_thread", side_effect=_inline_to_thread):
             result = asyncio.run(multi_retrieve_node(SimpleNamespace(rag=FakeRag()), state))
 
         self.assertEqual(result["candidate_indices"], [])
@@ -185,7 +179,7 @@ class RetrievalTests(unittest.TestCase):
             "stats": {},
         }
 
-        with patch("rag.nodes.retrieval_node.asyncio.to_thread", side_effect=_inline_to_thread):
+        with patch("src.graph.retrieval_node.asyncio.to_thread", side_effect=_inline_to_thread):
             result = asyncio.run(multi_retrieve_node(SimpleNamespace(rag=rag), state))
 
         self.assertEqual(result["candidate_indices"], [0, 1])
@@ -223,7 +217,7 @@ class ScopeTests(unittest.TestCase):
             "stats": {},
         }
 
-        result = query_scope_node(agent, state)
+        raise unittest.SkipTest("V1 query_scope_node no longer exists")
 
         self.assertEqual(result["target_tickers"], ["MSFT", "NVDA"])
 
@@ -272,7 +266,7 @@ class RerankTests(unittest.TestCase):
             "candidate_indices": [0, 1, 2, 3, 4, 5],
         }
 
-        with patch("rag.nodes.rerank_node.asyncio.to_thread", side_effect=_inline_to_thread):
+        with patch("src.graph.rerank_node.asyncio.to_thread", side_effect=_inline_to_thread):
             result = asyncio.run(rerank_node(agent, state))
 
         self.assertEqual(
@@ -284,6 +278,7 @@ class RerankTests(unittest.TestCase):
 
 class GenerationTests(unittest.TestCase):
     def test_retrieved_excerpts_include_metadata_labels(self):
+        from src.graph.prompt_context import format_retrieved_excerpts
         result = format_retrieved_excerpts(
             ["microsoft excerpt", "nvidia excerpt"],
             [
@@ -302,7 +297,7 @@ class GenerationTests(unittest.TestCase):
             "draft_answer": "AMD mentionne un risque de demande cyclique.",
         }
 
-        result = synthesis_node(SimpleNamespace(), state)
+        raise unittest.SkipTest("V1 synthesis_node no longer exists")
 
         self.assertIn("AMD mentionne un risque de demande cyclique.", result["answer"])
         self.assertIn("un seul extrait", result["answer"])
@@ -325,7 +320,7 @@ class GenerationTests(unittest.TestCase):
             "draft_answer": "MSFT ... NVDA ...",
         }
 
-        synthesis_node(agent, state)
+        raise unittest.SkipTest("V1 synthesis_node no longer exists")
 
         self.assertIn("Target tickers: MSFT, NVDA", provider.prompt)
         self.assertIn("do not collapse the answer to only one company", provider.prompt)
@@ -353,7 +348,8 @@ class ContextPruneTests(unittest.TestCase):
             "stats": {},
         }
 
-        with patch("rag.nodes.memory_nodes.asyncio.to_thread", side_effect=_inline_to_thread):
+        with patch("src.graph.memory_store", side_effect=_inline_to_thread):
+            from src.graph.memory_nodes import context_prune_node
             result = asyncio.run(context_prune_node(agent, state))
 
         self.assertEqual(result["final_chunks"], ["keep"])
@@ -362,7 +358,7 @@ class ContextPruneTests(unittest.TestCase):
 
 class ConfigurationTests(unittest.TestCase):
     def test_universe_is_limited_to_debug_tickers(self):
-        from rag.config import TRACKED_TICKERS
+        from src.config import TRACKED_TICKERS
 
         rag = SimpleNamespace(doc_metadata=[{"ticker": "AMD"}, {"ticker": "ASML"}, {"ticker": "FAKE"}])
 
@@ -388,7 +384,7 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(normalized, ["20-F", "6-K", "10-K"])
 
     def test_file_type_infers_sec_form_from_source_name(self):
-        from rag.hybrid_rag import extract_file_type_from_source
+        from src.rag.metadata.extract import extract_file_type_from_source
 
         self.assertEqual(
             extract_file_type_from_source("asml-20-f_2025-03-05.htm__foreign_annual_report.txt"),
@@ -400,10 +396,10 @@ class ConfigurationTests(unittest.TestCase):
         )
 
     def test_export_report_writes_markdown_file(self):
-        with patch("rag.tools.REPORTS_DIR", Path(os.getenv("TMPDIR", "/tmp")) / "finance_rag_test_reports"):
-            from rag import tools as tools_module
+        with patch("src.tools.export_report.REPORTS_DIR", Path(os.getenv("TMPDIR", "/tmp")) / "finance_rag_test_reports"):
+            from src.tools.export_report import REPORTS_DIR
 
-            tools_module.REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+            REPORTS_DIR.mkdir(parents=True, exist_ok=True)
             result = run_export_investment_report(ExportReportArgs(title="Test Report", content="## Section\nContent", format="md"))
             path = Path(result["path"])
             self.assertTrue(path.is_file())
@@ -412,10 +408,10 @@ class ConfigurationTests(unittest.TestCase):
 
     @unittest.skipIf(importlib.util.find_spec("reportlab") is None, "reportlab not installed")
     def test_export_report_writes_pdf_file(self):
-        with patch("rag.tools.REPORTS_DIR", Path(os.getenv("TMPDIR", "/tmp")) / "finance_rag_test_reports"):
-            from rag import tools as tools_module
+        with patch("src.tools.export_report.REPORTS_DIR", Path(os.getenv("TMPDIR", "/tmp")) / "finance_rag_test_reports"):
+            from src.tools.export_report import REPORTS_DIR
 
-            tools_module.REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+            REPORTS_DIR.mkdir(parents=True, exist_ok=True)
             result = run_export_investment_report(
                 ExportReportArgs(
                     title="Test PDF Report",
@@ -445,7 +441,7 @@ class ConfigurationTests(unittest.TestCase):
             },
             clear=False,
         ):
-            from rag.llm_provider import build_llm_config_from_env
+            from src.llm.provider import build_llm_config_from_env
 
             config = build_llm_config_from_env()
             self.assertEqual(config.provider, "gemini")
@@ -453,7 +449,7 @@ class ConfigurationTests(unittest.TestCase):
             self.assertEqual(config.embedding_api_key, "test-openai")
 
     def test_tool_definitions_count(self):
-        from rag.tools import get_tool_definitions
+        from src.tools.definitions import get_tool_definitions
 
         # 10 tools: sec_filings_rag, market_price, export_report, validate_claims,
         # portfolio_info, place_trade, close_position, get_news, portfolio_history, account_activity
@@ -495,8 +491,8 @@ class IndexSynchronizationTests(unittest.TestCase):
 
 class AgentToolsTests(unittest.TestCase):
     def test_validate_claims_supported_and_unsupported(self):
-        from rag.tool_schemas import ValidateClaimsArgs
-        from rag.tools import run_validate_claims
+        from src.tools.schemas import ValidateClaimsArgs
+        from src.tools.validate_claims import run_validate_claims
 
         chunks = [
             "Item 1A risk factors include supply chain concentration and regulatory scrutiny.",
@@ -534,8 +530,8 @@ class AgentToolsTests(unittest.TestCase):
         self.assertEqual(result["stats"]["validate_nli_used"], True)
 
     def test_validate_claims_requires_rag_chunks(self):
-        from rag.tool_schemas import ValidateClaimsArgs
-        from rag.tools import run_validate_claims
+        from src.tools.schemas import ValidateClaimsArgs
+        from src.tools.validate_claims import run_validate_claims
 
         agent = SimpleNamespace(rag=SimpleNamespace(provider=MagicMock()))
         result = run_validate_claims(
@@ -549,7 +545,7 @@ class AgentToolsTests(unittest.TestCase):
     def test_place_trade_rejects_invalid_ticker(self):
         from unittest.mock import patch
 
-        with patch("rag.alpaca_tools.get_alpaca_client", return_value=None):
+        with patch("src.alpaca.client.get_alpaca_client", return_value=None):
             result = run_place_trade(
                 PlaceTradeArgs(ticker="ZZZZ", side="buy", qty=10)
             )
@@ -565,23 +561,23 @@ class AgentToolsTests(unittest.TestCase):
     def test_portfolio_info_graceful_when_not_configured(self):
         from unittest.mock import patch
 
-        with patch("rag.alpaca_tools.get_alpaca_client", return_value=None):
+        with patch("src.alpaca.client.get_alpaca_client", return_value=None):
             result = run_portfolio_info(PortfolioInfoArgs())
         self.assertEqual(result.get("error"), "alpaca_not_configured")
 
     def test_close_position_graceful_when_not_configured(self):
         from unittest.mock import patch
 
-        with patch("rag.alpaca_tools.get_alpaca_client", return_value=None):
+        with patch("src.alpaca.client.get_alpaca_client", return_value=None):
             result = run_close_position(ClosePositionArgs(ticker="NVDA"))
         self.assertEqual(result.get("error"), "alpaca_not_configured")
 
     def test_get_news_graceful_when_not_configured(self):
         from unittest.mock import patch
 
-        with patch("rag.alpaca_tools.get_news_client", return_value=None):
-            from rag.tools import run_get_news
-            from rag.tool_schemas import GetNewsArgs
+        with patch("src.alpaca.client.get_news_client", return_value=None):
+            from src.tools.news import run_get_news
+            from src.tools.schemas import GetNewsArgs
 
             result = run_get_news(GetNewsArgs(symbols=["NVDA"]))
         self.assertEqual(result.get("error"), "alpaca_not_configured")
@@ -589,9 +585,9 @@ class AgentToolsTests(unittest.TestCase):
     def test_portfolio_history_graceful_when_not_configured(self):
         from unittest.mock import patch
 
-        with patch("rag.alpaca_tools.get_alpaca_client", return_value=None):
-            from rag.tools import run_portfolio_history
-            from rag.tool_schemas import PortfolioHistoryArgs
+        with patch("src.alpaca.client.get_alpaca_client", return_value=None):
+            from src.tools.portfolio import run_portfolio_history
+            from src.tools.schemas import PortfolioHistoryArgs
 
             result = run_portfolio_history(PortfolioHistoryArgs())
         self.assertEqual(result.get("error"), "alpaca_not_configured")
@@ -623,7 +619,7 @@ class AgentToolsTests(unittest.TestCase):
             "stats": {},
         }
 
-        with patch("rag.tools.run_sec_filings_rag") as mock_rag:
+        with patch("src.tools.sec_filings.run_sec_filings_rag") as mock_rag:
             async def fake_rag(args, *, agent):
                 return {
                     "text": "[1] ticker=MSFT excerpt",
@@ -632,7 +628,7 @@ class AgentToolsTests(unittest.TestCase):
                     "stats": {"chunks_used": 1},
                 }
             mock_rag.side_effect = fake_rag
-            from rag.llm_provider import LLMStreamChunk
+            from src.llm.provider import LLMStreamChunk
 
             # First ainvoke_with_tools_stream call → tool_call (sec_filings_rag_tool)
             # Second call → final answer text
@@ -686,7 +682,7 @@ class AgentToolsTests(unittest.TestCase):
         chunk — that would break tool_call_id matching in the next LLM call
         (assistant.tool_calls ids no longer match the tool messages' tool_call_id).
         """
-        from rag.llm_provider import LLMStreamChunk
+        from src.llm.provider import LLMStreamChunk
 
         agent = SimpleNamespace(max_tool_iterations=6, rag=SimpleNamespace(provider=MagicMock()))
         REAL_ID = "call_r3YATjEm9WWID8AGbBzQddld"
@@ -745,7 +741,7 @@ class AgentToolsTests(unittest.TestCase):
             "stats": {},
         }
 
-        with patch("rag.tools.run_sec_filings_rag") as mock_rag:
+        with patch("src.tools.sec_filings.run_sec_filings_rag") as mock_rag:
             async def fake_rag(args, *, agent):
                 return {
                     "text": "[1] NVDA risk excerpt",
@@ -797,7 +793,7 @@ class AgentToolsTests(unittest.TestCase):
           tool responses.
         This is an OpenAI API invariant, not a convention.
         """
-        from rag.llm_provider import LLMStreamChunk
+        from src.llm.provider import LLMStreamChunk
 
         agent = SimpleNamespace(max_tool_iterations=6, rag=SimpleNamespace(provider=MagicMock()))
         ID_OK = "call_ok_real"
@@ -845,7 +841,7 @@ class AgentToolsTests(unittest.TestCase):
             "stats": {},
         }
 
-        with patch("rag.tools.run_sec_filings_rag") as mock_rag:
+        with patch("src.tools.sec_filings.run_sec_filings_rag") as mock_rag:
             async def rag_side_effect(args, *, agent):
                 # First call (NVDA) succeeds; second call (AMD) raises
                 # to simulate retrieval error.
@@ -912,8 +908,8 @@ class AgentToolsTests(unittest.TestCase):
         actually received a 'coroutine is not iterable' error message).
         """
         import asyncio
-        from rag.tools import run_sec_filings_rag
-        from rag.tool_schemas import SecFilingsRAGArgs
+        from src.tools.sec_filings import run_sec_filings_rag
+        from src.tools.schemas import SecFilingsRAGArgs
 
         # Fake agent whose rag.retrieve returns 2 NVDA chunks.
         class FakeRetrieval:
@@ -941,9 +937,9 @@ class AgentToolsTests(unittest.TestCase):
 
         # Avoid the rerank path complexity by stubbing _balanced_rerank_indices
         # to just return the candidates as-is.
-        with patch("rag.tools._balanced_rerank_indices", return_value=[0, 1]), \
-             patch("rag.tools._ticker_counts", return_value={"NVDA": 2}), \
-             patch("rag.nodes.retrieval_node.asyncio.to_thread", side_effect=_inline_to_thread):
+        with patch("src.graph.rerank_node._balanced_rerank_indices", return_value=[0, 1]), \
+             patch("src.graph.rerank_node._ticker_counts", return_value={"NVDA": 2}), \
+             patch("src.graph.retrieval_node.asyncio.to_thread", side_effect=_inline_to_thread):
             agent = SimpleNamespace(
                 rag=FakeRag(),
                 max_tool_iterations=6,
@@ -991,8 +987,8 @@ class ValidateClaimsNLITests(unittest.TestCase):
         return SimpleNamespace(rag=rag)
 
     def test_validate_uses_nli_path(self):
-        from rag.tool_schemas import ValidateClaimsArgs
-        from rag.tools import run_validate_claims
+        from src.tools.schemas import ValidateClaimsArgs
+        from src.tools.validate_claims import run_validate_claims
 
         agent = self._make_agent(
             '{"results": ['
@@ -1030,8 +1026,8 @@ class ValidateClaimsNLITests(unittest.TestCase):
             self.assertIn("reasoning", v)
 
     def test_validate_fallback_on_invalid_json(self):
-        from rag.tool_schemas import ValidateClaimsArgs
-        from rag.tools import run_validate_claims
+        from src.tools.schemas import ValidateClaimsArgs
+        from src.tools.validate_claims import run_validate_claims
 
         agent = self._make_agent("not valid json at all")
         result = run_validate_claims(
@@ -1050,8 +1046,8 @@ class ValidateClaimsNLITests(unittest.TestCase):
         self.assertEqual(result["stats"]["validate_nli_used"], True)
 
     def test_validate_nli_skipped_when_chunks_empty(self):
-        from rag.tool_schemas import ValidateClaimsArgs
-        from rag.tools import run_validate_claims
+        from src.tools.schemas import ValidateClaimsArgs
+        from src.tools.validate_claims import run_validate_claims
 
         agent = self._make_agent("")
         result = run_validate_claims(
@@ -1078,7 +1074,7 @@ class StateAuditTests(unittest.TestCase):
     }
 
     def test_graphstate_typeddict_has_no_ghosts(self):
-        from rag.nodes.state import GraphState
+        from src.graph.state import GraphState
 
         declared = set(GraphState.__annotations__.keys())
         overlap = self.GHOST_KEYS & declared

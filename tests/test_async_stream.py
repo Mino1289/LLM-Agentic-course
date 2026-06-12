@@ -19,7 +19,7 @@ import unittest.mock
 def _make_agent_with_mock_graph():
     """Build a FinanceLangGraphAgent with a fully-mocked graph object
     that supports both invoke (sync) and ainvoke (async) and astream_events."""
-    from rag.langgraph_flow import FinanceLangGraphAgent
+    from src.graph.flow import FinanceLangGraphAgent
     # Bypass __init__ (avoids building the real graph + RAG + memory store)
     agent = FinanceLangGraphAgent.__new__(FinanceLangGraphAgent)
     # Mock graph with ainvoke returning a fake state and astream_events
@@ -41,11 +41,11 @@ def _make_agent_with_mock_graph():
 class AsyncAPIStructureTests(unittest.TestCase):
     def test_run_is_sync_method(self):
         # run() stays sync for backwards compat
-        from rag.langgraph_flow import FinanceLangGraphAgent
+        from src.graph.flow import FinanceLangGraphAgent
         self.assertTrue(hasattr(FinanceLangGraphAgent, "run"))
 
     def test_arun_is_coroutine_method(self):
-        from rag.langgraph_flow import FinanceLangGraphAgent
+        from src.graph.flow import FinanceLangGraphAgent
         self.assertTrue(
             hasattr(FinanceLangGraphAgent, "arun"),
             "FinanceLangGraphAgent must expose `arun()` for async invocation",
@@ -56,7 +56,7 @@ class AsyncAPIStructureTests(unittest.TestCase):
         )
 
     def test_astream_is_async_generator_method(self):
-        from rag.langgraph_flow import FinanceLangGraphAgent
+        from src.graph.flow import FinanceLangGraphAgent
         self.assertTrue(
             hasattr(FinanceLangGraphAgent, "astream"),
             "FinanceLangGraphAgent must expose `astream()` for tool event streaming",
@@ -73,10 +73,10 @@ class AsyncAPIBehaviorTests(unittest.IsolatedAsyncioTestCase):
         # (the new implementation explicitly raises in that case). Run it
         # in a thread to escape the running loop and verify delegation.
         import threading
-        from rag import langgraph_flow
+        from src.graph import flow as flow_module
         agent = _make_agent_with_mock_graph()
         captured: dict = {}
-        original_run = langgraph_flow.asyncio.run
+        original_run = flow_module.asyncio.run
 
         def spy_run(coro, *args, **kwargs):
             captured["called"] = True
@@ -84,7 +84,7 @@ class AsyncAPIBehaviorTests(unittest.IsolatedAsyncioTestCase):
 
         result_holder: dict = {}
         def worker():
-            with unittest.mock.patch.object(langgraph_flow.asyncio, "run", spy_run):
+            with unittest.mock.patch.object(flow_module.asyncio, "run", spy_run):
                 result_holder["value"] = agent.run("test query")
 
         t = threading.Thread(target=worker)
@@ -138,7 +138,7 @@ class AStreamTokenEventsTests(unittest.IsolatedAsyncioTestCase):
         """Build an agent whose graph.astream_events yields the given raw events
         (already in the LangGraph astream_events schema, NOT yet transformed
         by our astream() wrapper)."""
-        from rag.langgraph_flow import FinanceLangGraphAgent
+        from src.graph.flow import FinanceLangGraphAgent
         agent = FinanceLangGraphAgent.__new__(FinanceLangGraphAgent)
 
         async def fake_astream_events(state, version=None):

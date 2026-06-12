@@ -13,77 +13,77 @@ import unittest.mock
 
 class AsyncNodeStructureTests(unittest.TestCase):
     def test_agent_node_is_coroutine(self):
-        from rag.nodes.agent_nodes import agent_node
+        from src.graph.agent_node import agent_node
         self.assertTrue(
             inspect.iscoroutinefunction(agent_node),
             "agent_node must be `async def` to support astream_events",
         )
 
     def test_tools_node_is_coroutine(self):
-        from rag.nodes.tool_execution_node import tools_node
+        from src.graph.tool_execution_node import tools_node
         self.assertTrue(
             inspect.iscoroutinefunction(tools_node),
             "tools_node must be `async def` to wrap blocking tool calls",
         )
 
     def test_finalize_from_agent_state_is_coroutine(self):
-        from rag.nodes.agent_nodes import finalize_from_agent_state
+        from src.graph.agent_node import finalize_from_agent_state
         self.assertTrue(
             inspect.iscoroutinefunction(finalize_from_agent_state),
             "finalize_from_agent_state must be `async def`",
         )
 
     def test_memory_read_node_is_coroutine(self):
-        from rag.nodes.memory_nodes import memory_read_node
+        from src.graph.memory_nodes import memory_read_node
         self.assertTrue(
             inspect.iscoroutinefunction(memory_read_node),
             "memory_read_node must be `async def`",
         )
 
     def test_memory_write_node_is_coroutine(self):
-        from rag.nodes.memory_nodes import memory_write_node
+        from src.graph.memory_nodes import memory_write_node
         self.assertTrue(
             inspect.iscoroutinefunction(memory_write_node),
             "memory_write_node must be `async def`",
         )
 
     def test_gc_node_is_coroutine(self):
-        from rag.nodes.memory_nodes import gc_node
+        from src.graph.memory_nodes import gc_node
         self.assertTrue(
             inspect.iscoroutinefunction(gc_node),
             "gc_node must be `async def`",
         )
 
     def test_prepare_query_node_is_coroutine(self):
-        from rag.nodes.prepare_node import prepare_query_node
+        from src.graph.prepare_node import prepare_query_node
         self.assertTrue(
             inspect.iscoroutinefunction(prepare_query_node),
             "prepare_query_node must be `async def`",
         )
 
     def test_guard_node_is_coroutine(self):
-        from rag.guards import guard_node
+        from src.graph.guard import guard_node
         self.assertTrue(
             inspect.iscoroutinefunction(guard_node),
             "guard_node must be `async def`",
         )
 
     def test_multi_retrieve_node_is_coroutine(self):
-        from rag.nodes.retrieval_node import multi_retrieve_node
+        from src.graph.retrieval_node import multi_retrieve_node
         self.assertTrue(
             inspect.iscoroutinefunction(multi_retrieve_node),
             "multi_retrieve_node must be `async def`",
         )
 
     def test_rerank_node_is_coroutine(self):
-        from rag.nodes.rerank_node import rerank_node
+        from src.graph.rerank_node import rerank_node
         self.assertTrue(
             inspect.iscoroutinefunction(rerank_node),
             "rerank_node must be `async def`",
         )
 
     def test_decompose_query_node_is_coroutine(self):
-        from rag.nodes.decompose_node import decompose_query_node
+        from src.graph.decompose_node import decompose_query_node
         self.assertTrue(
             inspect.iscoroutinefunction(decompose_query_node),
             "decompose_query_node must be `async def`",
@@ -104,9 +104,9 @@ class AsyncNodeThreadWrappingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_agent_node_calls_ainvoke_with_tools_stream(self):
         # agent_node now uses ainvoke_with_tools_stream (async, no to_thread wrap)
-        from rag.nodes import agent_nodes
-        from rag.nodes.agent_nodes import agent_node
-        from rag.llm_provider import LLMStreamChunk
+        from src.nodes import agent_nodes
+        from src.graph.agent_node import agent_node
+        from src.llm.provider import LLMStreamChunk
 
         called_with: dict = {}
 
@@ -142,10 +142,10 @@ class AsyncNodeThreadWrappingTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.get("tool_calls_pending"))
 
     async def test_tools_node_wraps_sync_execute_tool_in_to_thread(self):
-        import rag.tool_executor as tool_executor
-        from rag.nodes.tool_execution_node import tools_node
-        from rag.tools import execute_tool
-        from rag.llm_provider import ToolCall
+        import src.tools.execute as tool_executor
+        from src.graph.tool_execution_node import tools_node
+        from src.tools.execute import execute_tool
+        from src.llm.types import ToolCall
         # ... spy on asyncio.to_thread to ensure it is used for execute_tool
         wrapped: list = []
         async def spy(*args, **kwargs):
@@ -189,8 +189,8 @@ class AsyncNodeThreadWrappingTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_memory_read_node_wraps_memory_store_in_to_thread(self):
-        from rag.nodes import memory_nodes
-        from rag.nodes.memory_nodes import memory_read_node
+        from src.nodes import memory_nodes
+        from src.graph.memory_nodes import memory_read_node
         wrapped: list = []
         spy = await self._spy_to_thread(wrapped, exc=asyncio.CancelledError())
 
@@ -220,8 +220,8 @@ class AsyncNodeThreadWrappingTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_multi_retrieve_node_wraps_rag_retrieve_in_to_thread(self):
-        from rag.nodes import retrieval_node
-        from rag.nodes.retrieval_node import multi_retrieve_node
+        from src.nodes import retrieval_node
+        from src.graph.retrieval_node import multi_retrieve_node
         wrapped: list = []
         spy = await self._spy_to_thread(wrapped, exc=asyncio.CancelledError())
 

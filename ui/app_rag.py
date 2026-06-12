@@ -18,14 +18,14 @@ except Exception:
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from rag.langsmith_env import ensure_langsmith_env
+from src.graph.tracing import ensure_langsmith_env
 
 ensure_langsmith_env()
 
-from rag.hybrid_rag import HybridRAG
-from rag.langgraph_flow import FinanceLangGraphAgent
-from rag.llm_provider import build_llm_config_from_env
-from rag.tools import get_tool_definitions
+from src.rag.core import HybridRAG
+from src.graph.flow import FinanceLangGraphAgent
+from src.llm import build_llm_config_from_env
+from src.tools.definitions import get_tool_definitions
 from ui.streaming import run_stream
 
 st.set_page_config(page_title="Finance RAG LangGraph", page_icon="📈", layout="wide")
@@ -53,32 +53,24 @@ if "messages" not in st.session_state:
 
 @st.cache_resource
 def build_agent(
-    memory_window_size: int,
-    summarize_every_n_turns: int,
     max_context_chunks: int,
-    max_context_tokens: int,
     decompose_query_count: int,
     price_max_days: int,
     price_max_points: int,
     price_max_tickers: int,
     price_default_days: int,
-    price_max_attempts: int,
     max_tool_iterations: int,
 ):
     rag = HybridRAG(chunk_strategy="semantic", search_mode="vector", use_reranking=True)
     rag.load_and_index_data(max_new_embeddings=0)
     return FinanceLangGraphAgent(
         rag=rag,
-        memory_window_size=memory_window_size,
-        summarize_every_n_turns=summarize_every_n_turns,
         max_context_chunks=max_context_chunks,
-        max_context_tokens=max_context_tokens,
         decompose_query_count=decompose_query_count,
         price_max_days=price_max_days,
         price_max_points=price_max_points,
         price_max_tickers=price_max_tickers,
         price_default_days=price_default_days,
-        price_max_attempts=price_max_attempts,
         max_tool_iterations=max_tool_iterations,
     )
 
@@ -329,41 +321,21 @@ st.sidebar.divider()
 
 st.sidebar.subheader("Configuration")
 
-memory_window_default = int(os.getenv("MEMORY_WINDOW_SIZE", "6"))
-summarize_every_n_turns_default = int(os.getenv("SUMMARIZE_EVERY_N_TURNS", "6"))
 max_context_chunks_default = int(os.getenv("MAX_CONTEXT_CHUNKS", "8"))
-max_context_tokens_default = int(os.getenv("MAX_CONTEXT_TOKENS", "3500"))
 decompose_query_count_default = int(os.getenv("QUERY_DECOMPOSE_COUNT", "2"))
 price_max_days_default = int(os.getenv("PRICE_MAX_DAYS", "180"))
 price_max_points_default = int(os.getenv("PRICE_MAX_POINTS", "40"))
 price_max_tickers_default = int(os.getenv("PRICE_MAX_TICKERS", "3"))
 price_default_days_default = int(os.getenv("PRICE_DEFAULT_DAYS", "90"))
-price_max_attempts_default = int(os.getenv("PRICE_MAX_ATTEMPTS", "2"))
 max_tool_iterations_default = int(os.getenv("MAX_TOOL_ITERATIONS", "6"))
 
-memory_window_size = st.sidebar.slider("Fenêtre mémoire", min_value=4, max_value=12, value=memory_window_default)
-summarize_every_n_turns = st.sidebar.slider(
-    "GC après N tours", min_value=4, max_value=16, value=summarize_every_n_turns_default
-)
 max_context_chunks = st.sidebar.slider("Chunks max", min_value=4, max_value=12, value=max_context_chunks_default)
-max_context_tokens = st.sidebar.slider(
-    "Tokens contexte max", min_value=1200, max_value=8000, step=100, value=max_context_tokens_default
-)
-decompose_query_count = st.sidebar.slider(
-    "Nb sous-requêtes", min_value=1, max_value=8, value=decompose_query_count_default
-)
+decompose_query_count = st.sidebar.slider("Nb sous-requêtes", min_value=1, max_value=8, value=decompose_query_count_default)
 price_max_days = st.sidebar.slider("Prix max jours", min_value=30, max_value=365, value=price_max_days_default)
 price_max_points = st.sidebar.slider("Prix max points", min_value=10, max_value=120, value=price_max_points_default)
 price_max_tickers = st.sidebar.slider("Prix max tickers", min_value=1, max_value=5, value=price_max_tickers_default)
-price_default_days = st.sidebar.slider(
-    "Prix fenêtre défaut (jours)", min_value=15, max_value=180, value=price_default_days_default
-)
-price_max_attempts = st.sidebar.slider(
-    "Prix max tentatives outil", min_value=1, max_value=4, value=price_max_attempts_default
-)
-max_tool_iterations = st.sidebar.slider(
-    "Max itérations agent/outils", min_value=2, max_value=10, value=max_tool_iterations_default
-)
+price_default_days = st.sidebar.slider("Prix fenêtre défaut (jours)", min_value=15, max_value=180, value=price_default_days_default)
+max_tool_iterations = st.sidebar.slider("Max itérations agent/outils", min_value=2, max_value=10, value=max_tool_iterations_default)
 
 if st.sidebar.button("Nouvelle conversation", use_container_width=True):
     st.session_state.conversation_id = str(uuid.uuid4())
@@ -382,16 +354,12 @@ if st.sidebar.button("Nouvelle conversation", use_container_width=True):
 st.sidebar.divider()
 try:
     agent = build_agent(
-        memory_window_size,
-        summarize_every_n_turns,
         max_context_chunks,
-        max_context_tokens,
         decompose_query_count,
         price_max_days,
         price_max_points,
         price_max_tickers,
         price_default_days,
-        price_max_attempts,
         max_tool_iterations,
     )
     st.sidebar.success("Système prêt")

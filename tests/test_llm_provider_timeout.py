@@ -16,14 +16,17 @@ class LLMProviderTimeoutTests(unittest.TestCase):
     """Fix #1 — OpenAI sync + async clients must carry a request timeout."""
 
     def _build_provider(self):
-        from rag.llm_provider import LLMProvider
+        from src.llm.provider import LLMProvider
 
         cfg = SimpleNamespace(
             provider="github_models",
             api_key="sk-test",
             base_url="https://models.inference.ai.azure.com",
+            api_version=None,
             embedding_api_key="sk-test",
             embedding_base_url="https://models.inference.ai.azure.com",
+            embedding_api_version=None,
+            embedding_provider="github_models",
             chat_model="gpt-4.1-mini",
             embedding_model="text-embedding-3-small",
         )

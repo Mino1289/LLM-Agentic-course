@@ -18,7 +18,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from rag.hybrid_rag import HybridRAG, iter_batches
+from src.rag.core import HybridRAG
+from src.rag.indexing import iter_batches
 
 
 def _build_fake_rag(num_chunks: int, embedding_batch_size: int = 32):

@@ -33,7 +33,7 @@ class _FakeStatusContainer:
 def _build_agent_with_astream_events(raw_events: list[dict]):
     """Build a FinanceLangGraphAgent with a graph.astream_events that
     yields the given raw events."""
-    from rag.langgraph_flow import FinanceLangGraphAgent
+    from src.graph.flow import FinanceLangGraphAgent
     agent = FinanceLangGraphAgent.__new__(FinanceLangGraphAgent)
 
     async def fake_astream_events(state, version=None):

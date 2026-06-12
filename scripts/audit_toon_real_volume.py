@@ -4,7 +4,7 @@ This script:
 - P1-A: measures token savings on real RAG retrieval across the indexed tickers
 - P1-B: confirms the OpenAI API blocker (theoretical only)
 - P2-C: measures memory/chat context formatting (data-independent)
-- P3: scans remaining serializers in rag/ for further TOON candidates
+- P3: scans remaining serializers in src/ for further TOON candidates
 
 Usage: python -m scripts.audit_toon_real_volume
 """
@@ -19,12 +19,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import tiktoken
 
 import toon_format
-from rag.paths import CHROMA_DB_DIR
-from rag.tools import format_rag_excerpts
+from src.paths import CHROMA_DB_DIR
+from src.tools.descriptions import format_rag_excerpts
 
 # Avoid loading dotenv since this is a one-off audit
 import chromadb
-from rag.nodes.memory_store import format_chat_context, format_memory_context
+from src.graph.memory_store import format_chat_context, format_memory_context
 
 
 _ENC = tiktoken.get_encoding("cl100k_base")
