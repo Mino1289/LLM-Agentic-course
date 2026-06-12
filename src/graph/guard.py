@@ -10,7 +10,7 @@ from src.graph.prompt_context import format_universe_hint
 from src.graph.state import GraphState
 from src.graph.tracing import traceable
 
-_guard_cache: dict[str, tuple[str, str, str]] = {}
+_guard_cache: dict[str, tuple[str, str, str, Optional[dict]]] = {}
 _MAX_CACHE_SIZE = 128
 
 GUARD_SYSTEM_PROMPT = """You are an intent guard for a finance RAG assistant.
@@ -83,38 +83,42 @@ def _build_guard_prompt(agent: Any, state: GraphState, query: str) -> str:
     )
 
 
-async def _llm_guard_decision(agent: Any, state: GraphState, query: str) -> tuple[str, str, str]:
+async def _llm_guard_decision(agent: Any, state: GraphState, query: str) -> tuple[str, str, str, Optional[dict]]:
     if cached := _guard_cache.get(query):
         return cached
 
     prompt = _build_guard_prompt(agent, state, query)
     raw = ""
+    usage = None
     try:
-        raw = await asyncio.to_thread(
-            agent.rag.provider.generate,
-            prompt,
-            system_prompt=GUARD_SYSTEM_PROMPT,
+        messages = [{"role": "system", "content": GUARD_SYSTEM_PROMPT}, {"role": "user", "content": prompt}]
+        response = await asyncio.to_thread(
+            agent.rag.provider.invoke_with_tools,
+            messages,
+            tools=None,
             temperature=0.0,
             max_tokens=180,
         )
+        raw = response.content or ""
+        usage = response.usage
         parsed = _extract_first_json_object(raw)
         route = str(parsed.get("route", "")).strip().lower() if parsed else ""
         if route in _VALID_ROUTES:
             reason = str(parsed.get("reason", "llm_guard")).strip() or "llm_guard"
-            result = (route, reason, "llm")
+            result = (route, reason, "llm", usage)
             _guard_cache[query] = result
             if len(_guard_cache) > _MAX_CACHE_SIZE:
                 _guard_cache.pop(next(iter(_guard_cache)))
             return result
         if raw.strip():
-            result = ("continue", "fallback_parse_error", "fallback")
+            result = ("continue", "fallback_parse_error", "fallback", usage)
             _guard_cache[query] = result
             if len(_guard_cache) > _MAX_CACHE_SIZE:
                 _guard_cache.pop(next(iter(_guard_cache)))
             return result
     except Exception:
-        return "continue", "fallback_provider_error", "fallback"
-    result = ("continue", "fallback_empty_response", "fallback")
+        return "continue", "fallback_provider_error", "fallback", None
+    result = ("continue", "fallback_empty_response", "fallback", usage)
     _guard_cache[query] = result
     if len(_guard_cache) > _MAX_CACHE_SIZE:
         _guard_cache.pop(next(iter(_guard_cache)))
@@ -133,7 +137,9 @@ def _answer_for_route(agent: Any, route: str, query: str) -> str:
     if route == "clarify":
         return (
             "Ta question est trop large ou manque de contexte. Précise l'entreprise, "
-            f"la période ou le type d'analyse. Entreprises disponibles : {universe}."
+            f"la période ou le type d'analyse. Si tu veux des infos sur ton portefeuille "
+            f"Alpaca, demande directement « mon portfolio » ou « mes positions ». "
+            f"Entreprises disponibles : {universe}."
         )
     if route == "general_chat":
         return (
@@ -162,7 +168,24 @@ async def guard_node(agent: Any, state: GraphState) -> GraphState:
             "stats": stats,
         }
 
-    route, reason, source = await _llm_guard_decision(agent, state, query)
+    portfolio_keywords = [
+        "portfolio", "portefeuille", "compte", "positions", "account",
+        "mon portfolio", "mon compte", "mes positions", "mon investissement",
+        "mes actions", "mon alpaca", "buying power", "equity", "pnl",
+        "profit and loss", "solde", "balance",
+    ]
+    query_lower = query.lower()
+    if any(kw in query_lower for kw in portfolio_keywords):
+        stats.update(
+            {
+                "guard_route": "continue",
+                "guard_source": "rule",
+                "guard_reason": "portfolio_query_detected",
+            }
+        )
+        return {"stats": stats}
+
+    route, reason, source, guard_usage = await _llm_guard_decision(agent, state, query)
     stats.update(
         {
             "guard_route": route,
@@ -170,6 +193,10 @@ async def guard_node(agent: Any, state: GraphState) -> GraphState:
             "guard_reason": reason,
         }
     )
+    if guard_usage:
+        stats["guard_input_tokens"] = guard_usage.get("prompt_tokens", 0)
+        stats["guard_output_tokens"] = guard_usage.get("completion_tokens", 0)
+        stats["guard_total_tokens"] = guard_usage.get("total_tokens", 0)
 
     answer = _answer_for_route(agent, route, query)
     if answer:

@@ -20,7 +20,7 @@ Tool usage guidelines:
 - portfolio_info_tool: view Alpaca paper account (balance, buying power, open positions, P&L).
 - place_trade_tool: submit real paper trades on Alpaca (market/limit/stop). Tracked tickers only, max $10K.
 - close_position_tool: close a specific position or liquidate all on Alpaca paper.
-- get_news_tool: fetch latest news articles for any ticker.
+- get_news_tool: fetch latest news articles for any ticker. Always include the article summary AND the clickable `[Lire plus](url)` link in your response.
 - portfolio_history_tool: get equity/P&L history over a period (1D/1W/1M/1A).
 - account_activity_tool: retrieve fills, dividends, deposits, withdrawals, fees.
 - export_investment_report_tool: when the user asks to save/generate a report file.

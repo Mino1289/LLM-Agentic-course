@@ -10,7 +10,8 @@ async def _inline_to_thread(func, *args, **kwargs):
 
 class GuardNodeTests(unittest.TestCase):
     def _agent(self, response: str = '{"route":"continue","reason":"ok"}'):
-        provider = SimpleNamespace(generate=MagicMock(return_value=response))
+        from src.llm.types import LLMToolResponse
+        provider = SimpleNamespace(invoke_with_tools=MagicMock(return_value=LLMToolResponse(content=response)))
         return SimpleNamespace(rag=SimpleNamespace(doc_metadata=[], provider=provider))
 
     def test_empty_query_clarifies(self):
@@ -37,7 +38,7 @@ class GuardNodeTests(unittest.TestCase):
         self.assertIn("MSFT", result["answer"])
         self.assertEqual(result["stats"]["guard_route"], "coverage_info")
         self.assertEqual(result["stats"]["guard_source"], "llm")
-        agent.rag.provider.generate.assert_called_once()
+        agent.rag.provider.invoke_with_tools.assert_called_once()
 
     def test_llm_offtopic_question_is_rejected(self):
         from src.graph.guard import guard_node

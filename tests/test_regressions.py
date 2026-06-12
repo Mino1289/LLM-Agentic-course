@@ -259,6 +259,9 @@ class RerankTests(unittest.TestCase):
             def _rerank(self, _query, indices, top_k):
                 return indices[:top_k]
 
+            def count_context_tokens(self, chunks):
+                return len(chunks) * 10
+
         agent = SimpleNamespace(rag=Rag(), max_context_chunks=4)
         state = {
             "normalized_query": "Compare MSFT et NVDA revenue growth",

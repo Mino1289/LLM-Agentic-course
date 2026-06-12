@@ -60,5 +60,6 @@ async def rerank_node(agent: Any, state: GraphState) -> GraphState:
     final_chunks = [agent.rag.documents[idx] for idx in top_indices]
     final_meta = [agent.rag.doc_metadata[idx] for idx in top_indices]
     stats = state.get("stats", {})
+    stats["estimated_context_tokens"] = agent.rag.count_context_tokens(final_chunks)
     stats.update({"rerank_final_ticker_counts": _ticker_counts(final_meta), "rerank_final_count": len(top_indices)})
     return {"final_chunks": final_chunks, "final_metadatas": final_meta, "stats": stats}

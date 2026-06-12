@@ -50,9 +50,15 @@ class OpenAIClient:
             kwargs["tool_choice"] = "auto"
         response = self.client.chat.completions.create(**kwargs)
         message = response.choices[0].message
+        usage = getattr(response, "usage", None)
         return LLMToolResponse(
             content=message.content,
             tool_calls=_parse_openai_tool_calls(message.tool_calls),
+            usage={
+                "prompt_tokens": usage.prompt_tokens,
+                "completion_tokens": usage.completion_tokens,
+                "total_tokens": usage.total_tokens,
+            } if usage else None,
         )
 
     async def ainvoke_with_tools_stream(
@@ -69,12 +75,22 @@ class OpenAIClient:
             "temperature": temperature,
             "max_tokens": max_tokens,
             "stream": True,
+            "stream_options": {"include_usage": True},
         }
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
         response = await self.async_client.chat.completions.create(**kwargs)
         async for raw_chunk in response:
+            usage_data = getattr(raw_chunk, "usage", None)
+            if usage_data:
+                yield LLMStreamChunk(
+                    usage={
+                        "prompt_tokens": usage_data.prompt_tokens,
+                        "completion_tokens": usage_data.completion_tokens,
+                        "total_tokens": usage_data.total_tokens,
+                    }
+                )
             if not getattr(raw_chunk, "choices", None):
                 continue
             choice = raw_chunk.choices[0]
@@ -96,10 +112,11 @@ class OpenAIClient:
                             "arguments": getattr(fn, "arguments", None) if fn else None,
                         }
                     )
+            finish_reason = getattr(choice, "finish_reason", None)
             chunk = LLMStreamChunk(
                 delta=delta_text,
                 tool_call_delta=tool_deltas,
-                finish_reason=getattr(choice, "finish_reason", None),
+                finish_reason=finish_reason,
             )
             if delta_text:
                 await _call_token_sink(delta_text)

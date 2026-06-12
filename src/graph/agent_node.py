@@ -34,10 +34,15 @@ async def agent_node(agent: Any, state: GraphState) -> GraphState:
     lc_messages = build_lc_messages(agent, state)
     text_parts: list[str] = []
     tool_calls_dict: dict[str | int, dict[str, Any]] = {}
+    stats = dict(state.get("stats") or {})
     llm_t0 = time.perf_counter()
     async for stream_chunk in agent.rag.provider.ainvoke_with_tools_stream(
         lc_messages, tools=get_tool_definitions(), temperature=0.2, max_tokens=2500,
     ):
+        if stream_chunk.usage:
+            stats["llm_input_tokens"] = stream_chunk.usage.get("prompt_tokens", stats.get("llm_input_tokens", 0))
+            stats["llm_output_tokens"] = stream_chunk.usage.get("completion_tokens", stats.get("llm_output_tokens", 0))
+            stats["llm_total_tokens"] = stream_chunk.usage.get("total_tokens", stats.get("llm_total_tokens", 0))
         if stream_chunk.delta:
             text_parts.append(stream_chunk.delta)
         if stream_chunk.tool_call_delta:
@@ -66,7 +71,6 @@ async def agent_node(agent: Any, state: GraphState) -> GraphState:
                         tool_calls_dict[tc_key]["arguments_parts"].append(tc_delta["arguments"])
     final_text = "".join(text_parts)
     final_tool_calls = [ToolCall(id=tc["id"], name=tc["name"], arguments="".join(tc["arguments_parts"]), thought_signature=tc.get("thought_signature")) for tc in tool_calls_dict.values() if tc["name"]]
-    stats = dict(state.get("stats") or {})
     stats["agent_iterations"] = iterations + 1
     if final_tool_calls:
         assistant_msg = {"role": "assistant", "content": final_text, "tool_calls": final_tool_calls}

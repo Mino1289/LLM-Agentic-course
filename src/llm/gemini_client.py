@@ -53,9 +53,15 @@ class GeminiClient:
             for part in getattr(candidate.content, "parts", []) or []:
                 if getattr(part, "text", None):
                     text_parts.append(part.text)
+        usage_meta = getattr(response, "usage_metadata", None)
         return LLMToolResponse(
             content="\n".join(text_parts).strip() or None,
             tool_calls=_parse_gemini_tool_calls(response),
+            usage={
+                "prompt_tokens": usage_meta.prompt_token_count,
+                "completion_tokens": usage_meta.candidates_token_count,
+                "total_tokens": usage_meta.total_token_count,
+            } if usage_meta else None,
         )
 
     async def ainvoke_with_tools_stream(
@@ -110,6 +116,15 @@ class GeminiClient:
 
         index_counter = 0
         async for raw_chunk in response:
+            usage_meta = getattr(raw_chunk, "usage_metadata", None)
+            if usage_meta:
+                yield LLMStreamChunk(
+                    usage={
+                        "prompt_tokens": usage_meta.prompt_token_count,
+                        "completion_tokens": usage_meta.candidates_token_count,
+                        "total_tokens": usage_meta.total_token_count,
+                    }
+                )
             text_parts: list[str] = []
             tool_deltas: list[dict[str, Any]] = []
             for candidate in getattr(raw_chunk, "candidates", []) or []:

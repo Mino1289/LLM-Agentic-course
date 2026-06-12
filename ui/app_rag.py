@@ -141,7 +141,8 @@ def render_stats(stats: dict[str, Any]) -> None:
 
     cols = st.columns(6)
     cols[0].metric("Chunks", stats.get("chunks_used", 0))
-    cols[1].metric("Tokens", stats.get("estimated_context_tokens", 0))
+    total = stats.get("llm_total_tokens", 0) + stats.get("guard_total_tokens", 0)
+    cols[1].metric("Tokens", total or stats.get("estimated_context_tokens", 0))
     cols[2].metric("Itérations agent", stats.get("agent_iterations", 0))
     cols[3].metric("Candidats", stats.get("retrieval_candidate_count", 0))
     cols[4].metric("Final", stats.get("rerank_final_count", stats.get("chunks_used", 0)))

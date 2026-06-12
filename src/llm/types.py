@@ -31,6 +31,7 @@ class LLMConfig:
 class LLMToolResponse:
     content: Optional[str]
     tool_calls: list[ToolCall] = field(default_factory=list)
+    usage: Optional[dict] = None
 
 
 @dataclass
@@ -39,9 +40,11 @@ class LLMStreamChunk:
 
     Soit un delta texte (delta != ""), soit un delta de tool_call
     (tool_call_delta != None), soit les deux. Un chunk final peut
-    contenir finish_reason set ("stop", "tool_calls", "length").
+    contenir finish_reason set ("stop", "tool_calls", "length") et
+    usage set (stats réelles de tokens de l'appel API).
     """
 
     delta: str = ""
     tool_call_delta: Optional[list[dict[str, Any]]] = None
     finish_reason: Optional[str] = None
+    usage: Optional[dict] = None
