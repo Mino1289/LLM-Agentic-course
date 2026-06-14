@@ -26,14 +26,14 @@ async def compliance_validator_node(agent: Any, state: HubSpokeState) -> HubSpok
         "tool_events": [],
     })
 
-    task = f"""Proposed investment decision to validate:
+    task = f"""Décision d'investissement à valider :
 {decision_text}
 
-Use portfolio_info_tool to check buying power and positions.
-Use account_activity_tool to check recent activity.
-Use validate_claims_tool to verify any claims if RAG data is present.
+Utilise portfolio_info_tool pour vérifier le pouvoir d'achat et les positions.
+Utilise account_activity_tool pour vérifier l'activité récente.
+Utilise validate_claims_tool pour vérifier les affirmations si des données RAG sont disponibles.
 
-Return PASS or FAIL with specific, actionable reasons."""
+Retourne PASS ou FAIL avec des raisons spécifiques et actionnables."""
 
     # Compter le nombre de passages dans Compliance via spoke_events
     compliance_count = sum(1 for e in spoke_events if e.get("agent") == "Compliance Validator" and e.get("status") == "running") + 1
@@ -51,7 +51,7 @@ Return PASS or FAIL with specific, actionable reasons."""
             verdict = "OVERRULED"
             reasons = ["Maximum de tentatives atteint. Décision forcée après révision.", *reasons]
 
-        summary = reasons[0][:300] if reasons else "Aucune raison détaillée."
+        summary = reasons[0][:2000] if reasons else "Aucune raison détaillée."
         spoke_events.append({
             "agent": "Compliance Validator",
             "status": "completed",

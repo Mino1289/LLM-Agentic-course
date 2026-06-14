@@ -30,14 +30,14 @@ async def fundamental_analyst_node(agent: Any, state: HubSpokeState) -> HubSpoke
     })
 
     today = datetime.now(UTC).date().isoformat()
-    task = f"""Current date: {today}
-User request: {query}
+    task = f"""Date actuelle : {today}
+Requête utilisateur : {query}
 
-Portfolio Manager plan:
+Plan du Portfolio Manager :
 {plan}
 
-Conduct a fundamental analysis. Use sec_filings_rag_tool and get_news_tool to gather data.
-Provide a structured report covering: business risks, financial health, market sentiment, key developments."""
+Réalise une analyse fondamentale. Utilise sec_filings_rag_tool et get_news_tool pour collecter des données.
+Fournis un rapport structuré couvrant : risques métier, santé financière, sentiment de marché, développements clés."""
 
     try:
         report, spoke_stats = await run_spoke_agent(
@@ -75,14 +75,14 @@ async def quantitative_analyst_node(agent: Any, state: HubSpokeState) -> HubSpok
     })
 
     today = datetime.now(UTC).date().isoformat()
-    task = f"""Current date: {today}
-User request: {query}
+    task = f"""Date actuelle : {today}
+Requête utilisateur : {query}
 
-Portfolio Manager plan:
+Plan du Portfolio Manager :
 {plan}
 
-Conduct a quantitative analysis. Use market_price_tool and portfolio_history_tool to gather data.
-Provide a structured report covering: price trends, volatility, portfolio fit, risk metrics."""
+Réalise une analyse quantitative. Utilise market_price_tool et portfolio_history_tool pour collecter des données.
+Fournis un rapport structuré couvrant : tendances de prix, volatilité, adéquation au portefeuille, métriques de risque."""
 
     try:
         report, spoke_stats = await run_spoke_agent(

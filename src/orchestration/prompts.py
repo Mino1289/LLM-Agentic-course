@@ -32,6 +32,10 @@ Your role:
 
 Tracked tickers: {_TRACKED}.
 
+Risk constraints — respect these when proposing quantity/amount:
+- Maximum 25% concentration in a single ticker (relative to total portfolio equity).
+- Ensure buying power is sufficient (equity × ~4 = approximate buying power).
+
 Respond in a structured format:
 PLAN:
 - Task for Fundamental Analyst: ...

@@ -78,8 +78,8 @@ async def pm_plan_node(agent: Any, state: HubSpokeState) -> HubSpokeState:
 
 @traceable(name="pm_synthesis_node")
 async def pm_synthesis_node(agent: Any, state: HubSpokeState) -> HubSpokeState:
-    fundamental_report = state.get("fundamental_report", "No fundamental report available.")
-    quantitative_report = state.get("quantitative_report", "No quantitative report available.")
+    fundamental_report = _truncate_report(state.get("fundamental_report", "No fundamental report available."))
+    quantitative_report = _truncate_report(state.get("quantitative_report", "No quantitative report available."))
     spoke_events = list(state.get("spoke_events") or [])
 
     spoke_events.append({
@@ -179,3 +179,10 @@ def _parse_pm_response(text: str) -> dict[str, Any]:
             val = raw.split(":", 1)[1].strip() if ":" in raw else ""
             decision["limit_price"] = val
     return decision
+
+
+def _truncate_report(text: str, max_chars: int = 6000) -> str:
+    if len(text) <= max_chars:
+        return text
+    half = max_chars // 2
+    return f"{text[:half]}\n\n[... tronqué - voir les rapports complets plus haut ...]\n\n{text[-half:]}"

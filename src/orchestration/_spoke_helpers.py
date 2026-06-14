@@ -10,8 +10,8 @@ from src.tools.execute import ToolExecutor
 
 _LOGGER = logging.getLogger("src.orchestration._spoke_helpers")
 
-LLM_TIMEOUT = 90
-TOOL_TIMEOUT = 30
+LLM_TIMEOUT = 180
+TOOL_TIMEOUT = 120
 
 
 async def run_spoke_agent(
