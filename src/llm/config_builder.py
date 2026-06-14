@@ -6,8 +6,8 @@ from typing import Optional
 
 from src.llm.types import LLMConfig
 
-SUPPORTED_CHAT_PROVIDERS = {"openai", "github_models", "gemini", "azure_openai"}
-SUPPORTED_EMBEDDING_PROVIDERS = {"openai", "github_models", "azure_openai"}
+SUPPORTED_CHAT_PROVIDERS = {"openai", "github_models", "gemini", "azure_openai", "nvidia_nim"}
+SUPPORTED_EMBEDDING_PROVIDERS = {"openai", "github_models", "azure_openai", "nvidia_nim"}
 GITHUB_MODELS_BASE_URL = "https://models.inference.ai.azure.com"
 GITHUB_DEFAULT_CHAT_MODEL = "gpt-4.1-mini"
 GITHUB_DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
@@ -15,6 +15,9 @@ OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1"
 AZURE_DEFAULT_API_VERSION = "2024-02-01"
 AZURE_DEFAULT_CHAT_DEPLOYMENT = "gpt-4o-mini"
 AZURE_DEFAULT_EMBEDDING_DEPLOYMENT = "text-embedding-3-small"
+NVIDIA_NIM_BASE_URL = "https://integrate.api.nvidia.com/v1"
+NVIDIA_NIM_DEFAULT_CHAT_MODEL = "deepseek-ai/deepseek-v4-flash"
+NVIDIA_NIM_DEFAULT_EMBEDDING_MODEL = "nvidia/llama-nemotron-embed-1b-v2"
 # Backward-compatible alias
 SUPPORTED_PROVIDERS = SUPPORTED_CHAT_PROVIDERS
 
@@ -41,6 +44,12 @@ def _build_openai_style_embedding_config(provider: str) -> tuple[str, str, Optio
             os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"),
             _require_env("OPENAI_API_KEY"),
             os.getenv("OPENAI_BASE_URL", "").strip() or OPENAI_DEFAULT_BASE_URL,
+        )
+    if provider == "nvidia_nim":
+        return (
+            os.getenv("NVIDIA_NIM_EMBEDDING_MODEL", NVIDIA_NIM_DEFAULT_EMBEDDING_MODEL),
+            _require_env("NVIDIA_NIM_API_KEY"),
+            os.getenv("NVIDIA_NIM_BASE_URL", "").strip() or NVIDIA_NIM_BASE_URL,
         )
     return (
         _normalize_github_model_id(
@@ -124,6 +133,20 @@ def build_llm_config_from_env() -> LLMConfig:
             api_key=api_key,
             base_url=endpoint,
             api_version=api_ver,
+            embedding_provider=embedding_provider,
+            embedding_api_key=embed_key,
+            embedding_base_url=embed_base,
+            embedding_api_version=embed_api_ver,
+        )
+
+    if provider == "nvidia_nim":
+        api_key = _require_env("NVIDIA_NIM_API_KEY")
+        return LLMConfig(
+            provider=provider,
+            chat_model=os.getenv("NVIDIA_NIM_CHAT_MODEL", NVIDIA_NIM_DEFAULT_CHAT_MODEL),
+            embedding_model=embed_model,
+            api_key=api_key,
+            base_url=os.getenv("NVIDIA_NIM_BASE_URL", "").strip() or NVIDIA_NIM_BASE_URL,
             embedding_provider=embedding_provider,
             embedding_api_key=embed_key,
             embedding_base_url=embed_base,

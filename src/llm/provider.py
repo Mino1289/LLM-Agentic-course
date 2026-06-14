@@ -9,12 +9,13 @@ from src.llm.config_builder import build_llm_config_from_env
 from src.llm.openai_client import OpenAIClient
 from src.llm.github_client import GitHubModelsClient
 from src.llm.azure_client import AzureOpenAIClient
+from src.llm.nvidia_nim_client import NvidiaNIMClient
 from src.llm.gemini_client import GeminiClient
 
 
 class LLMProvider:
     """
-    Unified provider wrapper for OpenAI, GitHub Models, Azure OpenAI, and Gemini.
+    Unified provider wrapper for OpenAI, GitHub Models, Azure OpenAI, NVIDIA NIM, and Gemini.
     Embedding and chat providers can be selected independently.
     """
 
@@ -51,6 +52,8 @@ class LLMProvider:
             self._client = GitHubModelsClient(self.config)
         elif self.config.provider == "azure_openai":
             self._client = AzureOpenAIClient(self.config)
+        elif self.config.provider == "nvidia_nim":
+            self._client = NvidiaNIMClient(self.config)
         else:
             self._client = None
 
@@ -80,7 +83,7 @@ class LLMProvider:
 
     def _init_async_client(self) -> None:
         """Initialize async client if needed."""
-        if self.config.provider in {"openai", "github_models", "azure_openai"} and self._client:
+        if self.config.provider in {"openai", "github_models", "azure_openai", "nvidia_nim"} and self._client:
             self._client._init_async()
 
     def _get_gemini_client(self):
