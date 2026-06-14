@@ -75,7 +75,10 @@ def _gemini_contents_from_messages(messages: list[dict[str, Any]]) -> tuple[Opti
                         args = json.loads(fn.get("arguments", " {}") or "{}")
                     except json.JSONDecodeError:
                         args = {}
-                    parts.append(types.Part.from_function_call(name=fn.get("name", ""), args=args))
+                    part = types.Part.from_function_call(name=fn.get("name", ""), args=args)
+                    if tc.get("thought_signature"):
+                        part.thought_signature = tc.thought_signature
+                    parts.append(part)
             if parts:
                 contents.append(types.Content(role="model", parts=parts))
             continue

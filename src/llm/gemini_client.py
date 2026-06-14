@@ -1,7 +1,9 @@
 """Client Gemini pour les appels LLM et streaming."""
 from __future__ import annotations
 
+import asyncio
 import json
+import time
 import uuid
 from typing import Any, AsyncIterator, Optional
 
@@ -10,6 +12,26 @@ from src.llm.messages import _gemini_contents_from_messages
 from src.llm.parser import _tool_definitions_to_gemini
 from src.llm.sinks import _call_token_sink
 from src.llm.parser import _parse_gemini_tool_calls
+
+# Token bucket rate limiter pour éviter 429 (free tier: 15 req/min)
+_MAX_RPM = 12
+_RATE_LIMIT_WINDOW = 60.0
+_semaphore = asyncio.Semaphore(3)
+_request_timestamps: list[float] = []
+
+
+async def _rate_limit_wait():
+    async with _semaphore:
+        now = time.monotonic()
+        cutoff = now - _RATE_LIMIT_WINDOW
+        # Purge les timestamps hors de la fenêtre
+        while _request_timestamps and _request_timestamps[0] < cutoff:
+            _request_timestamps.pop(0)
+        if len(_request_timestamps) >= _MAX_RPM:
+            sleep_for = _request_timestamps[0] + _RATE_LIMIT_WINDOW - now
+            if sleep_for > 0:
+                await asyncio.sleep(sleep_for)
+        _request_timestamps.append(time.monotonic())
 
 
 class GeminiClient:
@@ -31,6 +53,7 @@ class GeminiClient:
         max_tokens: int = 2000,
     ) -> LLMToolResponse:
         client = self._get_gemini_client()
+        # Note: sync call ne peut pas await, on skip le rate limit ici (peu utilisé)
         from google.genai import types
         system_instruction, contents = _gemini_contents_from_messages(messages)
         config_kwargs: dict[str, Any] = {
@@ -97,24 +120,39 @@ class GeminiClient:
                 function_calling_config=types.FunctionCallingConfig(mode="AUTO")
             )
 
-        try:
-            response = await client.aio.models.generate_content_stream(
-                model=self.config.chat_model,
-                contents=contents,
-                config=types.GenerateContentConfig(**config_kwargs),
-            )
-        except (AttributeError, RuntimeError, NotImplementedError):
-            # Fallback non-streaming
-            full = self.invoke_with_tools(messages, tools, temperature, max_tokens)
-            yield LLMStreamChunk(
-                delta=full.content or "",
-                tool_call_delta=[
-                    {"id": tc.id, "name": tc.name, "arguments": tc.arguments, "thought_signature": tc.thought_signature}
-                    for tc in full.tool_calls
-                ] or None,
-                finish_reason="stop",
-            )
-            return
+        await _rate_limit_wait()
+
+        # Retry loop for 429 (rate limit) with exponential backoff
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                response = await client.aio.models.generate_content_stream(
+                    model=self.config.chat_model,
+                    contents=contents,
+                    config=types.GenerateContentConfig(**config_kwargs),
+                )
+                break
+            except (AttributeError, RuntimeError, NotImplementedError):
+                # Fallback non-streaming
+                full = self.invoke_with_tools(messages, tools, temperature, max_tokens)
+                yield LLMStreamChunk(
+                    delta=full.content or "",
+                    tool_call_delta=[
+                        {"id": tc.id, "name": tc.name, "arguments": tc.arguments, "thought_signature": tc.thought_signature}
+                        for tc in full.tool_calls
+                    ] or None,
+                    finish_reason="stop",
+                )
+                return
+            except Exception as exc:
+                from google.genai.errors import ClientError
+                is_429 = isinstance(exc, ClientError) and getattr(exc, "code", 0) == 429
+                if is_429 and attempt < max_retries - 1:
+                    wait = 2 ** attempt * 10
+                    yield LLMStreamChunk(delta=f"\n[Rate limit dépassé, attente {wait}s...]\n")
+                    await asyncio.sleep(wait)
+                    continue
+                raise
 
         index_counter = 0
         async for raw_chunk in response:

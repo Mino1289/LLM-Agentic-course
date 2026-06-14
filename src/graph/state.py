@@ -47,3 +47,4 @@ class GraphState(TypedDict, total=False):
     answer: str
     gc_applied: bool
     stats: dict[str, Any]
+    compliance_retries: int

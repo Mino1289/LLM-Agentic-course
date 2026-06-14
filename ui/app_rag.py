@@ -1,3 +1,4 @@
+import asyncio
 import os
 import sys
 import uuid
@@ -7,11 +8,9 @@ from typing import Any
 
 import streamlit as st
 
-# Reduce noisy transformers warnings triggered by Streamlit module introspection.
 os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
 try:
     from transformers.utils import logging as transformers_logging
-
     transformers_logging.set_verbosity_error()
 except Exception:
     pass
@@ -19,22 +18,16 @@ except Exception:
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.graph.tracing import ensure_langsmith_env
-
 ensure_langsmith_env()
 
 from src.rag.core import HybridRAG
 from src.graph.flow import FinanceLangGraphAgent
+from src.orchestration.hub_graph import HubAndSpokeGraph
 from src.llm import build_llm_config_from_env
 from src.tools.definitions import get_tool_definitions
-from ui.streaming import run_stream
+from ui.streaming import run_phase3_stream
 
-st.set_page_config(page_title="Finance RAG LangGraph", page_icon="📈", layout="wide")
-st.title("📈 Finance RAG LangGraph")
-st.markdown(
-    "Assistant d'analyse financière (agent à outils, style MCP) : SEC filings, earnings calls, "
-    "prix de marché et export de rapports. **Pas de serveur MCP séparé** — les outils sont exposés "
-    "au LLM via function calling (`get_tool_definitions` / `tools_node`)."
-)
+st.set_page_config(page_title="Finance RAG Hub-and-Spoke", page_icon="📈", layout="wide")
 
 if "conversation_id" not in st.session_state:
     st.session_state.conversation_id = str(uuid.uuid4())
@@ -43,12 +36,14 @@ if "messages" not in st.session_state:
         {
             "role": "assistant",
             "content": (
-                "Bonjour. Je peux comparer NVDA, AMD et MSFT, ARM, ASML interroger les 10-K/10-Q/8-K/6-K/20-F "
-                "et les transcripts earnings, valider des affirmations, simuler une allocation fictive, "
-                "récupérer les prix et générer un rapport téléchargeable."
+                "Bonjour. Je peux analyser NVDA, AMD, MSFT, ARM, ASML — "
+                "interroger les filings SEC, les transcripts earnings, valider des affirmations, "
+                "simuler une allocation, récupérer les prix et générer des rapports."
             ),
         }
     ]
+if "pending_trade_state" not in st.session_state:
+    st.session_state.pending_trade_state = None
 
 
 @st.cache_resource
@@ -138,35 +133,41 @@ def render_report_downloads(report_artifacts: list[dict[str, Any]], key_prefix: 
 def render_stats(stats: dict[str, Any]) -> None:
     if not stats:
         return
-
-    cols = st.columns(6)
-    cols[0].metric("Chunks", stats.get("chunks_used", 0))
-    total = stats.get("llm_total_tokens", 0) + stats.get("guard_total_tokens", 0)
-    cols[1].metric("Tokens", total or stats.get("estimated_context_tokens", 0))
-    cols[2].metric("Itérations agent", stats.get("agent_iterations", 0))
-    cols[3].metric("Candidats", stats.get("retrieval_candidate_count", 0))
-    cols[4].metric("Final", stats.get("rerank_final_count", stats.get("chunks_used", 0)))
-    cols[5].metric("Prix", "oui" if stats.get("price_tool_used") else "non")
-
-    retrieval_counts = stats.get("retrieval_candidate_ticker_counts", {})
-    rerank_counts = stats.get("rerank_final_ticker_counts", {})
-    if retrieval_counts or rerank_counts:
-        st.caption(
-            "Répartition tickers - "
-            f"retrieval: {format_counts(retrieval_counts)} | "
-            f"rerank final: {format_counts(rerank_counts)}"
-        )
-    else:
-        st.caption(
-            f"GC: {'oui' if stats.get('gc_applied') else 'non'} | "
-            f"RAG tool: {'oui' if stats.get('rag_tool_used') else 'non'}"
-        )
+    items = []
+    spoke_tc = stats.get("spoke_tool_calls", 0)
+    spoke_llm = stats.get("spoke_llm_iterations", 0)
+    if spoke_tc:
+        items.append(("Appels outils", str(spoke_tc)))
+    if spoke_llm:
+        items.append(("Itérations LLM", str(spoke_llm)))
+    total_tokens = stats.get("llm_total_tokens", 0) + stats.get("guard_total_tokens", 0) or stats.get("estimated_context_tokens", 0)
+    if total_tokens:
+        items.append(("Tokens", str(total_tokens)))
+    if stats.get("chunks_used"):
+        items.append(("Chunks", str(stats["chunks_used"])))
+    if stats.get("retrieval_candidate_count"):
+        items.append(("Candidats", str(stats["retrieval_candidate_count"])))
+    if stats.get("rerank_final_count", stats.get("chunks_used")):
+        items.append(("Final", str(stats.get("rerank_final_count") or stats.get("chunks_used", ""))))
+    if stats.get("price_tool_used"):
+        items.append(("Prix", "oui"))
+    if stats.get("rag_tool_used"):
+        items.append(("RAG", "oui"))
+    if stats.get("gc_applied"):
+        items.append(("GC", "oui"))
+    for stat_name in ("pm_plan_done", "pm_synthesis_done"):
+        if stats.get(stat_name):
+            items.append((stat_name.replace("_", " ").title(), "✓"))
+    if not items:
+        return
+    cols = st.columns(min(len(items), 6))
+    for i, (label, value) in enumerate(items[:6]):
+        cols[i].metric(label, value)
 
 
 def render_sources(sources: list[dict[str, Any]], key_prefix: str) -> None:
     if not sources:
         return
-
     counts = Counter(str(source.get("ticker", "UNKNOWN")) for source in sources)
     summary = ", ".join(f"{ticker}: {count}" for ticker, count in sorted(counts.items()))
     with st.expander(f"Sources consultées ({len(sources)} chunks | {summary})"):
@@ -175,7 +176,6 @@ def render_sources(sources: list[dict[str, Any]], key_prefix: str) -> None:
         col1, col2 = st.columns(2)
         selected_ticker = col1.selectbox("Ticker", tickers, key=f"{key_prefix}_source_ticker")
         selected_section = col2.selectbox("Section", sections, key=f"{key_prefix}_source_section")
-
         visible_sources = []
         for source in sources:
             if selected_ticker != "Tous" and source.get("ticker") != selected_ticker:
@@ -183,7 +183,6 @@ def render_sources(sources: list[dict[str, Any]], key_prefix: str) -> None:
             if selected_section != "Toutes" and source.get("section") != selected_section:
                 continue
             visible_sources.append(source)
-
         for source_idx, source in enumerate(visible_sources, start=1):
             stable_idx = source.get("source_index", source_idx)
             st.markdown(
@@ -210,12 +209,10 @@ def render_debug(message: dict[str, Any], key_prefix: str) -> None:
     debug_payload = message.get("debug", {})
     if not stats and not debug_payload:
         return
-
     with st.expander("Debug RAG"):
         tab_pipeline, tab_tools, tab_filters, tab_stats = st.tabs(
             ["Pipeline", "Outils", "Filtres", "Stats brutes"]
         )
-
         with tab_pipeline:
             pipeline_rows = {
                 "pipeline": stats.get("pipeline"),
@@ -228,14 +225,12 @@ def render_debug(message: dict[str, Any], key_prefix: str) -> None:
                 "report_exported": stats.get("report_exported"),
             }
             st.json({k: v for k, v in pipeline_rows.items() if v not in (None, "", [])})
-
         with tab_tools:
             events = message.get("tool_events", [])
             if events:
                 st.json(events)
             else:
                 st.caption("Aucun appel d'outil enregistré.")
-
         with tab_filters:
             st.json(
                 {
@@ -244,51 +239,8 @@ def render_debug(message: dict[str, Any], key_prefix: str) -> None:
                     "target_tickers": debug_payload.get("target_tickers", []),
                 }
             )
-
         with tab_stats:
             st.json(stats)
-
-
-def render_sidebar_models(
-    provider_name: str,
-    chat_model: str,
-    embed_provider: str,
-    embed_model: str,
-    config_error: str | None = None,
-) -> None:
-    st.sidebar.subheader("Modèles")
-    if config_error:
-        st.sidebar.error(f"Config LLM : {config_error}")
-        return
-    st.sidebar.markdown(f"**Chat** : `{provider_name}` · `{chat_model}`")
-    st.sidebar.markdown(f"**Embeddings** : `{embed_provider}` · `{embed_model}`")
-    if os.getenv("LANGSMITH_TRACING", "").strip().lower() in {"1", "true", "yes"}:
-        region = os.getenv("LANGSMITH_REGION", "us").upper()
-        project = os.getenv("LANGSMITH_PROJECT", "")
-        st.sidebar.caption(f"LangSmith ({region}) · projet `{project}`")
-
-
-def render_sidebar_tools() -> None:
-    st.sidebar.subheader("Outils disponibles")
-    st.sidebar.caption(
-        "5 outils (contrat type MCP). L'agent les appelle dynamiquement ; "
-        "il n'y a pas de serveur MCP stdio/HTTP dans ce projet."
-    )
-    for tool in get_tool_definitions():
-        fn = tool.get("function", {})
-        name = fn.get("name", "outil")
-        description = fn.get("description", "")
-        with st.sidebar.expander(name, expanded=False):
-            st.markdown(description)
-            params = fn.get("parameters", {}) or {}
-            properties = params.get("properties", {}) or {}
-            required = set(params.get("required", []) or [])
-            if properties:
-                st.markdown("**Paramètres**")
-                for param_name, param_info in properties.items():
-                    req = " *(requis)*" if param_name in required else ""
-                    param_desc = param_info.get("description", "")
-                    st.markdown(f"- `{param_name}`{req} — {param_desc}")
 
 
 def render_assistant_artifacts(message: dict[str, Any], key_prefix: str) -> None:
@@ -303,25 +255,75 @@ def render_assistant_artifacts(message: dict[str, Any], key_prefix: str) -> None
     render_debug(message, key_prefix)
 
 
-st.sidebar.title("Finance RAG Agent")
-st.sidebar.caption("LangGraph v2 · semantic chunking · boucle agent ↔ outils")
+def render_human_review(state: dict[str, Any]) -> None:
+    decision = state.get("pm_decision", {})
+    detail = state.get("compliance_detail", "")
+
+    st.markdown("---")
+    st.subheader("🔐 Approbation Humaine Requise")
+
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        st.markdown(f"**Ticker:** {decision.get('ticker', 'N/A')}")
+        st.markdown(f"**Side:** {decision.get('side', 'N/A')}")
+        st.markdown(f"**Quantité:** {decision.get('qty', 'N/A')}")
+        st.markdown(f"**Type d'ordre:** {decision.get('order_type', 'market')}")
+        if decision.get("limit_price"):
+            st.markdown(f"**Prix limite:** {decision['limit_price']}")
+    with col2:
+        st.metric("Buying Power", "À vérifier")
+        st.metric("Risque", "Faible" if state.get("compliance_verdict") == "PASS" else "Élevé")
+
+    with st.expander("Justification complète"):
+        st.markdown(decision.get("response", "N/A"))
+    with st.expander("Détail de la vérification Compliance"):
+        st.markdown(detail)
+
+    col_a, col_b = st.columns(2)
+    with col_a:
+        if st.button("✅ Approuver le Trade", type="primary", use_container_width=True):
+            st.session_state.pending_trade_approved = True
+            st.rerun()
+    with col_b:
+        if st.button("❌ Annuler", use_container_width=True):
+            st.session_state.pending_trade_approved = False
+            st.rerun()
+
+
+st.sidebar.title("Finance RAG Hub-and-Spoke")
+st.sidebar.caption("Routeur d'intention → agents spécialisés Hub-and-Spoke")
 
 try:
     llm_config = build_llm_config_from_env()
-    render_sidebar_models(
-        llm_config.provider,
-        llm_config.chat_model,
-        llm_config.embedding_provider,
-        llm_config.embedding_model,
-    )
+    st.sidebar.subheader("Modèles")
+    st.sidebar.markdown(f"**Chat** : `{llm_config.provider}` · `{llm_config.chat_model}`")
+    st.sidebar.markdown(f"**Embeddings** : `{llm_config.embedding_provider}` · `{llm_config.embedding_model}`")
+    if os.getenv("LANGSMITH_TRACING", "").strip().lower() in {"1", "true", "yes"}:
+        region = os.getenv("LANGSMITH_REGION", "us").upper()
+        project = os.getenv("LANGSMITH_PROJECT", "")
+        st.sidebar.caption(f"LangSmith ({region}) · projet `{project}`")
 except Exception as config_exc:
-    render_sidebar_models("?", "?", "?", "?", str(config_exc))
+    st.sidebar.error(f"Config LLM : {config_exc}")
 
-render_sidebar_tools()
+st.sidebar.subheader("Outils disponibles")
+st.sidebar.caption("10 outils (contrat type MCP). Les agents les appellent dynamiquement.")
+for tool in get_tool_definitions():
+    fn = tool.get("function", {})
+    name = fn.get("name", "outil")
+    description = fn.get("description", "")
+    with st.sidebar.expander(name, expanded=False):
+        st.markdown(description)
+        params = fn.get("parameters", {}) or {}
+        properties = params.get("properties", {}) or {}
+        required = set(params.get("required", []) or [])
+        if properties:
+            st.markdown("**Paramètres**")
+            for param_name, param_info in properties.items():
+                req = " *(requis)*" if param_name in required else ""
+                st.markdown(f"- `{param_name}`{req} — {param_info.get('description', '')}")
+
 st.sidebar.divider()
-
 st.sidebar.subheader("Configuration")
-
 max_context_chunks_default = int(os.getenv("MAX_CONTEXT_CHUNKS", "8"))
 decompose_query_count_default = int(os.getenv("QUERY_DECOMPOSE_COUNT", "2"))
 price_max_days_default = int(os.getenv("PRICE_MAX_DAYS", "180"))
@@ -344,15 +346,24 @@ if st.sidebar.button("Nouvelle conversation", use_container_width=True):
         {
             "role": "assistant",
             "content": (
-                "Bonjour. Je peux comparer NVDA, AMD, ARM, ASML et MSFT, interroger les filings SEC "
-                "et earnings calls, valider des affirmations, simuler une allocation fictive "
-                "et exporter un rapport."
+                "Bonjour. Je peux analyser NVDA, AMD, ARM, ASML et MSFT, "
+                "interroger les filings SEC et earnings calls, valider des affirmations, "
+                "simuler une allocation fictive et exporter un rapport."
             ),
         }
     ]
+    st.session_state.pending_trade_state = None
     st.rerun()
 
 st.sidebar.divider()
+
+st.title("📈 Orchestration Hub-and-Spoke")
+st.markdown(
+    "Système multi-agents : **Routeur d'Intention** 🚦 décide automatiquement : "
+    "requête simple → **Agent Phase 2** ; requête complexe → **Portfolio Manager** 👔 → "
+    "**Analystes** 📚📈 → **Compliance** 🛡️ → **Executor** ⚡."
+)
+
 try:
     agent = build_agent(
         max_context_chunks,
@@ -377,59 +388,77 @@ for message_idx, message in enumerate(st.session_state.messages):
 query = st.chat_input(
     "Question finance (ex: Compare MSFT et NVDA — risques SEC 2024, perf 6 mois, puis sauvegarde le rapport)"
 )
+
 if query:
     st.session_state.messages.append({"role": "user", "content": query})
     with st.chat_message("user"):
         st.markdown(query)
 
     with st.chat_message("assistant"):
+        hub_graph = HubAndSpokeGraph(agent, max_spoke_iterations=3)
+
+        console_container = st.empty()
         text_container = st.empty()
         status_container = st.status("⏳ Analyse en cours...", expanded=True)
+
+        def on_human_review_cb(state: dict[str, Any]) -> None:
+            st.session_state.pending_trade_state = state
+            st.session_state.pending_trade_approved = None
+
         try:
-            result = run_stream(
-                agent,
+            result = run_phase3_stream(
+                hub_graph,
                 query,
                 conversation_id=st.session_state.conversation_id,
                 messages=st.session_state.messages,
+                console_container=console_container,
                 text_container=text_container,
                 status_container=status_container,
+                on_human_review=on_human_review_cb,
             )
 
-            assistant_text = result.get("clarification_question") or result.get(
-                "answer", "Aucune réponse générée."
-            )
-            # Replace the streamed text with the final answer (no cursor)
+            if result.get("human_review_pending"):
+                st.session_state.pending_trade_state = result
+
+            assistant_text = result.get("answer", "Aucune réponse générée.")
             text_container.markdown(assistant_text)
 
-            chunks = result.get("final_chunks", [])
-            metadatas = result.get("final_metadatas", [])
-            price_context = result.get("price_context", "")
-            sources = build_sources(chunks, metadatas)
-            debug = {
-                "normalized_query": result.get("normalized_query", ""),
-                "metadata_filter": result.get("metadata_filter", {}),
-                "target_tickers": result.get("target_tickers", []),
-            }
+            spoke_events = result.get("spoke_events", [])
+            tool_events = result.get("tool_events", [])
+            stats = result.get("stats", {})
 
-            assistant_message = {
+            message = {
                 "role": "assistant",
                 "content": assistant_text,
-                "stats": result.get("stats", {}),
-                "sources": sources,
-                "price_context": price_context,
-                "tool_events": result.get("tool_events", []),
-                "report_artifacts": result.get("report_artifacts", []),
-                "debug": debug,
+                "stats": stats,
+                "sources": build_sources([], []),
+                "tool_events": tool_events if tool_events else [],
+                "report_artifacts": [],
             }
-            render_assistant_artifacts(
-                assistant_message, key_prefix=f"live_{len(st.session_state.messages)}"
-            )
+            render_assistant_artifacts(message, key_prefix=f"live_{len(st.session_state.messages)}")
+            st.session_state.messages.append(message)
 
-            st.session_state.messages.append(assistant_message)
         except Exception as e:
             error_msg = f"Erreur lors de l'analyse: {e}"
             st.error(error_msg)
             st.session_state.messages.append({"role": "assistant", "content": error_msg})
 
+# Traitement approve/reject : doit être HORS du bloc if query: pour survivre aux reruns
+if st.session_state.get("pending_trade_state") and st.session_state.get("pending_trade_approved") is None:
+    render_human_review(st.session_state.pending_trade_state)
+elif st.session_state.get("pending_trade_approved") is True:
+    st.info("✅ Trade approuvé. Exécution en cours...")
+    hub_graph = HubAndSpokeGraph(agent, max_spoke_iterations=3)
+    final_state = asyncio.run(hub_graph.resume_after_human(
+        st.session_state.pending_trade_state, approved=True,
+    ))
+    st.success(final_state.get("answer", "Trade exécuté."))
+    st.session_state.pending_trade_state = None
+    st.session_state.pending_trade_approved = None
+elif st.session_state.get("pending_trade_approved") is False:
+    st.warning("❌ Ordre annulé par l'utilisateur.")
+    st.session_state.pending_trade_state = None
+    st.session_state.pending_trade_approved = None
+
 st.divider()
-st.caption("OpenAI / GitHub Models / Gemini (chat) + ChromaDB + LangGraph Agent v2")
+st.caption("OpenAI/GitHub Models/Gemini + ChromaDB + LangGraph · Orchestration Hub-and-Spoke multi-agents")

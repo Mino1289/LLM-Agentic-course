@@ -36,6 +36,35 @@ Priority:
 _VALID_ROUTES = {"continue", "clarify", "coverage_info", "reject_offtopic", "general_chat"}
 
 
+def _ticker_fuzzy_suggest(word: str, known: list[str], max_dist: int = 1) -> str | None:
+    """Cherche le plus proche ticker connu par distance de Levenshtein."""
+    w = word.strip().upper()
+    if not w or len(w) < 2 or w in known:
+        return None
+    best, best_dist = None, 99
+    for k in known:
+        d = _levenshtein(w, k)
+        if d < best_dist:
+            best_dist = d
+            best = k
+    return best if best_dist <= max_dist else None
+
+
+def _levenshtein(a: str, b: str) -> int:
+    na, nb = len(a), len(b)
+    if na > nb:
+        a, b = b, a
+        na, nb = nb, na
+    prev = list(range(nb + 1))
+    for i, ca in enumerate(a):
+        curr = [i + 1]
+        for j, cb in enumerate(b):
+            cost = 0 if ca == cb else 1
+            curr.append(min(curr[j] + 1, prev[j + 1] + 1, prev[j] + cost))
+        prev = curr
+    return prev[nb]
+
+
 def _extract_first_json_object(raw: str) -> dict[str, Any] | None:
     text = (raw or "").strip()
     if not text:
@@ -186,6 +215,21 @@ async def guard_node(agent: Any, state: GraphState) -> GraphState:
         return {"stats": stats}
 
     route, reason, source, guard_usage = await _llm_guard_decision(agent, state, query)
+
+    # Fuzzy ticker suggestion: if guard says "clarify" but we detect a close ticker typo,
+    # let the query pass through so the downstream agent can handle it.
+    ticker_suggestion = None
+    if route == "clarify":
+        from src.config import TRACKED_TICKERS
+        for word in re.findall(r"[A-Z]{2,5}", query.upper()):
+            suggestion = _ticker_fuzzy_suggest(word, list(TRACKED_TICKERS), max_dist=1)
+            if suggestion:
+                ticker_suggestion = suggestion
+                route = "continue"
+                reason = f"fuzzy_ticker: {word} -> {suggestion}"
+                source = "rule"
+                break
+
     stats.update(
         {
             "guard_route": route,
@@ -203,6 +247,11 @@ async def guard_node(agent: Any, state: GraphState) -> GraphState:
         return {
             "answer": answer,
             "tool_calls_pending": False,
+            "stats": stats,
+        }
+    if ticker_suggestion:
+        return {
+            "normalized_query": f"{query} (peut-être {ticker_suggestion} ?)",
             "stats": stats,
         }
     return {"stats": stats}
