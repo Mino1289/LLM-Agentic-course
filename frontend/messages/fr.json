@@ -1,0 +1,68 @@
+{
+  "meta": {
+    "title": "Finance RAG · Hub-and-Spoke",
+    "description": "Assistant financier multi-agents avec RAG"
+  },
+  "sidebar": {
+    "newChat": "Nouvelle conversation",
+    "settings": "Paramètres",
+    "chatLabel": "Chat:",
+    "embeddingsLabel": "Embeddings:",
+    "localeSwitch": "EN"
+  },
+  "topbar": {
+    "toggleSidebar": "Basculer la barre latérale"
+  },
+  "chat": {
+    "emptyTitle": "Posez une question finance pour commencer",
+    "inputPlaceholder": "Question finance (ex: Compare MSFT et NVDA — risques SEC 2024, perf 6 mois...)",
+    "inputHint": "Finance RAG Hub-and-Spoke · 8INF829 · L'assistant peut faire des erreurs. Vérifiez les informations importantes.",
+    "send": "Envoyer",
+    "streamStatusWorking": "Traitement en cours...",
+    "streamReasoning": "Raisonnements en cours",
+    "pipelineModeMulti": "Mode Hub-and-Spoke (multi-agents)",
+    "pipelineModeSimple": "Mode agent simple",
+    "userAvatar": "VO",
+    "assistantAvatar": "AI"
+  },
+  "artifacts": {
+    "thoughts": "Réflexion de l'agent",
+    "sources": "Sources consultées",
+    "reports": "Rapports générés",
+    "stats": "Statistiques & Debug",
+    "allTickers": "Tous tickers",
+    "allSections": "Toutes sections",
+    "download": "Télécharger"
+  },
+  "trade": {
+    "title": "Approbation Humaine Requise",
+    "ticker": "Ticker",
+    "side": "Side",
+    "quantity": "Quantité",
+    "orderType": "Type",
+    "limitPrice": "Prix limite",
+    "risk": "Risque",
+    "justification": "Justification complète",
+    "compliance": "Vérification Compliance",
+    "approve": "Approuver le Trade",
+    "cancel": "Annuler",
+    "approved": "Approuvé",
+    "cancelled": "Annulé",
+    "riskLow": "Faible",
+    "riskMedium": "Moyen",
+    "riskHigh": "Élevé"
+  },
+  "config": {
+    "title": "Paramètres",
+    "agentSection": "Paramètres de l'agent",
+    "toolsSection": "Outils disponibles",
+    "maxChunks": "Chunks max",
+    "subQueries": "Nb sous-requêtes",
+    "priceMaxDays": "Prix max jours",
+    "priceMaxPoints": "Prix max points",
+    "priceMaxTickers": "Prix max tickers",
+    "priceDefaultWindow": "Prix fen défaut",
+    "maxIterations": "Max itérations agent",
+    "close": "Fermer"
+  }
+}

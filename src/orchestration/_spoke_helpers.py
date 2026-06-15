@@ -6,6 +6,7 @@ import logging
 from typing import Any, AsyncIterator
 
 from src.llm.types import ToolCall, LLMStreamChunk
+from src.orchestration.progress import emit_agent_progress
 from src.tools.execute import ToolExecutor
 
 _LOGGER = logging.getLogger("src.orchestration._spoke_helpers")
@@ -53,6 +54,11 @@ async def run_spoke_agent(
             executor = ToolExecutor(agent, state)
             for tc in final_tool_calls:
                 tool_call_count += 1
+                emit_agent_progress(
+                    "Outils",
+                    "running",
+                    f"Exécution de {tc.name}...",
+                )
                 try:
                     outcome = await asyncio.wait_for(executor.execute(tc), timeout=TOOL_TIMEOUT)
                     messages.append(outcome.message)

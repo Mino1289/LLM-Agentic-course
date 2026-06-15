@@ -1,0 +1,1321 @@
+
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Finance RAG · Hub-and-Spoke</title>
+  <style>
+    :root {
+      --bg: #201d1d;
+      --surface: #302c2c;
+      --surface-warm: var(--surface);
+      --fg: #fdfcfc;
+      --fg-2: #c8c6c4;
+      --muted: #9a9898;
+      --meta: #6e6e73;
+      --border: #464343;
+      --border-soft: #302c2c;
+      --accent: #007aff;
+      --accent-on: #ffffff;
+      --accent-hover: #0056b3;
+      --accent-active: #004085;
+      --success: #30d158;
+      --warn: #ff9f0a;
+      --danger: #ff3b30;
+      --font-display: "Berkeley Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      --font-body: "Berkeley Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      --font-mono: "Berkeley Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      --text-xs: 12px;
+      --text-sm: 14px;
+      --text-base: 16px;
+      --text-lg: 18px;
+      --text-xl: 22px;
+      --text-2xl: 28px;
+      --text-3xl: 38px;
+      --leading-body: 1.5;
+      --leading-tight: 1.0;
+      --space-1: 4px;
+      --space-2: 8px;
+      --space-3: 12px;
+      --space-4: 16px;
+      --space-5: 20px;
+      --space-6: 24px;
+      --space-8: 32px;
+      --space-12: 48px;
+      --radius-sm: 4px;
+      --radius-md: 6px;
+      --radius-lg: 8px;
+      --elev-flat: none;
+      --elev-ring: 0 0 0 1px var(--border);
+      --elev-raised: 0 0 0 2px var(--border);
+      --focus-ring: 0 0 0 2px var(--accent);
+      --motion-fast: 100ms;
+      --motion-base: 150ms;
+      --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+      --sidebar-w: 270px;
+      --sidebar-collapsed-w: 0px;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+    html { -webkit-text-size-adjust: 100%; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: var(--font-body);
+      font-size: var(--text-sm);
+      line-height: var(--leading-body);
+      -webkit-font-smoothing: antialiased;
+      overflow: hidden;
+      height: 100vh;
+    }
+    img, svg { display: block; max-width: 100%; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    button { font: inherit; cursor: pointer; }
+    p { text-wrap: pretty; margin: 0; }
+    h1, h2, h3, h4 { text-wrap: balance; margin: 0; }
+    ::selection { background: var(--accent); color: var(--accent-on); }
+    :focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: var(--radius-sm); }
+
+    .app {
+      display: flex;
+      height: 100vh;
+      width: 100vw;
+    }
+
+    .sidebar {
+      width: var(--sidebar-w);
+      min-width: var(--sidebar-w);
+      background: var(--bg);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      transition: min-width var(--motion-base) var(--ease-standard), width var(--motion-base) var(--ease-standard), opacity var(--motion-base) var(--ease-standard);
+      overflow: hidden;
+    }
+    .sidebar.collapsed {
+      min-width: 0;
+      width: 0;
+      border-right: none;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .sidebar-header {
+      padding: var(--space-4);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .btn-new-chat {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      padding: var(--space-3) var(--space-4);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: transparent;
+      color: var(--fg);
+      font-size: var(--text-sm);
+      font-weight: 500;
+      transition: background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard);
+    }
+    .btn-new-chat:hover { background: var(--surface); border-color: var(--fg-2); }
+    .btn-new-chat svg { width: 16px; height: 16px; flex-shrink: 0; }
+
+    .sidebar-history {
+      flex: 1;
+      overflow-y: auto;
+      padding: var(--space-2) var(--space-3);
+    }
+    .sidebar-history::-webkit-scrollbar { width: 4px; }
+    .sidebar-history::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+    .history-label {
+      font-size: var(--text-xs);
+      color: var(--meta);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      padding: var(--space-3) var(--space-2) var(--space-2);
+    }
+
+    .history-item {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      padding: var(--space-2) var(--space-3);
+      border-radius: var(--radius-sm);
+      color: var(--muted);
+      font-size: var(--text-sm);
+      cursor: pointer;
+      transition: background var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .history-item:hover { background: var(--surface); color: var(--fg); }
+    .history-item.active { background: var(--surface); color: var(--fg); }
+    .history-item svg { width: 14px; height: 14px; flex-shrink: 0; opacity: 0.5; }
+
+    .sidebar-footer {
+      padding: var(--space-4);
+      border-top: 1px solid var(--border);
+      font-size: var(--text-xs);
+      color: var(--meta);
+      line-height: var(--leading-tight);
+    }
+    .sidebar-footer .model-line { margin-bottom: var(--space-1); }
+    .sidebar-footer .model-label { color: var(--muted); }
+
+    .btn-settings {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      padding: var(--space-3) var(--space-4);
+      margin-top: var(--space-4);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: transparent;
+      color: var(--muted);
+      font-size: var(--text-sm);
+      font-weight: 500;
+      transition: background var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard);
+    }
+    .btn-settings:hover { background: var(--surface); color: var(--fg); }
+    .btn-settings svg { width: 16px; height: 16px; flex-shrink: 0; }
+
+    .main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      height: 100vh;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      padding: var(--space-3) var(--space-5);
+      border-bottom: 1px solid var(--border);
+      background: var(--bg);
+      min-height: 49px;
+    }
+    .btn-toggle-sidebar {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      border: none;
+      border-radius: var(--radius-sm);
+      background: transparent;
+      color: var(--muted);
+      transition: background var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard);
+    }
+    .btn-toggle-sidebar:hover { background: var(--surface); color: var(--fg); }
+    .btn-toggle-sidebar svg { width: 18px; height: 18px; }
+    .topbar-title {
+      font-size: var(--text-base);
+      font-weight: 700;
+      color: var(--fg);
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .topbar-model {
+      font-size: var(--text-xs);
+      color: var(--meta);
+      padding: var(--space-1) var(--space-3);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+    }
+
+    .chat-area {
+      flex: 1;
+      overflow-y: auto;
+      padding: var(--space-8) var(--space-6);
+    }
+    .chat-area::-webkit-scrollbar { width: 6px; }
+    .chat-area::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    .chat-empty {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      text-align: center;
+      color: var(--meta);
+      gap: var(--space-4);
+    }
+    .chat-empty h2 {
+      font-size: var(--text-xl);
+      color: var(--muted);
+    }
+
+    .message {
+      display: flex;
+      gap: var(--space-4);
+      margin-bottom: var(--space-8);
+      max-width: 780px;
+    }
+    .message-user {
+      flex-direction: row-reverse;
+      margin-left: auto;
+    }
+    .message-assistant {
+      margin-right: auto;
+    }
+
+    .message-avatar {
+      width: 28px;
+      height: 28px;
+      border-radius: var(--radius-sm);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      font-size: var(--text-xs);
+      font-weight: 700;
+    }
+    .message-user .message-avatar {
+      background: var(--accent);
+      color: var(--accent-on);
+    }
+    .message-assistant .message-avatar {
+      background: var(--surface);
+      color: var(--fg);
+      border: 1px solid var(--border);
+    }
+
+    .message-body {
+      flex: 1;
+      min-width: 0;
+    }
+    .message-user .message-body {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+    }
+
+    .message-bubble {
+      padding: var(--space-4) var(--space-5);
+      border-radius: var(--radius-lg);
+      font-size: var(--text-sm);
+      line-height: var(--leading-body);
+    }
+    .message-user .message-bubble {
+      background: var(--accent);
+      color: var(--accent-on);
+      border-bottom-right-radius: var(--radius-sm);
+    }
+    .message-assistant .message-bubble {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-bottom-left-radius: var(--radius-sm);
+    }
+    .message-time {
+      font-size: var(--text-xs);
+      color: var(--meta);
+      margin-top: var(--space-2);
+    }
+
+    .artifact-stack {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-3);
+      margin-top: var(--space-4);
+    }
+
+    .accordion {
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+    }
+    .accordion-trigger {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      padding: var(--space-3) var(--space-4);
+      background: transparent;
+      border: none;
+      color: var(--fg-2);
+      font-size: var(--text-sm);
+      font-weight: 500;
+      text-align: left;
+      transition: background var(--motion-fast) var(--ease-standard);
+    }
+    .accordion-trigger:hover { background: color-mix(in oklch, var(--surface) 50%, transparent); }
+    .accordion-trigger svg { width: 14px; height: 14px; transition: transform var(--motion-base) var(--ease-standard); flex-shrink: 0; }
+    .accordion.open .accordion-trigger svg { transform: rotate(90deg); }
+    .accordion-content {
+      display: none;
+      padding: 0 var(--space-4) var(--space-4);
+      border-top: 1px solid var(--border);
+      font-size: var(--text-xs);
+      color: var(--muted);
+      line-height: var(--leading-body);
+    }
+    .accordion.open .accordion-content { display: block; }
+
+    .step-list {
+      list-style: none;
+      padding: 0;
+      margin: var(--space-3) 0 0;
+    }
+    .step-list li {
+      display: flex;
+      align-items: flex-start;
+      gap: var(--space-3);
+      padding: var(--space-2) 0;
+      border-bottom: 1px solid color-mix(in oklch, var(--border) 40%, transparent);
+    }
+    .step-list li:last-child { border-bottom: none; }
+    .step-num {
+      font-weight: 700;
+      color: var(--accent);
+      min-width: 20px;
+    }
+
+    .source-filters {
+      display: flex;
+      gap: var(--space-2);
+      margin: var(--space-3) 0;
+    }
+    .source-select {
+      padding: var(--space-1) var(--space-3);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--fg-2);
+      font: inherit;
+      font-size: var(--text-xs);
+      cursor: pointer;
+    }
+    .source-select:focus { border-color: var(--accent); }
+
+    .source-card {
+      padding: var(--space-3);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      margin-top: var(--space-2);
+      background: var(--bg);
+    }
+    .source-card-title {
+      font-size: var(--text-xs);
+      font-weight: 700;
+      color: var(--fg);
+      margin-bottom: var(--space-1);
+    }
+    .source-card-excerpt {
+      font-size: var(--text-xs);
+      color: var(--muted);
+      line-height: var(--leading-body);
+    }
+    .source-card-meta {
+      margin-top: var(--space-2);
+      font-size: var(--text-xs);
+      color: var(--meta);
+    }
+
+    .report-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: var(--space-3);
+      margin-top: var(--space-3);
+    }
+    .report-tile {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      padding: var(--space-3);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--bg);
+    }
+    .report-icon {
+      width: 28px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: var(--radius-sm);
+      font-size: var(--text-xs);
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+    .report-icon.pdf { background: color-mix(in oklch, var(--danger) 14%, transparent); color: var(--danger); }
+    .report-icon.md  { background: color-mix(in oklch, var(--accent) 14%, transparent); color: var(--accent); }
+    .report-info { flex: 1; min-width: 0; }
+    .report-name { font-size: var(--text-xs); font-weight: 500; color: var(--fg); }
+    .report-size { font-size: var(--text-xs); color: var(--meta); }
+    .btn-download {
+      padding: var(--space-1) var(--space-3);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: transparent;
+      color: var(--muted);
+      font-size: var(--text-xs);
+      font-weight: 500;
+      transition: color var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard);
+    }
+    .btn-download:hover { color: var(--fg); border-color: var(--fg-2); }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: var(--space-3);
+      margin-top: var(--space-3);
+    }
+    .stat-item {
+      padding: var(--space-3);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--bg);
+      text-align: center;
+    }
+    .stat-value {
+      font-size: var(--text-lg);
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      color: var(--fg);
+    }
+    .stat-label-text {
+      font-size: var(--text-xs);
+      color: var(--meta);
+      margin-top: var(--space-1);
+    }
+
+    .trade-card {
+      border: 2px solid var(--warn);
+      border-radius: var(--radius-md);
+      background: color-mix(in oklch, var(--warn) 6%, var(--bg));
+      overflow: hidden;
+      margin-top: var(--space-4);
+    }
+    .trade-header {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      padding: var(--space-4) var(--space-5);
+      border-bottom: 1px solid color-mix(in oklch, var(--warn) 20%, transparent);
+      background: color-mix(in oklch, var(--warn) 10%, var(--bg));
+    }
+    .trade-header-icon {
+      width: 24px;
+      height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: var(--text-base);
+    }
+    .trade-header-title {
+      font-size: var(--text-base);
+      font-weight: 700;
+      color: var(--warn);
+    }
+    .trade-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: var(--space-1);
+      padding: var(--space-4) var(--space-5);
+    }
+    .trade-field {
+      padding: var(--space-2) var(--space-3);
+    }
+    .trade-field-label {
+      font-size: var(--text-xs);
+      color: var(--meta);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: var(--space-1);
+    }
+    .trade-field-value {
+      font-size: var(--text-sm);
+      font-weight: 700;
+      color: var(--fg);
+    }
+    .trade-risk-low { color: var(--success); }
+    .trade-risk-high { color: var(--danger); }
+    .trade-actions {
+      display: flex;
+      gap: var(--space-3);
+      padding: var(--space-4) var(--space-5);
+      border-top: 1px solid color-mix(in oklch, var(--warn) 20%, transparent);
+    }
+    .btn-approve {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: var(--space-2);
+      padding: var(--space-3) var(--space-5);
+      border: 1px solid var(--success);
+      border-radius: var(--radius-sm);
+      background: color-mix(in oklch, var(--success) 12%, transparent);
+      color: var(--success);
+      font-size: var(--text-sm);
+      font-weight: 700;
+      transition: background var(--motion-fast) var(--ease-standard);
+    }
+    .btn-approve:hover { background: var(--success); color: var(--bg); }
+    .btn-cancel-trade {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: var(--space-2);
+      padding: var(--space-3) var(--space-5);
+      border: 1px solid var(--danger);
+      border-radius: var(--radius-sm);
+      background: color-mix(in oklch, var(--danger) 12%, transparent);
+      color: var(--danger);
+      font-size: var(--text-sm);
+      font-weight: 700;
+      transition: background var(--motion-fast) var(--ease-standard);
+    }
+    .btn-cancel-trade:hover { background: var(--danger); color: var(--bg); }
+
+    .input-area {
+      padding: var(--space-4) var(--space-6) var(--space-6);
+      border-top: 1px solid var(--border);
+      background: var(--bg);
+    }
+    .input-box {
+      display: flex;
+      align-items: flex-end;
+      gap: var(--space-2);
+      max-width: 780px;
+      margin: 0 auto;
+      padding: var(--space-3) var(--space-4);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      background: var(--surface);
+      transition: border-color var(--motion-fast) var(--ease-standard);
+    }
+    .input-box:focus-within { border-color: var(--accent); }
+    .input-box textarea {
+      flex: 1;
+      border: none;
+      background: transparent;
+      color: var(--fg);
+      font: inherit;
+      font-size: var(--text-sm);
+      line-height: var(--leading-body);
+      resize: none;
+      min-height: 22px;
+      max-height: 120px;
+      padding: 0;
+      outline: none;
+    }
+    .input-box textarea::placeholder { color: var(--meta); }
+    .btn-send {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      border: none;
+      border-radius: var(--radius-sm);
+      background: var(--accent);
+      color: var(--accent-on);
+      transition: background var(--motion-fast) var(--ease-standard);
+      flex-shrink: 0;
+    }
+    .btn-send:hover { background: var(--accent-hover); }
+    .btn-send:active { background: var(--accent-active); }
+    .btn-send svg { width: 16px; height: 16px; }
+    .input-hint {
+      text-align: center;
+      font-size: var(--text-xs);
+      color: var(--meta);
+      margin-top: var(--space-2);
+      max-width: 780px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    .config-panel {
+      position: fixed;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: 380px;
+      background: var(--bg);
+      border-left: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      z-index: 100;
+      transform: translateX(100%);
+      transition: transform var(--motion-base) var(--ease-standard);
+    }
+    .config-panel.open { transform: translateX(0); }
+    .config-overlay {
+      position: fixed;
+      inset: 0;
+      background: color-mix(in oklch, var(--bg) 60%, transparent);
+      z-index: 99;
+      display: none;
+    }
+    .config-overlay.open { display: block; }
+
+    .config-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: var(--space-4) var(--space-5);
+      border-bottom: 1px solid var(--border);
+    }
+    .config-title {
+      font-size: var(--text-base);
+      font-weight: 700;
+    }
+    .btn-close-config {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      border: none;
+      border-radius: var(--radius-sm);
+      background: transparent;
+      color: var(--muted);
+      transition: background var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard);
+    }
+    .btn-close-config:hover { background: var(--surface); color: var(--fg); }
+    .btn-close-config svg { width: 16px; height: 16px; }
+
+    .config-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: var(--space-5);
+    }
+    .config-body::-webkit-scrollbar { width: 4px; }
+    .config-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+    .config-section { margin-bottom: var(--space-6); }
+    .config-section-title {
+      font-size: var(--text-xs);
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      margin-bottom: var(--space-4);
+    }
+
+    .slider-field {
+      margin-bottom: var(--space-5);
+    }
+    .slider-label {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: var(--space-2);
+    }
+    .slider-label-text {
+      font-size: var(--text-sm);
+      color: var(--fg-2);
+    }
+    .slider-value {
+      font-size: var(--text-sm);
+      font-weight: 700;
+      color: var(--fg);
+      font-variant-numeric: tabular-nums;
+    }
+    .slider-track {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100%;
+      height: 4px;
+      border-radius: 2px;
+      background: var(--border);
+      outline: none;
+    }
+    .slider-track::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: var(--fg);
+      border: 2px solid var(--bg);
+      cursor: pointer;
+      box-shadow: 0 0 0 1px var(--border);
+      transition: background var(--motion-fast) var(--ease-standard);
+    }
+    .slider-track::-webkit-slider-thumb:hover { background: var(--accent); }
+    .slider-track::-moz-range-thumb {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: var(--fg);
+      border: 2px solid var(--bg);
+      cursor: pointer;
+      box-shadow: 0 0 0 1px var(--border);
+    }
+    .slider-range {
+      display: flex;
+      justify-content: space-between;
+      font-size: var(--text-xs);
+      color: var(--meta);
+      margin-top: var(--space-1);
+    }
+
+    .tool-item {
+      padding: var(--space-3) 0;
+      border-bottom: 1px solid color-mix(in oklch, var(--border) 40%, transparent);
+    }
+    .tool-item:last-child { border-bottom: none; }
+    .tool-name {
+      font-size: var(--text-sm);
+      font-weight: 700;
+      color: var(--fg);
+    }
+    .tool-desc {
+      font-size: var(--text-xs);
+      color: var(--muted);
+      margin-top: var(--space-1);
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: var(--space-1) var(--space-2);
+      border-radius: var(--radius-sm);
+      font-size: var(--text-xs);
+      font-weight: 500;
+    }
+    .badge-accent { background: color-mix(in oklch, var(--accent) 14%, transparent); color: var(--accent); }
+    .badge-success { background: color-mix(in oklch, var(--success) 14%, transparent); color: var(--success); }
+    .badge-danger { background: color-mix(in oklch, var(--danger) 14%, transparent); color: var(--danger); }
+    .badge-warn { background: color-mix(in oklch, var(--warn) 14%, transparent); color: var(--warn); }
+
+    .msg-text p { margin-bottom: var(--space-2); }
+    .msg-text p:last-child { margin-bottom: 0; }
+    .msg-text strong { color: var(--fg); }
+
+    .typing-indicator {
+      display: flex;
+      gap: var(--space-1);
+      padding: var(--space-2) 0;
+    }
+    .typing-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--muted);
+      animation: typing 1.4s infinite;
+    }
+    .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+    .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes typing {
+      0%, 60%, 100% { opacity: 0.3; }
+      30% { opacity: 1; }
+    }
+
+    @media (max-width: 920px) {
+      .sidebar { min-width: 0; width: 0; border-right: none; opacity: 0; pointer-events: none; }
+      .sidebar.open-mobile { min-width: var(--sidebar-w); width: var(--sidebar-w); opacity: 1; pointer-events: auto; position: fixed; z-index: 50; }
+      .trade-grid { grid-template-columns: repeat(2, 1fr); }
+      .stats-grid { grid-template-columns: repeat(2, 1fr); }
+      .config-panel { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app" id="app">
+    <aside class="sidebar" id="sidebar" data-od-id="sidebar">
+      <div class="sidebar-header">
+        <button class="btn-new-chat" onclick="document.querySelector('.chat-area').scrollTo({top:0})">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+          Nouvelle conversation
+        </button>
+      </div>
+      <div class="sidebar-history">
+        <div class="history-label">Aujourd'hui</div>
+        <div class="history-item active">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+          Comparaison MSFT vs NVDA
+        </div>
+        <div class="history-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+          Risques SEC ARM 2024
+        </div>
+        <div class="history-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+          Performance ASML 6 mois
+        </div>
+        <div class="history-label">Hier</div>
+        <div class="history-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+          Rapport AMD earnings Q3
+        </div>
+        <div class="history-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+          Validation affirmation NVDA
+        </div>
+        <div class="history-label">Semaine dernière</div>
+        <div class="history-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+          Allocation simulateur NVDA
+        </div>
+      </div>
+      <div class="sidebar-footer">
+        <div class="model-line"><span class="model-label">Chat:</span> OpenAI / GPT-4</div>
+        <div class="model-line"><span class="model-label">Embeddings:</span> Cohere</div>
+        <button class="btn-settings" onclick="toggleConfig()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+          Paramètres
+        </button>
+      </div>
+    </aside>
+
+    <div class="main">
+      <div class="topbar">
+        <button class="btn-toggle-sidebar" onclick="toggleSidebar()" aria-label="Toggle sidebar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg>
+        </button>
+        <span class="topbar-title">Comparaison MSFT vs NVDA</span>
+        <span class="topbar-model">GPT-4</span>
+      </div>
+
+      <div class="chat-area" id="chatArea">
+        <div class="message message-assistant">
+          <div class="message-avatar">AI</div>
+          <div class="message-body">
+            <div class="message-bubble">
+              <div class="msg-text">
+                <p>Bonjour. Je peux analyser <strong>NVDA, AMD, MSFT, ARM, ASML</strong> — interroger les filings SEC, les transcripts earnings, valider des affirmations, simuler une allocation, récupérer les prix et générer des rapports.</p>
+              </div>
+            </div>
+            <span class="message-time">10:23</span>
+          </div>
+        </div>
+
+        <div class="message message-user">
+          <div class="message-avatar">VO</div>
+          <div class="message-body">
+            <div class="message-bubble">Compare MSFT et NVDA — risques SEC 2024, perf 6 mois, recommande un trade avec une allocation de 50 actions.</div>
+            <span class="message-time">10:24</span>
+          </div>
+        </div>
+
+        <div class="message message-assistant">
+          <div class="message-avatar">AI</div>
+          <div class="message-body">
+            <div class="message-bubble">
+              <div class="msg-text">
+                <p>Voici l'analyse comparative entre <strong>MSFT</strong> et <strong>NVDA</strong> basée sur les filings SEC 2024 et les performances des 6 derniers mois.</p>
+                <p>Les risques identifiés dans les 10-K récents montrent que NVDA est plus exposé aux restrictions géopolitiques (export controls Chine), tandis que MSFT fait face à des risques réglementaires sur le cloud (antitrust EU). Côté performance, NVDA affiche +187% sur 6 mois vs +28% pour MSFT, mais avec une volatilité significativement plus élevée (beta 1.8 vs 0.9).</p>
+                <p>Sur la base de cette analyse, je recommande un ordre <strong>NVDA Buy</strong> avec les paramètres suivants :</p>
+              </div>
+
+              <div class="artifact-stack">
+                <div class="accordion open" data-accordion>
+                  <button class="accordion-trigger" onclick="toggleAccordion(this)">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+                    Réflexion de l'agent
+                  </button>
+                  <div class="accordion-content">
+                    <ol class="step-list">
+                      <li><span class="step-num">1.</span>Récupération des 10-K SEC pour MSFT et NVDA (fiscal year 2024)</li>
+                      <li><span class="step-num">2.</span>Extraction des facteurs de risque — Risk Factors sections</li>
+                      <li><span class="step-num">3.</span>Récupération des prix historiques via <strong>Price_History</strong> (6 mois)</li>
+                      <li><span class="step-num">4.</span>Calcul de la volatilité et du beta relatif</li>
+                      <li><span class="step-num">5.</span>Génération de la recommandation de trade</li>
+                    </ol>
+                  </div>
+                </div>
+
+                <div class="accordion open" data-accordion>
+                  <button class="accordion-trigger" onclick="toggleAccordion(this)">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+                    Sources consultées
+                  </button>
+                  <div class="accordion-content">
+                    <div class="source-filters">
+                      <select class="source-select"><option>Tous tickers</option><option>MSFT</option><option>NVDA</option></select>
+                      <select class="source-select"><option>Toutes sections</option><option>Risk Factors</option><option>MD&A</option><option>Financial Statements</option></select>
+                    </div>
+                    <div class="source-card">
+                      <div class="source-card-title">NVDA 10-K FY2024 — Risk Factors</div>
+                      <div class="source-card-excerpt">"Our business is subject to export control laws and regulations, including those administered by the Bureau of Industry and Security... Changes in U.S. export control policies, particularly with respect to China, could materially adversely affect our revenue..."</div>
+                      <div class="source-card-meta">SEC EDGAR · Filed 2024-02-28 · Pages 15-18</div>
+                    </div>
+                    <div class="source-card">
+                      <div class="source-card-title">MSFT 10-K FY2024 — Risk Factors</div>
+                      <div class="source-card-excerpt">"We face increasing scrutiny from regulatory authorities around the world regarding antitrust concerns, particularly with respect to our cloud computing services and practices in the European Union..."</div>
+                      <div class="source-card-meta">SEC EDGAR · Filed 2024-07-30 · Pages 22-25</div>
+                    </div>
+                    <div class="source-card">
+                      <div class="source-card-title">NVDA Price History — 6 Month Range</div>
+                      <div class="source-card-excerpt">Range: $475.18 — $1,024.00 · Change: +187.4% · Beta: 1.82 · Vol 30d: 42.6%</div>
+                      <div class="source-card-meta">Price_History tool · Window: 180 days</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="accordion" data-accordion>
+                  <button class="accordion-trigger" onclick="toggleAccordion(this)">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+                    Rapports générés
+                  </button>
+                  <div class="accordion-content">
+                    <div class="report-grid">
+                      <div class="report-tile">
+                        <div class="report-icon pdf">PDF</div>
+                        <div class="report-info">
+                          <div class="report-name">Analyse comparative MSFT-NVDA</div>
+                          <div class="report-size">2.4 Mo</div>
+                        </div>
+                        <button class="btn-download">Télécharger</button>
+                      </div>
+                      <div class="report-tile">
+                        <div class="report-icon md">MD</div>
+                        <div class="report-info">
+                          <div class="report-name">Rapport fiscal SEC 2024</div>
+                          <div class="report-size">840 Ko</div>
+                        </div>
+                        <button class="btn-download">Télécharger</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="accordion" data-accordion>
+                  <button class="accordion-trigger" onclick="toggleAccordion(this)">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+                    Statistiques & Debug
+                  </button>
+                  <div class="accordion-content">
+                    <div class="stats-grid">
+                      <div class="stat-item">
+                        <div class="stat-value">8,241</div>
+                        <div class="stat-label-text">Tokens utilisés</div>
+                      </div>
+                      <div class="stat-item">
+                        <div class="stat-value">6</div>
+                        <div class="stat-label-text">Chunks RAG</div>
+                      </div>
+                      <div class="stat-item">
+                        <div class="stat-value">3</div>
+                        <div class="stat-label-text">Itérations LLM</div>
+                      </div>
+                      <div class="stat-item">
+                        <div class="stat-value">5</div>
+                        <div class="stat-label-text">Outils appelés</div>
+                      </div>
+                      <div class="stat-item">
+                        <div class="stat-value">4.2s</div>
+                        <div class="stat-label-text">Latence totale</div>
+                      </div>
+                      <div class="stat-item">
+                        <div class="stat-value">0.847</div>
+                        <div class="stat-label-text">Score confiance</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="trade-card" data-od-id="trade-approval">
+              <div class="trade-header">
+                <div class="trade-header-icon">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+                </div>
+                <div class="trade-header-title">Approbation Humaine Requise</div>
+              </div>
+              <div class="trade-grid">
+                <div class="trade-field">
+                  <div class="trade-field-label">Ticker</div>
+                  <div class="trade-field-value">NVDA</div>
+                </div>
+                <div class="trade-field">
+                  <div class="trade-field-label">Side</div>
+                  <div class="trade-field-value">BUY</div>
+                </div>
+                <div class="trade-field">
+                  <div class="trade-field-label">Quantité</div>
+                  <div class="trade-field-value">50</div>
+                </div>
+                <div class="trade-field">
+                  <div class="trade-field-label">Type</div>
+                  <div class="trade-field-value">Limit</div>
+                </div>
+                <div class="trade-field">
+                  <div class="trade-field-label">Prix limite</div>
+                  <div class="trade-field-value">$1,024.00</div>
+                </div>
+                <div class="trade-field">
+                  <div class="trade-field-label">Risque</div>
+                  <div class="trade-field-value trade-risk-medium">
+                    <span class="badge badge-warn">Moyen</span>
+                  </div>
+                </div>
+              </div>
+              <div class="accordion" data-accordion style="margin: 0 var(--space-5);">
+                <button class="accordion-trigger" onclick="toggleAccordion(this)">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+                  Justification complète
+                </button>
+                <div class="accordion-content">
+                  <p>Le secteur des semi-conducteurs bénéficie d'un cycle d'investissement massif en infrastructure AI. NVDA domine le marché des GPU datacenter avec une part estimée à 80%. Les restrictions d'exportation vers la Chine représentent un risque mais sont partiellement compensées par la diversification géographique croissante. Le trailing P/E de 64x reste élevé mais justifié par la croissance attendue du revenu de +40% pour FY2025. La position limitée (50 actions) capte le potentiel de hausse tout en limitant l'exposition à ~$51K.</p>
+                </div>
+              </div>
+              <div class="trade-actions">
+                <button class="btn-approve" onclick="handleApprove(this)">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>
+                  Approuver le Trade
+                </button>
+                <button class="btn-cancel-trade" onclick="handleCancel(this)">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                  Annuler
+                </button>
+              </div>
+            </div>
+
+            <span class="message-time">10:26</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="input-area">
+        <div class="input-box">
+          <textarea id="chatInput" rows="1" placeholder="Question finance (ex: Compare MSFT et NVDA — risques SEC 2024, perf 6 mois...)" onkeydown="handleInputKey(event)" oninput="autoResize(this)"></textarea>
+          <button class="btn-send" onclick="sendMessage()" aria-label="Envoyer">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/></svg>
+          </button>
+        </div>
+        <div class="input-hint">Finance RAG Hub-and-Spoke · GPT-4 peut faire des erreurs. Vérifiez les informations importantes.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="config-overlay" id="configOverlay" onclick="toggleConfig()"></div>
+  <div class="config-panel" id="configPanel" data-od-id="config-panel">
+    <div class="config-header">
+      <span class="config-title">Paramètres</span>
+      <button class="btn-close-config" onclick="toggleConfig()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="config-body">
+      <div class="config-section">
+        <div class="config-section-title">Paramètres de l'agent</div>
+
+        <div class="slider-field">
+          <div class="slider-label">
+            <span class="slider-label-text">Chunks max</span>
+            <span class="slider-value" id="v-chunks">8</span>
+          </div>
+          <input type="range" class="slider-track" min="4" max="12" value="8" oninput="updateSlider(this,'v-chunks')">
+          <div class="slider-range"><span>4</span><span>12</span></div>
+        </div>
+
+        <div class="slider-field">
+          <div class="slider-label">
+            <span class="slider-label-text">Nb sous-requêtes</span>
+            <span class="slider-value" id="v-subqueries">3</span>
+          </div>
+          <input type="range" class="slider-track" min="1" max="8" value="3" oninput="updateSlider(this,'v-subqueries')">
+          <div class="slider-range"><span>1</span><span>8</span></div>
+        </div>
+
+        <div class="slider-field">
+          <div class="slider-label">
+            <span class="slider-label-text">Prix max jours</span>
+            <span class="slider-value" id="v-pricemax-days">180</span>
+          </div>
+          <input type="range" class="slider-track" min="30" max="365" value="180" oninput="updateSlider(this,'v-pricemax-days')">
+          <div class="slider-range"><span>30</span><span>365</span></div>
+        </div>
+
+        <div class="slider-field">
+          <div class="slider-label">
+            <span class="slider-label-text">Prix max points</span>
+            <span class="slider-value" id="v-pricemax-points">60</span>
+          </div>
+          <input type="range" class="slider-track" min="10" max="120" value="60" oninput="updateSlider(this,'v-pricemax-points')">
+          <div class="slider-range"><span>10</span><span>120</span></div>
+        </div>
+
+        <div class="slider-field">
+          <div class="slider-label">
+            <span class="slider-label-text">Prix max tickers</span>
+            <span class="slider-value" id="v-pricemax-tickers">3</span>
+          </div>
+          <input type="range" class="slider-track" min="1" max="5" value="3" oninput="updateSlider(this,'v-pricemax-tickers')">
+          <div class="slider-range"><span>1</span><span>5</span></div>
+        </div>
+
+        <div class="slider-field">
+          <div class="slider-label">
+            <span class="slider-label-text">Prix fen défaut</span>
+            <span class="slider-value" id="v-price-window">90</span>
+          </div>
+          <input type="range" class="slider-track" min="15" max="180" value="90" oninput="updateSlider(this,'v-price-window')">
+          <div class="slider-range"><span>15</span><span>180</span></div>
+        </div>
+
+        <div class="slider-field">
+          <div class="slider-label">
+            <span class="slider-label-text">Max itérations agent</span>
+            <span class="slider-value" id="v-max-iter">5</span>
+          </div>
+          <input type="range" class="slider-track" min="2" max="10" value="5" oninput="updateSlider(this,'v-max-iter')">
+          <div class="slider-range"><span>2</span><span>10</span></div>
+        </div>
+      </div>
+
+      <div class="config-section">
+        <div class="accordion open" data-accordion>
+          <button class="accordion-trigger" onclick="toggleAccordion(this)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+            Outils disponibles
+          </button>
+          <div class="accordion-content">
+            <div class="tool-item">
+              <div class="tool-name">SEC_Filings</div>
+              <div class="tool-desc">Interroge les dépôts SEC 10-K, 10-Q et 8-K pour les tickers donnés. Extrait les sections Risk Factors, MD&A et Financial Statements.</div>
+            </div>
+            <div class="tool-item">
+              <div class="tool-name">Price_History</div>
+              <div class="tool-desc">Récupère les prix historiques OHLCV avec fenêtre configurable. Calcule volatilité, beta et rendements sur période.</div>
+            </div>
+            <div class="tool-item">
+              <div class="tool-name">Earnings_Transcripts</div>
+              <div class="tool-desc">Accède aux transcripts d'appels earnings avec extraction de sentiment et résumé par topic.</div>
+            </div>
+            <div class="tool-item">
+              <div class="tool-name">Claim_Validator</div>
+              <div class="tool-desc">Vérifie une affirmation financière contre les données des filings, des prix et des sources externes.</div>
+            </div>
+            <div class="tool-item">
+              <div class="tool-name">Allocation_Simulator</div>
+              <div class="tool-desc">Simule un portefeuille avec allocation personnalisée, calcule VaR, Sharpe ratio et drawdown maximum.</div>
+            </div>
+            <div class="tool-item">
+              <div class="tool-name">Report_Generator</div>
+              <div class="tool-desc">Génère des rapports PDF ou Markdown à partir de l'analyse effectuée, avec table des matières et références.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function toggleSidebar() {
+      document.getElementById('sidebar').classList.toggle('collapsed');
+    }
+
+    function toggleConfig() {
+      const panel = document.getElementById('configPanel');
+      const overlay = document.getElementById('configOverlay');
+      panel.classList.toggle('open');
+      overlay.classList.toggle('open');
+    }
+
+    function toggleAccordion(btn) {
+      btn.closest('.accordion').classList.toggle('open');
+    }
+
+    function updateSlider(input, id) {
+      document.getElementById(id).textContent = input.value;
+    }
+
+    function autoResize(el) {
+      el.style.height = 'auto';
+      el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+    }
+
+    function handleInputKey(e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    }
+
+    function sendMessage() {
+      const input = document.getElementById('chatInput');
+      const text = input.value.trim();
+      if (!text) return;
+
+      const chatArea = document.getElementById('chatArea');
+
+      const userMsg = document.createElement('div');
+      userMsg.className = 'message message-user';
+      userMsg.innerHTML = `
+        <div class="message-avatar">VO</div>
+        <div class="message-body">
+          <div class="message-bubble">${escapeHtml(text)}</div>
+          <span class="message-time">${now()}</span>
+        </div>`;
+      chatArea.appendChild(userMsg);
+
+      input.value = '';
+      input.style.height = 'auto';
+
+      const assistantMsg = document.createElement('div');
+      assistantMsg.className = 'message message-assistant';
+      assistantMsg.innerHTML = `
+        <div class="message-avatar">AI</div>
+        <div class="message-body">
+          <div class="message-bubble">
+            <div class="typing-indicator">
+              <div class="typing-dot"></div>
+              <div class="typing-dot"></div>
+              <div class="typing-dot"></div>
+            </div>
+          </div>
+        </div>`;
+      chatArea.appendChild(assistantMsg);
+      chatArea.scrollTo({ top: chatArea.scrollHeight, behavior: 'smooth' });
+    }
+
+    function handleApprove(btn) {
+      const card = btn.closest('.trade-card');
+      btn.textContent = 'Approuvé';
+      btn.disabled = true;
+      btn.style.background = 'var(--success)';
+      btn.style.color = 'var(--bg)';
+      btn.style.borderColor = 'var(--success)';
+      const cancelBtn = card.querySelector('.btn-cancel-trade');
+      cancelBtn.disabled = true;
+      cancelBtn.style.opacity = '0.3';
+      card.style.borderColor = 'var(--success)';
+    }
+
+    function handleCancel(btn) {
+      const card = btn.closest('.trade-card');
+      btn.textContent = 'Annulé';
+      btn.disabled = true;
+      btn.style.background = 'var(--danger)';
+      btn.style.color = 'var(--bg)';
+      btn.style.borderColor = 'var(--danger)';
+      const approveBtn = card.querySelector('.btn-approve');
+      approveBtn.disabled = true;
+      approveBtn.style.opacity = '0.3';
+      card.style.borderColor = 'var(--danger)';
+    }
+
+    function escapeHtml(str) {
+      const d = document.createElement('div');
+      d.textContent = str;
+      return d.innerHTML;
+    }
+
+    function now() {
+      const d = new Date();
+      return d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
+    }
+  </script>
+</body>
+</html>

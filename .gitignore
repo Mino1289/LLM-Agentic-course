@@ -17,6 +17,7 @@ downloads/
 eggs/
 .eggs/
 lib/
+!frontend/src/lib/
 lib64/
 parts/
 sdist/
@@ -225,6 +226,10 @@ __marimo__/
 **/processed_data
 **/*db
 reports/
+
+# Next.js frontend
+frontend/node_modules/
+frontend/.next/
 
 skills-lock.json
 .agents

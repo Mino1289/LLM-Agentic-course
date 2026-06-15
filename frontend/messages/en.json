@@ -1,0 +1,68 @@
+{
+  "meta": {
+    "title": "Finance RAG · Hub-and-Spoke",
+    "description": "Multi-agent financial assistant with RAG"
+  },
+  "sidebar": {
+    "newChat": "New conversation",
+    "settings": "Settings",
+    "chatLabel": "Chat:",
+    "embeddingsLabel": "Embeddings:",
+    "localeSwitch": "FR"
+  },
+  "topbar": {
+    "toggleSidebar": "Toggle sidebar"
+  },
+  "chat": {
+    "emptyTitle": "Ask a finance question to get started",
+    "inputPlaceholder": "Finance question (e.g.: Compare MSFT and NVDA — 2024 SEC risks, 6-month perf...)",
+    "inputHint": "Finance RAG Hub-and-Spoke · 8INF829 · The assistant can make mistakes. Verify important information.",
+    "send": "Send",
+    "streamStatusWorking": "Working...",
+    "streamReasoning": "Reasoning in progress",
+    "pipelineModeMulti": "Hub-and-Spoke mode (multi-agents)",
+    "pipelineModeSimple": "Simple agent mode",
+    "userAvatar": "YO",
+    "assistantAvatar": "AI"
+  },
+  "artifacts": {
+    "thoughts": "Agent's thoughts",
+    "sources": "Consulted sources",
+    "reports": "Generated reports",
+    "stats": "Stats & Debug",
+    "allTickers": "All tickers",
+    "allSections": "All sections",
+    "download": "Download"
+  },
+  "trade": {
+    "title": "Human Approval Required",
+    "ticker": "Ticker",
+    "side": "Side",
+    "quantity": "Quantity",
+    "orderType": "Order type",
+    "limitPrice": "Limit price",
+    "risk": "Risk Level",
+    "justification": "Full justification",
+    "compliance": "Compliance check",
+    "approve": "Approve Trade",
+    "cancel": "Cancel",
+    "approved": "Approved",
+    "cancelled": "Cancelled",
+    "riskLow": "Low",
+    "riskMedium": "Medium",
+    "riskHigh": "High"
+  },
+  "config": {
+    "title": "Settings",
+    "agentSection": "Agent settings",
+    "toolsSection": "Available tools",
+    "maxChunks": "Max chunks",
+    "subQueries": "Sub-queries count",
+    "priceMaxDays": "Max price days",
+    "priceMaxPoints": "Max price points",
+    "priceMaxTickers": "Max price tickers",
+    "priceDefaultWindow": "Default price window",
+    "maxIterations": "Max agent/tool iterations",
+    "close": "Close"
+  }
+}

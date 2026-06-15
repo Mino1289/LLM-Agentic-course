@@ -170,7 +170,7 @@ def _parse_pm_response(text: str) -> dict[str, Any]:
             decision["ticker"] = raw.split(":", 1)[1].strip()
         elif lower.startswith("side:"):
             decision["side"] = raw.split(":", 1)[1].strip().lower()
-        elif lower.startswith("quantity") or lower.startswith("qty"):
+        elif lower.startswith("quantity") or lower.startswith("qty") or lower.startswith("amount"):
             val = raw.split(":", 1)[1].strip() if ":" in raw else ""
             decision["qty"] = val
         elif lower.startswith("order type"):

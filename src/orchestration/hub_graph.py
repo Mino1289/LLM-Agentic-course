@@ -15,9 +15,39 @@ from src.orchestration.spoke_agents import analyze_parallel_node
 from src.orchestration.compliance_node import compliance_validator_node, route_after_compliance
 from src.orchestration.human_review_node import human_review_node, human_approve_node, human_reject_node
 from src.orchestration.executor_node import executor_trader_node
+from src.orchestration.progress import bind_progress_queue, clear_progress_queue
 from src.orchestration.simple_agent_node import simple_agent_node
 
 _LOGGER = logging.getLogger("src.orchestration.hub_graph")
+
+_NODE_AGENT_LABELS = {
+    "intent_router": "Intent Router",
+    "pm_plan": "Portfolio Manager",
+    "pm_synthesis": "Portfolio Manager",
+    "analyze_parallel": "Analystes (Fundamental + Quant)",
+    "fundamental_analyst": "Fundamental Analyst",
+    "quantitative_analyst": "Quantitative Analyst",
+    "compliance_validator": "Compliance Validator",
+    "executor_trader": "Executor Trader",
+    "human_review": "Human Review",
+    "simple_agent": "Simple Agent",
+}
+
+_TRACKED_NODES = frozenset(_NODE_AGENT_LABELS.keys())
+
+
+def _node_name(raw_name: str) -> str:
+    if raw_name in _TRACKED_NODES:
+        return raw_name
+    for node in _TRACKED_NODES:
+        if raw_name.endswith(node) or raw_name.split(":")[-1] == node:
+            return node
+    return raw_name
+
+
+def _chain_output(event: dict[str, Any]) -> dict[str, Any]:
+    raw = event.get("data", {}).get("output")
+    return raw if isinstance(raw, dict) else {}
 
 
 class HubAndSpokeGraph:
@@ -108,6 +138,52 @@ class HubAndSpokeGraph:
         conversation_id: str | None = None,
         messages: list[dict[str, str]] | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
+        progress_q: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        bind_progress_queue(progress_q)
+        graph_q: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+
+        async def pump_graph() -> None:
+            try:
+                async for event in self._astream_graph(query, conversation_id, messages):
+                    await graph_q.put(event)
+            except Exception as exc:
+                _LOGGER.exception("Graph stream failed")
+                await graph_q.put({"event": "on_stream_error", "message": str(exc)})
+            finally:
+                await graph_q.put(None)
+
+        pump_task = asyncio.create_task(pump_graph())
+        try:
+            while True:
+                while not progress_q.empty():
+                    yield progress_q.get_nowait()
+
+                try:
+                    event = await asyncio.wait_for(graph_q.get(), timeout=0.15)
+                except asyncio.TimeoutError:
+                    if pump_task.done() and graph_q.empty():
+                        break
+                    continue
+
+                if event is None:
+                    break
+                if event.get("event") == "on_stream_error":
+                    raise RuntimeError(str(event.get("message", "Graph stream failed")))
+                yield event
+        finally:
+            clear_progress_queue()
+            if not pump_task.done():
+                pump_task.cancel()
+
+        while not progress_q.empty():
+            yield progress_q.get_nowait()
+
+    async def _astream_graph(
+        self,
+        query: str,
+        conversation_id: str | None = None,
+        messages: list[dict[str, str]] | None = None,
+    ) -> AsyncIterator[dict[str, Any]]:
         initial_state = self._initial_state(query, conversation_id, messages)
         last_state: HubSpokeState | None = None
 
@@ -115,41 +191,38 @@ class HubAndSpokeGraph:
 
         async for event in self.graph.astream_events(initial_state, version="v2"):
             kind = event.get("event")
-            name = event.get("name", "")
+            name = _node_name(event.get("name", ""))
 
-            if kind == "on_chain_start" and name in (
-                "intent_router", "pm_plan", "pm_synthesis",
-                "analyze_parallel",
-                "compliance_validator", "executor_trader",
-                "human_review", "simple_agent",
-            ):
-                agent_labels = {
-                    "intent_router": "Intent Router",
-                    "pm_plan": "Portfolio Manager",
-                    "pm_synthesis": "Portfolio Manager",
-                    "analyze_parallel": "Analystes (Fundamental + Quant)",
-                    "compliance_validator": "Compliance Validator",
-                    "executor_trader": "Executor Trader",
-                    "human_review": "Human Review",
-                    "simple_agent": "Simple Agent",
-                }
-                label = agent_labels.get(name, name)
+            if kind == "on_chain_start" and name in _TRACKED_NODES:
+                label = _NODE_AGENT_LABELS.get(name, name)
                 spoke_event_sinks[name] = []
-                yield {"event": "on_spoke_event", "agent": label, "status": "running", "message": f"{label} en cours...", "tool_events": []}
+                yield {
+                    "event": "on_spoke_event",
+                    "agent": label,
+                    "status": "running",
+                    "message": f"{label} en cours...",
+                    "tool_events": [],
+                }
 
             elif kind == "on_chain_end" and name in spoke_event_sinks:
-                agent_labels = {
-                    "intent_router": "Intent Router",
-                    "pm_plan": "Portfolio Manager",
-                    "pm_synthesis": "Portfolio Manager",
-                    "analyze_parallel": "Analystes (Fundamental + Quant)",
-                    "compliance_validator": "Compliance Validator",
-                    "executor_trader": "Executor Trader",
-                    "human_review": "Human Review",
-                    "simple_agent": "Simple Agent",
+                label = _NODE_AGENT_LABELS.get(name, name)
+                message = f"{label} terminé."
+                output = _chain_output(event)
+                if name == "intent_router":
+                    route = output.get("intent_route")
+                    if route == "simple":
+                        message = "Route: Agent simple (requête directe)"
+                    elif route == "complex":
+                        message = "Route: Hub-and-Spoke (multi-agents)"
+                elif name == "simple_agent":
+                    message = "Agent simple — réponse terminée"
+                yield {
+                    "event": "on_spoke_event",
+                    "agent": label,
+                    "status": "completed",
+                    "message": message,
+                    "tool_events": [],
                 }
-                label = agent_labels.get(name, name)
-                yield {"event": "on_spoke_event", "agent": label, "status": "completed", "message": f"{label} terminé.", "tool_events": []}
 
             elif kind == "on_chat_model_stream":
                 chunk = event.get("data", {}).get("chunk")
@@ -163,9 +236,9 @@ class HubAndSpokeGraph:
                 continue
 
             elif kind == "on_chain_end":
-                output = event.get("data", {}).get("output")
-                if isinstance(output, dict):
-                    last_state = output
+                output = _chain_output(event)
+                if output:
+                    last_state = {**(last_state or {}), **output}
 
             yield event
 

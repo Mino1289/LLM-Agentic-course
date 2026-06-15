@@ -1,3 +1,7 @@
+# DEPRECATED: Streamlit UI replaced by Next.js frontend + FastAPI API.
+# Run: uvicorn api.main:app --reload --reload-dir api --reload-dir src --port 8000  and  cd frontend && npm run dev
+# See README.md for current instructions.
+
 import asyncio
 import os
 import sys

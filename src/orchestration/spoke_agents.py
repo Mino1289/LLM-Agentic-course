@@ -7,6 +7,7 @@ from typing import Any
 
 from src.graph.tracing import traceable
 from src.orchestration._spoke_helpers import run_spoke_agent
+from src.orchestration.progress import emit_agent_progress
 from src.orchestration.prompts import FUNDAMENTAL_ANALYST_PROMPT, QUANTITATIVE_ANALYST_PROMPT
 from src.orchestration.state import HubSpokeState
 
@@ -28,6 +29,11 @@ async def fundamental_analyst_node(agent: Any, state: HubSpokeState) -> HubSpoke
         "message": "Analyse des filings SEC et des actualités...",
         "tool_events": [],
     })
+    emit_agent_progress(
+        "Fundamental Analyst",
+        "running",
+        "Analyse des filings SEC et des actualités...",
+    )
 
     today = datetime.now(UTC).date().isoformat()
     task = f"""Date actuelle : {today}
@@ -49,6 +55,11 @@ Fournis un rapport structuré couvrant : risques métier, santé financière, se
             "message": "Analyse fondamentale terminée.",
             "tool_events": [],
         })
+        emit_agent_progress(
+            "Fundamental Analyst",
+            "completed",
+            "Analyse fondamentale terminée.",
+        )
         return {"fundamental_report": report, "spoke_events": spoke_events, "stats": spoke_stats}
     except Exception as e:
         _LOGGER.exception("Fundamental analyst failed")
@@ -73,6 +84,11 @@ async def quantitative_analyst_node(agent: Any, state: HubSpokeState) -> HubSpok
         "message": "Analyse des prix et de l'historique du portefeuille...",
         "tool_events": [],
     })
+    emit_agent_progress(
+        "Quantitative Analyst",
+        "running",
+        "Analyse des prix et de l'historique du portefeuille...",
+    )
 
     today = datetime.now(UTC).date().isoformat()
     task = f"""Date actuelle : {today}
@@ -94,6 +110,11 @@ Fournis un rapport structuré couvrant : tendances de prix, volatilité, adéqua
             "message": "Analyse quantitative terminée.",
             "tool_events": [],
         })
+        emit_agent_progress(
+            "Quantitative Analyst",
+            "completed",
+            "Analyse quantitative terminée.",
+        )
         return {"quantitative_report": report, "spoke_events": spoke_events, "stats": spoke_stats}
     except Exception as e:
         _LOGGER.exception("Quantitative analyst failed")

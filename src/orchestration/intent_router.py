@@ -6,6 +6,7 @@ from typing import Any
 
 from src.graph.tracing import traceable
 from src.orchestration.prompts import INTENT_ROUTER_PROMPT
+from src.orchestration.progress import emit_agent_progress
 from src.orchestration.state import HubSpokeState
 
 
@@ -26,7 +27,8 @@ async def intent_router_node(agent: Any, state: HubSpokeState) -> HubSpokeState:
 
     # --- Action (complex) keywords: these need the full Hub-and-Spoke pipeline ---
     action_keywords = [
-        "achète", "acheter", "achat", "achète", "buy", "investi", "investis", "investir", "placement",
+        "achète", "acheter", "achat", "acheté", "achete", "action achet",
+        "buy", "investi", "investis", "investir", "placement",
         "vends", "vendre", "vend", "sell", "vente", "trade", "order", "ordre",
         "rebalance", "rebalancer", "alloue", "allouer", "allocation",
         "place un ordre", "soumet un ordre", "exécute", "exécuter", "execute",
@@ -35,6 +37,11 @@ async def intent_router_node(agent: Any, state: HubSpokeState) -> HubSpokeState:
     ]
     if any(kw in query_lower for kw in action_keywords):
         stats.update({"intent_route": "complex", "intent_reason": "action_keyword"})
+        emit_agent_progress(
+            "Intent Router",
+            "completed",
+            "Route: Hub-and-Spoke (multi-agents)",
+        )
         return {"intent_route": "complex", "stats": stats}
 
     # --- Info (simple) keywords: these can be answered by the Phase 2 agent directly ---
@@ -50,6 +57,11 @@ async def intent_router_node(agent: Any, state: HubSpokeState) -> HubSpokeState:
     ]
     if any(kw in query_lower for kw in info_keywords):
         stats.update({"intent_route": "simple", "intent_reason": "info_keyword"})
+        emit_agent_progress(
+            "Intent Router",
+            "completed",
+            "Route: Agent simple (requête directe)",
+        )
         return {"intent_route": "simple", "stats": stats}
 
     # --- LLM classifier for ambiguous queries ---

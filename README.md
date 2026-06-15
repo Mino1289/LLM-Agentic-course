@@ -73,16 +73,29 @@ python run_pipeline.py --download                        # forcer le télécharg
 
 ## Lancement de l'interface
 
+**Next.js + FastAPI** (recommandé) :
+
 ```bash
-streamlit run ui/app_rag.py
+# Terminal 1 — API
+uvicorn api.main:app --reload --reload-dir api --reload-dir src --port 8000
+
+# Terminal 2 — UI
+cd frontend && npm install && npm run dev
 ```
+
+Interface : http://localhost:3000 · API : http://localhost:8000
+
+L'ancienne interface Streamlit (`ui/app_rag.py`) est dépréciée.
 
 ## Docker
 
 ```bash
-docker compose run --rm bootstrap    # pipeline complète
-docker compose up finance-rag-ui     # interface sur http://localhost:8501
+docker compose run --rm bootstrap              # pipeline complète
+docker compose up finance-rag-api finance-rag-web
 ```
+
+- UI : http://localhost:3000
+- API : http://localhost:8000
 
 Variables `.env` utiles pour Docker : `SKIP_DOWNLOAD_IF_EXISTS`, `BOOTSTRAP_MIN_YEAR`, `BOOTSTRAP_SECTIONS`, `EMBEDDING_BATCH_SIZE`, `EMBEDDING_RPM`, etc.
 
@@ -102,7 +115,8 @@ python -m src.rag.cli --plan --strategy semantic
 python -m src.rag.cli --embed --strategy semantic --quota-used 0 --batch-size 32 --rpm 120
 
 # 5. Lancer l'interface
-streamlit run ui/app_rag.py
+uvicorn api.main:app --reload --reload-dir api --reload-dir src --port 8000
+cd frontend && npm run dev
 ```
 
 ## Outils agent (5 outils de type MCP)
@@ -148,8 +162,10 @@ src/
 ├── mcp/             # Serveur MCP stdio
 └── paths.py         # Chemins du projet
 ui/
-├── app_rag.py       # Interface Streamlit
+├── app_rag.py       # Interface Streamlit (dépréciée)
 └── streaming.py     # Streaming temps réel
+frontend/            # Interface Next.js (production)
+api/                 # Backend FastAPI (SSE, chat, trade approval)
 data/                # Rapports SEC bruts + index ChromaDB
 reports/             # Rapports exportés
 ```

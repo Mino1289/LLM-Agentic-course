@@ -4,6 +4,7 @@ import logging
 from typing import Any
 
 from src.graph.tracing import traceable
+from src.orchestration.progress import emit_agent_progress
 from src.orchestration.state import HubSpokeState
 
 _LOGGER = logging.getLogger("src.orchestration.simple_agent_node")
@@ -20,6 +21,11 @@ async def simple_agent_node(agent: Any, state: HubSpokeState) -> HubSpokeState:
         "message": "Traitement de la requête simple...",
         "tool_events": [],
     })
+    emit_agent_progress(
+        "Simple Agent",
+        "running",
+        "Agent simple — traitement en cours...",
+    )
 
     try:
         result_state = await agent.arun(query, state.get("conversation_id"), state.get("messages", []))

@@ -20,27 +20,12 @@ async def human_review_node(agent: Any, state: HubSpokeState) -> HubSpokeState:
         "tool_events": [],
     })
 
-    decision = state.get("pm_decision", {})
-    detail = state.get("compliance_detail", "")
-
-    summary_lines = [
-        "## Résumé de l'ordre proposé",
-        "",
-        f"**Ticker:** {decision.get('ticker', 'N/A')}",
-        f"**Side:** {decision.get('side', 'N/A')}",
-        f"**Quantité:** {decision.get('qty', 'N/A')}",
-        f"**Type d'ordre:** {decision.get('order_type', 'market')}",
-    ]
-    if decision.get("limit_price"):
-        summary_lines.append(f"**Prix limite:** {decision['limit_price']}")
-    summary_lines.extend([
-        "",
-        "**Justification:**",
-        decision.get("response", "N/A")[:500],
-        "",
-        "**Vérification Compliance:**",
-        detail[:300],
-    ])
+    verdict = state.get("compliance_verdict", "N/A")
+    answer = (
+        "🔐 **Approbation humaine requise**\n\n"
+        f"Un ordre de trade a été proposé (Compliance: **{verdict}**). "
+        "Consultez les détails complets ci-dessous et approuvez ou annulez."
+    )
 
     spoke_events.append({
         "agent": "Human Review",
@@ -52,7 +37,7 @@ async def human_review_node(agent: Any, state: HubSpokeState) -> HubSpokeState:
     merged_stats = dict(state.get("stats") or {})
     return {
         "human_review_pending": True,
-        "answer": "\n".join(summary_lines),
+        "answer": answer,
         "spoke_events": spoke_events,
         "stats": merged_stats,
     }

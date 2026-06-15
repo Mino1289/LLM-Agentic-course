@@ -1,0 +1,266 @@
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+from api.schemas.artifacts import (
+    AgentStep,
+    MessageArtifacts,
+    ReportArtifact,
+    SourceItem,
+    StatItem,
+    TradeProposal,
+)
+from api.schemas.chat import ChatMessageDTO, ChatResponse, HumanReviewPayload
+from src.orchestration.pm_node import _parse_pm_response
+from src.paths import REPORTS_DIR
+
+
+def build_sources(chunks: list[str], metadatas: list[dict[str, Any]]) -> list[SourceItem]:
+    sources: list[SourceItem] = []
+    for i, chunk in enumerate(chunks):
+        meta = metadatas[i] if i < len(metadatas) else {}
+        ticker = str(meta.get("ticker", "UNKNOWN"))
+        source = str(meta.get("source", "unknown"))
+        section = str(meta.get("section", "unknown"))
+        year = str(meta.get("year", "unknown"))
+        chunk_index = meta.get("chunk_index", i)
+        sources.append(
+            SourceItem(
+                id=f"s{i + 1}",
+                title=f"{ticker} | {source} | {section}",
+                excerpt=chunk[:500] + ("..." if len(chunk) > 500 else ""),
+                meta=f"{source} · {year} · chunk {chunk_index}",
+                ticker=ticker,
+                section=section,
+            )
+        )
+    return sources
+
+
+def tool_events_to_steps(tool_events: list[dict[str, Any]]) -> list[AgentStep]:
+    steps: list[AgentStep] = []
+    for idx, event in enumerate(tool_events, start=1):
+        tool_name = event.get("tool", "outil")
+        summary = event.get("args_summary", "")
+        steps.append(
+            AgentStep(
+                id=str(idx),
+                text=f"L'agent utilise l'outil **{tool_name}** — {summary}",
+            )
+        )
+    return steps
+
+
+def stats_to_items(stats: dict[str, Any], locale: str = "fr") -> list[StatItem]:
+    if not stats:
+        return []
+    labels_fr = {
+        "tokens": "Tokens utilisés",
+        "chunks": "Chunks RAG",
+        "iterations": "Itérations LLM",
+        "tools": "Outils appelés",
+        "candidates": "Candidats",
+        "final": "Final",
+    }
+    labels_en = {
+        "tokens": "Tokens used",
+        "chunks": "RAG chunks",
+        "iterations": "LLM iterations",
+        "tools": "Tools called",
+        "candidates": "Candidates",
+        "final": "Final",
+    }
+    labels = labels_fr if locale == "fr" else labels_en
+    items: list[StatItem] = []
+
+    total_tokens = stats.get("llm_total_tokens", 0) + stats.get("guard_total_tokens", 0)
+    if not total_tokens:
+        total_tokens = stats.get("estimated_context_tokens", 0)
+    if total_tokens:
+        items.append(StatItem(id="tokens", label=labels["tokens"], value=f"{total_tokens:,}"))
+
+    chunks = stats.get("chunks_used") or stats.get("rerank_final_count")
+    if chunks:
+        items.append(StatItem(id="chunks", label=labels["chunks"], value=str(chunks)))
+
+    spoke_llm = stats.get("spoke_llm_iterations") or stats.get("agent_iterations")
+    if spoke_llm:
+        items.append(StatItem(id="iterations", label=labels["iterations"], value=str(spoke_llm)))
+
+    spoke_tc = stats.get("spoke_tool_calls")
+    if spoke_tc:
+        items.append(StatItem(id="tools", label=labels["tools"], value=str(spoke_tc)))
+
+    if stats.get("retrieval_candidate_count"):
+        items.append(
+            StatItem(
+                id="candidates",
+                label=labels["candidates"],
+                value=str(stats["retrieval_candidate_count"]),
+            )
+        )
+
+    if len(items) < 6 and stats.get("intent_route"):
+        route = str(stats.get("intent_route", ""))
+        route_label = {
+            "simple": "Agent simple" if locale == "fr" else "Simple agent",
+            "complex": "Hub-and-Spoke (multi-agents)",
+        }.get(route, route)
+        items.append(StatItem(id="route", label="Mode", value=route_label))
+
+    return items[:6]
+
+
+def _format_size(path: Path) -> str:
+    if not path.is_file():
+        return "—"
+    size = path.stat().st_size
+    if size >= 1_000_000:
+        return f"{size / 1_000_000:.1f} Mo"
+    if size >= 1000:
+        return f"{size / 1000:.0f} Ko"
+    return f"{size} o"
+
+
+def reports_to_artifacts(report_artifacts: list[dict[str, Any]]) -> list[ReportArtifact]:
+    results: list[ReportArtifact] = []
+    for idx, artifact in enumerate(report_artifacts, start=1):
+        path = Path(str(artifact.get("path", "")))
+        filename = artifact.get("filename") or path.name
+        fmt = str(artifact.get("format") or path.suffix.lstrip(".") or "pdf").lower()
+        report_type = "pdf" if "pdf" in fmt else "md"
+        results.append(
+            ReportArtifact(
+                id=f"r{idx}",
+                name=str(artifact.get("title") or filename),
+                size=_format_size(path),
+                type=report_type,
+                download_url=f"/api/reports/{filename}",
+            )
+        )
+    return results
+
+
+def _enrich_pm_decision(state: dict[str, Any]) -> dict[str, Any]:
+    decision = dict(state.get("pm_decision") or {})
+    response_text = str(decision.get("response") or state.get("answer") or "")
+    if response_text:
+        parsed = _parse_pm_response(response_text)
+        for key in ("ticker", "side", "qty", "order_type", "limit_price"):
+            if not decision.get(key) and parsed.get(key):
+                decision[key] = parsed[key]
+    return decision
+
+
+def state_to_trade(state: dict[str, Any]) -> TradeProposal | None:
+    decision = _enrich_pm_decision(state)
+    if not decision.get("ticker") and not decision.get("response"):
+        return None
+    verdict = str(state.get("compliance_verdict", ""))
+    risk = "low" if verdict == "PASS" else "high" if verdict == "FAIL" else "medium"
+    qty = decision.get("qty", decision.get("quantity", "N/A"))
+    try:
+        qty_val: int | float | str = int(qty)
+    except (TypeError, ValueError):
+        qty_val = str(qty)
+    return TradeProposal(
+        ticker=str(decision.get("ticker") or "Voir justification"),
+        side=str(decision.get("side", "N/A")).upper(),
+        quantity=qty_val,
+        order_type=str(decision.get("order_type", "market")),
+        limit_price=str(decision.get("limit_price", "")) or None,
+        risk_level=risk,
+        justification=str(decision.get("response") or state.get("answer", "")),
+        compliance_verdict=verdict or None,
+        compliance_detail=str(state.get("compliance_detail", "")) or None,
+    )
+
+
+def build_trade_for_review(state: dict[str, Any]) -> TradeProposal:
+    trade = state_to_trade(state)
+    if trade is not None:
+        return trade
+    return TradeProposal(
+        ticker="N/A",
+        side="N/A",
+        quantity=0,
+        order_type="market",
+        risk_level="medium",
+        justification=str(state.get("answer", "")),
+        compliance_verdict=str(state.get("compliance_verdict", "")) or None,
+        compliance_detail=str(state.get("compliance_detail", "")) or None,
+    )
+
+
+def state_to_artifacts(state: dict[str, Any], locale: str = "fr") -> MessageArtifacts:
+    chunks = state.get("final_chunks") or []
+    metadatas = state.get("final_metadatas") or []
+    tool_events = state.get("tool_events") or []
+    stats = state.get("stats") or {}
+    report_artifacts = state.get("report_artifacts") or []
+
+    trade = None
+    if state.get("human_review_pending"):
+        trade = build_trade_for_review(state)
+
+    return MessageArtifacts(
+        steps=tool_events_to_steps(tool_events),
+        sources=build_sources(chunks, metadatas),
+        reports=reports_to_artifacts(report_artifacts),
+        stats=stats_to_items(stats, locale),
+        trade=trade,
+    )
+
+
+def state_to_response(
+    state: dict[str, Any],
+    conversation_id: str,
+    run_id: str | None = None,
+    locale: str = "fr",
+) -> ChatResponse:
+    answer = str(state.get("answer", ""))
+    artifacts = state_to_artifacts(state, locale)
+    if not state.get("human_review_pending"):
+        artifacts.trade = None
+
+    return ChatResponse(
+        conversation_id=conversation_id,
+        run_id=run_id,
+        answer=answer,
+        human_review_pending=bool(state.get("human_review_pending")),
+        artifacts=artifacts,
+    )
+
+
+def state_to_human_review(
+    state: dict[str, Any],
+    conversation_id: str,
+    run_id: str,
+    locale: str = "fr",
+) -> HumanReviewPayload:
+    trade = build_trade_for_review(state)
+    artifacts = state_to_artifacts(state, locale)
+    artifacts.trade = trade
+    return HumanReviewPayload(
+        run_id=run_id,
+        conversation_id=conversation_id,
+        answer=str(state.get("answer", "")),
+        trade=trade,
+        artifacts=artifacts,
+    )
+
+
+def message_dto_from_assistant(
+    state: dict[str, Any],
+    message_id: str,
+    timestamp: str,
+    locale: str = "fr",
+) -> ChatMessageDTO:
+    return ChatMessageDTO(
+        id=message_id,
+        role="assistant",
+        content=str(state.get("answer", "")),
+        timestamp=timestamp,
+        artifacts=state_to_artifacts(state, locale),
+    )
