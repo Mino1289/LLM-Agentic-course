@@ -7,6 +7,7 @@ from src.graph.tracing import traceable
 from src.orchestration._spoke_helpers import run_spoke_agent
 from src.orchestration.prompts import COMPLIANCE_PROMPT
 from src.orchestration.state import HubSpokeState
+from src.orchestration.trade_intent import route_after_compliance as _route_after_compliance
 
 _LOGGER = logging.getLogger("src.orchestration.compliance_node")
 
@@ -86,10 +87,7 @@ Retourne PASS ou FAIL avec des raisons spécifiques et actionnables."""
 
 
 def route_after_compliance(state: HubSpokeState) -> str:
-    verdict = state.get("compliance_verdict", "FAIL")
-    if verdict in ("PASS", "OVERRULED"):
-        return "human_review"
-    return "pm_plan"
+    return _route_after_compliance(state)
 
 
 def _extract_reasons(result: str) -> list[str]:

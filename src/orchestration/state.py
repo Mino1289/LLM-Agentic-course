@@ -14,6 +14,7 @@ class SpokeEvent(TypedDict, total=False):
 
 class HubSpokeState(GraphState, total=False):
     intent_route: Literal["simple", "complex"]
+    trade_requested: bool
     analysis_plan: str
     fundamental_report: str
     quantitative_report: str

@@ -6,8 +6,10 @@ from datetime import UTC, datetime
 from typing import Any
 
 from src.graph.tracing import traceable
+from src.orchestration.pm_decision import parse_pm_response
 from src.orchestration.prompts import PM_SYSTEM_PROMPT
 from src.orchestration.state import HubSpokeState
+from src.orchestration.trade_intent import is_trade_requested
 
 _LOGGER = logging.getLogger("src.orchestration.pm_node")
 
@@ -30,8 +32,20 @@ async def pm_plan_node(agent: Any, state: HubSpokeState) -> HubSpokeState:
         context += f"\nPrevious Compliance rejection reasons:\n" + "\n".join(f"- {r}" for r in compliance_reasons)
         context += "\n\nAdjust the plan accordingly."
 
+    if is_trade_requested(state):
+        mode_instruction = (
+            "The user explicitly requested a trade or investment action. "
+            "Include a DECISION block with ticker, side, quantity/amount, and order type."
+        )
+    else:
+        mode_instruction = (
+            "This is an ANALYSIS-ONLY request (comparison, research, risks, performance). "
+            "Do NOT propose any trade or order. Provide only PLAN and RESPONSE — no DECISION block."
+        )
+
     messages = [
         {"role": "system", "content": PM_SYSTEM_PROMPT},
+        {"role": "system", "content": mode_instruction},
         {"role": "system", "content": f"Today (UTC): {datetime.now(UTC).date().isoformat()}."},
         {"role": "user", "content": context},
     ]
@@ -44,7 +58,11 @@ async def pm_plan_node(agent: Any, state: HubSpokeState) -> HubSpokeState:
             if chunk.delta:
                 full_response += chunk.delta
 
-        plan = _parse_pm_response(full_response)
+        plan = parse_pm_response(full_response)
+        if not is_trade_requested(state):
+            plan["action"] = "none"
+            for key in ("ticker", "side", "qty", "order_type", "limit_price"):
+                plan.pop(key, None)
 
         spoke_events.append({
             "agent": "Portfolio Manager",
@@ -90,18 +108,12 @@ async def pm_synthesis_node(agent: Any, state: HubSpokeState) -> HubSpokeState:
     })
 
     today = datetime.now(UTC).date().isoformat()
-    synthesis_prompt = f"""{PM_SYSTEM_PROMPT}
+    trade_requested = is_trade_requested(state)
 
-Current date: {today}
-You are now in the SYNTHESIS phase. Read the analyst reports and make the final investment decision.
+    if trade_requested:
+        synthesis_instructions = """You are now in the SYNTHESIS phase. Read the analyst reports and make the final investment decision.
 
 IMPORTANT — For every factual claim in your Justification, cite the specific source (filing type and year from the Fundamental Report, or price/date from the Quantitative Report). This allows Compliance to verify your claims.
-
-FUNDAMENTAL REPORT:
-{fundamental_report}
-
-QUANTITATIVE REPORT:
-{quantitative_report}
 
 Based on these reports, produce a final investment decision in this format:
 DECISION:
@@ -112,10 +124,32 @@ DECISION:
 - Justification: ... (cite specific sources for each claim)
 
 RESPONSE (French, human-readable): ..."""
+    else:
+        synthesis_instructions = """You are now in the SYNTHESIS phase for an ANALYSIS-ONLY request.
+The user did NOT ask to place a trade. Do NOT propose any buy/sell order or DECISION block.
+
+Synthesize the analyst reports into a clear comparative answer in this format:
+SYNTHESIS:
+- Fundamental highlights: ...
+- Quantitative highlights: ...
+- Comparative conclusion: ...
+
+RESPONSE (French, human-readable): ..."""
+
+    synthesis_prompt = f"""{PM_SYSTEM_PROMPT}
+
+Current date: {today}
+{synthesis_instructions}
+
+FUNDAMENTAL REPORT:
+{fundamental_report}
+
+QUANTITATIVE REPORT:
+{quantitative_report}"""
 
     messages = [
         {"role": "system", "content": synthesis_prompt},
-        {"role": "user", "content": "Synthesize and make the final decision."},
+        {"role": "user", "content": "Synthesize the analyst reports for the user." if not trade_requested else "Synthesize and make the final decision."},
     ]
 
     try:
@@ -126,12 +160,16 @@ RESPONSE (French, human-readable): ..."""
             if chunk.delta:
                 full_response += chunk.delta
 
-        decision = _parse_pm_response(full_response)
+        decision = parse_pm_response(full_response)
+        if not trade_requested:
+            decision["action"] = "none"
+            for key in ("ticker", "side", "qty", "order_type", "limit_price"):
+                decision.pop(key, None)
 
         spoke_events.append({
             "agent": "Portfolio Manager",
             "status": "completed",
-            "message": "Décision d'investissement prise.",
+            "message": "Décision d'investissement prise." if trade_requested else "Synthèse analytique terminée.",
             "tool_events": [],
         })
 
@@ -152,33 +190,6 @@ RESPONSE (French, human-readable): ..."""
             "tool_events": [],
         })
         return {"answer": f"Erreur lors de la synthèse: {e}", "spoke_events": spoke_events}
-
-
-def _parse_pm_response(text: str) -> dict[str, Any]:
-    decision: dict[str, Any] = {"response": text}
-    lines = text.split("\n")
-    for i, line in enumerate(lines):
-        raw = line.strip()
-        lower = raw.lower()
-        # Enlève les prefixes comme "- ", "* ", "• " pour matcher les champs
-        for prefix in ("- ", "* ", "• "):
-            if lower.startswith(prefix):
-                lower = lower[len(prefix):]
-                raw = raw[len(prefix):]
-                break
-        if lower.startswith("ticker:"):
-            decision["ticker"] = raw.split(":", 1)[1].strip()
-        elif lower.startswith("side:"):
-            decision["side"] = raw.split(":", 1)[1].strip().lower()
-        elif lower.startswith("quantity") or lower.startswith("qty") or lower.startswith("amount"):
-            val = raw.split(":", 1)[1].strip() if ":" in raw else ""
-            decision["qty"] = val
-        elif lower.startswith("order type"):
-            decision["order_type"] = raw.split(":", 1)[1].strip().lower() if ":" in raw else "market"
-        elif lower.startswith("limit price"):
-            val = raw.split(":", 1)[1].strip() if ":" in raw else ""
-            decision["limit_price"] = val
-    return decision
 
 
 def _truncate_report(text: str, max_chars: int = 6000) -> str:

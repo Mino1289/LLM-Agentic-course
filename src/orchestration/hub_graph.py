@@ -17,6 +17,7 @@ from src.orchestration.human_review_node import human_review_node, human_approve
 from src.orchestration.executor_node import executor_trader_node
 from src.orchestration.progress import bind_progress_queue, clear_progress_queue
 from src.orchestration.simple_agent_node import simple_agent_node
+from src.orchestration.trade_intent import route_after_pm_synthesis
 
 _LOGGER = logging.getLogger("src.orchestration.hub_graph")
 
@@ -81,10 +82,14 @@ class HubAndSpokeGraph:
         builder.add_edge("simple_agent", END)
         builder.add_edge("pm_plan", "analyze_parallel")
         builder.add_edge("analyze_parallel", "pm_synthesis")
-        builder.add_edge("pm_synthesis", "compliance_validator")
+        builder.add_conditional_edges("pm_synthesis", route_after_pm_synthesis, {
+            "compliance_validator": "compliance_validator",
+            "__end__": END,
+        })
         builder.add_conditional_edges("compliance_validator", route_after_compliance, {
             "pm_plan": "pm_plan",
             "human_review": "human_review",
+            "__end__": END,
         })
         builder.add_edge("human_review", END)
         builder.add_edge("human_approve", "executor_trader")
@@ -104,6 +109,7 @@ class HubAndSpokeGraph:
             "messages": messages or [],
             "conversation_id": conversation_id or str(uuid.uuid4()),
             "intent_route": "complex",
+            "trade_requested": False,
             "spoke_events": [],
             "spoke_iterations": 0,
             "compliance_retries": 0,

@@ -8,11 +8,27 @@ from src.graph.tracing import traceable
 from src.orchestration.prompts import INTENT_ROUTER_PROMPT
 from src.orchestration.progress import emit_agent_progress
 from src.orchestration.state import HubSpokeState
+from src.orchestration.tool_domains import detect_tool_domains, resolve_route_from_domains
 
 
 def route_after_intent_router(state: HubSpokeState) -> str:
     route = state.get("intent_route", "simple")
     return "simple_agent" if route == "simple" else "pm_plan"
+
+
+def _emit_route_progress(route: str) -> None:
+    if route == "complex":
+        emit_agent_progress(
+            "Intent Router",
+            "completed",
+            "Route: Hub-and-Spoke (multi-agents)",
+        )
+    else:
+        emit_agent_progress(
+            "Intent Router",
+            "completed",
+            "Route: Agent simple (requête directe)",
+        )
 
 
 @traceable(name="intent_router")
@@ -23,46 +39,21 @@ async def intent_router_node(agent: Any, state: HubSpokeState) -> HubSpokeState:
     if not query:
         return {"intent_route": "simple", "answer": "Peux-tu préciser ta question ?", "stats": stats}
 
-    query_lower = query.lower()
-
-    # --- Action (complex) keywords: these need the full Hub-and-Spoke pipeline ---
-    action_keywords = [
-        "achète", "acheter", "achat", "acheté", "achete", "action achet",
-        "buy", "investi", "investis", "investir", "placement",
-        "vends", "vendre", "vend", "sell", "vente", "trade", "order", "ordre",
-        "rebalance", "rebalancer", "alloue", "allouer", "allocation",
-        "place un ordre", "soumet un ordre", "exécute", "exécuter", "execute",
-        "close position", "liquid", "couvre", "couverture", "hedge",
-        "utilise mon", "prendre position",
-    ]
-    if any(kw in query_lower for kw in action_keywords):
-        stats.update({"intent_route": "complex", "intent_reason": "action_keyword"})
-        emit_agent_progress(
-            "Intent Router",
-            "completed",
-            "Route: Hub-and-Spoke (multi-agents)",
-        )
-        return {"intent_route": "complex", "stats": stats}
-
-    # --- Info (simple) keywords: these can be answered by the Phase 2 agent directly ---
-    info_keywords = [
-        "prix", "price", "cours", "cotati", "valeur", "combien coûte",
-        "portefeuille", "portfolio", "compte", "account", "positions",
-        "mon portefeuille", "mon compte", "mes positions", "mes actions",
-        "buying power", "equity", "pnl", "solde", "balance",
-        "rendement", "performance", "compar",
-        "new", "actualité", "article", "news",
-        "document", "filings", "sec", "10-k", "10-q", "8-k", "20-f",
-        "rapport", "report", "risque", "risk", "section",
-    ]
-    if any(kw in query_lower for kw in info_keywords):
-        stats.update({"intent_route": "simple", "intent_reason": "info_keyword"})
-        emit_agent_progress(
-            "Intent Router",
-            "completed",
-            "Route: Agent simple (requête directe)",
-        )
-        return {"intent_route": "simple", "stats": stats}
+    domains = detect_tool_domains(query)
+    resolved = resolve_route_from_domains(domains)
+    if resolved is not None:
+        route, reason = resolved
+        stats.update({
+            "intent_route": route,
+            "intent_reason": reason,
+            "tool_domains": sorted(domains),
+        })
+        _emit_route_progress(route)
+        return {
+            "intent_route": route,
+            "trade_requested": "trade" in domains,
+            "stats": stats,
+        }
 
     # --- LLM classifier for ambiguous queries ---
     try:
@@ -81,14 +72,31 @@ async def intent_router_node(agent: Any, state: HubSpokeState) -> HubSpokeState:
         route = str(parsed.get("route", "")).strip().lower() if parsed else ""
         if route in ("simple", "complex"):
             reason = str(parsed.get("reason", "llm_classifier")).strip()
-            stats.update({"intent_route": route, "intent_reason": reason})
-            return {"intent_route": route, "stats": stats}
+            stats.update({
+                "intent_route": route,
+                "intent_reason": reason,
+                "tool_domains": sorted(domains),
+            })
+            _emit_route_progress(route)
+            return {
+                "intent_route": route,
+                "trade_requested": "trade" in domains,
+                "stats": stats,
+            }
     except Exception:
         pass
 
-    # En cas de doute → simple (info) plutôt que complex (trading)
-    stats.update({"intent_route": "simple", "intent_reason": "fallback_to_simple"})
-    return {"intent_route": "simple", "stats": stats}
+    stats.update({
+        "intent_route": "simple",
+        "intent_reason": "fallback_to_simple",
+        "tool_domains": sorted(domains),
+    })
+    _emit_route_progress("simple")
+    return {
+        "intent_route": "simple",
+        "trade_requested": "trade" in domains,
+        "stats": stats,
+    }
 
 
 def _extract_first_json_object(text: str) -> dict[str, Any] | None:

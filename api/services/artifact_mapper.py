@@ -12,7 +12,8 @@ from api.schemas.artifacts import (
     TradeProposal,
 )
 from api.schemas.chat import ChatMessageDTO, ChatResponse, HumanReviewPayload
-from src.orchestration.pm_node import _parse_pm_response
+from src.orchestration.pm_decision import enrich_pm_decision
+from src.orchestration.trade_intent import has_trade_proposal
 from src.paths import REPORTS_DIR
 
 
@@ -143,20 +144,13 @@ def reports_to_artifacts(report_artifacts: list[dict[str, Any]]) -> list[ReportA
 
 
 def _enrich_pm_decision(state: dict[str, Any]) -> dict[str, Any]:
-    decision = dict(state.get("pm_decision") or {})
-    response_text = str(decision.get("response") or state.get("answer") or "")
-    if response_text:
-        parsed = _parse_pm_response(response_text)
-        for key in ("ticker", "side", "qty", "order_type", "limit_price"):
-            if not decision.get(key) and parsed.get(key):
-                decision[key] = parsed[key]
-    return decision
+    return enrich_pm_decision(state)
 
 
 def state_to_trade(state: dict[str, Any]) -> TradeProposal | None:
-    decision = _enrich_pm_decision(state)
-    if not decision.get("ticker") and not decision.get("response"):
+    if not has_trade_proposal(state):
         return None
+    decision = _enrich_pm_decision(state)
     verdict = str(state.get("compliance_verdict", ""))
     risk = "low" if verdict == "PASS" else "high" if verdict == "FAIL" else "medium"
     qty = decision.get("qty", decision.get("quantity", "N/A"))
@@ -181,16 +175,7 @@ def build_trade_for_review(state: dict[str, Any]) -> TradeProposal:
     trade = state_to_trade(state)
     if trade is not None:
         return trade
-    return TradeProposal(
-        ticker="N/A",
-        side="N/A",
-        quantity=0,
-        order_type="market",
-        risk_level="medium",
-        justification=str(state.get("answer", "")),
-        compliance_verdict=str(state.get("compliance_verdict", "")) or None,
-        compliance_detail=str(state.get("compliance_detail", "")) or None,
-    )
+    raise ValueError("No trade proposal in state")
 
 
 def state_to_artifacts(state: dict[str, Any], locale: str = "fr") -> MessageArtifacts:
