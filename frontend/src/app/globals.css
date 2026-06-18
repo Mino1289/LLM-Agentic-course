@@ -465,6 +465,62 @@ h4 {
     margin-top: var(--space-4);
   }
 
+  .price-chart-stack {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    padding: var(--space-3) var(--space-4) var(--space-4);
+  }
+
+  .price-chart-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  .price-chart-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-2);
+  }
+
+  .price-chart-ticker {
+    font-weight: 600;
+    color: var(--fg-1);
+  }
+
+  .price-chart-period {
+    font-size: var(--text-xs);
+    color: var(--meta);
+  }
+
+  .price-chart-svg {
+    width: 100%;
+    height: auto;
+    border-radius: var(--radius-sm);
+    background: color-mix(in oklch, var(--surface) 70%, transparent);
+  }
+
+  .price-chart-line {
+    stroke: var(--accent);
+    stroke-width: 2;
+  }
+
+  .price-chart-stats {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--space-2);
+    font-size: var(--text-xs);
+  }
+
+  .price-chart-stat-label {
+    display: block;
+    color: var(--meta);
+    margin-bottom: 2px;
+  }
+
   .accordion {
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);

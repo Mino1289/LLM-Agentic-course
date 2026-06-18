@@ -5,6 +5,8 @@ import { ThoughtsRenderer } from "@/components/artifacts/ThoughtsRenderer";
 import { SourcesRenderer } from "@/components/artifacts/SourcesRenderer";
 import { ReportsRenderer } from "@/components/artifacts/ReportsRenderer";
 import { StatsRenderer } from "@/components/artifacts/StatsRenderer";
+import { PriceChartRenderer } from "@/components/artifacts/PriceChartRenderer";
+
 interface ArtifactStackProps {
   artifacts: MessageArtifacts;
   labels: {
@@ -12,6 +14,14 @@ interface ArtifactStackProps {
     sources: string;
     reports: string;
     stats: string;
+    priceCharts: string;
+    pricePerformance: string;
+    priceVolatility: string;
+    priceDrawdown: string;
+    priceCurrent: string;
+    priceHigh: string;
+    priceLow: string;
+    pricePeriod: string;
     allTickers: string;
     allSections: string;
     download: string;
@@ -23,12 +33,30 @@ export function ArtifactStack({ artifacts, labels }: ArtifactStackProps) {
     artifacts.steps?.length ||
     artifacts.sources?.length ||
     artifacts.reports?.length ||
-    artifacts.stats?.length;
+    artifacts.stats?.length ||
+    artifacts.priceCharts?.length;
 
   if (!hasArtifacts) return null;
 
+  const priceLabels = {
+    performance: labels.pricePerformance,
+    volatility: labels.priceVolatility,
+    drawdown: labels.priceDrawdown,
+    current: labels.priceCurrent,
+    high: labels.priceHigh,
+    low: labels.priceLow,
+    period: labels.pricePeriod,
+  };
+
   return (
     <div className="artifact-stack">
+      {artifacts.priceCharts?.length ? (
+        <PriceChartRenderer
+          title={labels.priceCharts}
+          charts={artifacts.priceCharts}
+          labels={priceLabels}
+        />
+      ) : null}
       {artifacts.steps?.length ? (
         <ThoughtsRenderer title={labels.thoughts} steps={artifacts.steps} defaultOpen={false} />
       ) : null}

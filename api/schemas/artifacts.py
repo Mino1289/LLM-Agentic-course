@@ -39,14 +39,14 @@ class PricePoint(BaseModel):
 
 
 class PriceSeriesStats(BaseModel):
-    perf_pct: float | None = None
-    vol_ann_pct: float | None = None
-    max_drawdown_pct: float | None = None
-    close_min: float | None = None
-    close_max: float | None = None
-    close_last: float | None = None
-    high_date: str | None = None
-    low_date: str | None = None
+    perf_pct: float | None = Field(default=None, alias="perfPct")
+    vol_ann_pct: float | None = Field(default=None, alias="volAnnPct")
+    max_drawdown_pct: float | None = Field(default=None, alias="maxDrawdownPct")
+    close_min: float | None = Field(default=None, alias="closeMin")
+    close_max: float | None = Field(default=None, alias="closeMax")
+    close_last: float | None = Field(default=None, alias="closeLast")
+    high_date: str | None = Field(default=None, alias="highDate")
+    low_date: str | None = Field(default=None, alias="lowDate")
 
     model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
 

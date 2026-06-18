@@ -26,6 +26,14 @@ interface ChatAreaProps {
     sources: string;
     reports: string;
     stats: string;
+    priceCharts: string;
+    pricePerformance: string;
+    priceVolatility: string;
+    priceDrawdown: string;
+    priceCurrent: string;
+    priceHigh: string;
+    priceLow: string;
+    pricePeriod: string;
     allTickers: string;
     allSections: string;
     download: string;
@@ -103,6 +111,14 @@ export function ChatArea({
             sources: artifactLabels.sources,
             reports: artifactLabels.reports,
             stats: artifactLabels.stats,
+            priceCharts: artifactLabels.priceCharts,
+            pricePerformance: artifactLabels.pricePerformance,
+            priceVolatility: artifactLabels.priceVolatility,
+            priceDrawdown: artifactLabels.priceDrawdown,
+            priceCurrent: artifactLabels.priceCurrent,
+            priceHigh: artifactLabels.priceHigh,
+            priceLow: artifactLabels.priceLow,
+            pricePeriod: artifactLabels.pricePeriod,
             allTickers: artifactLabels.allTickers,
             allSections: artifactLabels.allSections,
             download: artifactLabels.download,

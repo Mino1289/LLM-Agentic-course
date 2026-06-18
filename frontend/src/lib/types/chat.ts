@@ -42,11 +42,37 @@ export interface TradeProposal {
   complianceDetail?: string;
 }
 
+export interface PricePoint {
+  date: string;
+  close: number;
+}
+
+export interface PriceSeriesStats {
+  perfPct?: number;
+  volAnnPct?: number;
+  maxDrawdownPct?: number;
+  closeMin?: number;
+  closeMax?: number;
+  closeLast?: number;
+  highDate?: string;
+  lowDate?: string;
+}
+
+export interface PriceSeriesArtifact {
+  id: string;
+  ticker: string;
+  startDate: string;
+  endDate: string;
+  points: PricePoint[];
+  stats?: PriceSeriesStats;
+}
+
 export interface MessageArtifacts {
   steps?: AgentStep[];
   sources?: SourceItem[];
   reports?: ReportArtifact[];
   stats?: StatItem[];
+  priceCharts?: PriceSeriesArtifact[];
   trade?: TradeProposal;
 }
 
