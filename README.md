@@ -307,6 +307,7 @@ python3 -m unittest tests.test_intent_router tests.test_trade_intent -v
 | Erreur embeddings / quota | Ajuster `EMBEDDING_RPM`, `EMBEDDING_BATCH_SIZE` ou attendre reset quota                            |
 | ChromaDB vide             | Relancer `python run_pipeline.py`                                                                  |
 | Trade non exécuté         | Normal si la requête est analytique ; l'approbation n'apparaît que pour un ordre explicite         |
+| Conversations perdues     | L'état (`run_store`) est en mémoire : il disparaît au redémarrage de l'API. Lancer uvicorn en mono-worker. |
 | SEC 403                   | Renseigner `SEC_USER_AGENT` avec un email valide                                                   |
 
 

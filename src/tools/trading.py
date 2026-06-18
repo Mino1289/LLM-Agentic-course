@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from datetime import UTC, datetime
 from typing import Any
@@ -9,8 +10,13 @@ from typing import Any
 from src.config import TRACKED_TICKERS
 from src.tools.schemas import PlaceTradeArgs, ClosePositionArgs
 
+_LOGGER = logging.getLogger("src.tools.trading")
+
 _TRACKED = set(TRACKED_TICKERS)
 _MAX_NOTIONAL_PER_ORDER = 10_000.0
+# Estimation prudente quand aucun prix réel n'est disponible (ex. clés data absentes).
+# Volontairement élevée pour ne pas sous-estimer le notionnel et laisser passer un gros ordre.
+_FALLBACK_PRICE_PER_SHARE = 1_000.0
 
 _NOT_CONFIGURED_TEXT = (
     "Outils Alpaca non disponibles — clés API manquantes. "
@@ -28,7 +34,30 @@ def _trade_allowed_without_approval(state: dict[str, Any] | None) -> bool:
     if (state or {}).get("human_approved"):
         return True
     flag = os.getenv("ALLOW_TRADE_WITHOUT_APPROVAL", "").strip().lower()
-    return flag in {"1", "true", "yes"}
+    if flag in {"1", "true", "yes"}:
+        _LOGGER.warning(
+            "ALLOW_TRADE_WITHOUT_APPROVAL actif — le garde-fou d'approbation humaine "
+            "est CONTOURNÉ. À n'utiliser qu'en développement."
+        )
+        return True
+    return False
+
+
+def _estimate_notional(ticker: str, qty: float, limit_price: float | None) -> float:
+    """Notionnel basé sur le prix réel (limite > dernier prix > estimation prudente)."""
+    if limit_price is not None and limit_price > 0:
+        return qty * limit_price
+    from src.alpaca.client import fetch_latest_price
+
+    last_price = fetch_latest_price(ticker)
+    if last_price is not None and last_price > 0:
+        return qty * last_price
+    _LOGGER.warning(
+        "Prix réel indisponible pour %s — estimation prudente à %s/action.",
+        ticker,
+        _FALLBACK_PRICE_PER_SHARE,
+    )
+    return qty * _FALLBACK_PRICE_PER_SHARE
 
 
 def _fmt_usd(value: float) -> str:
@@ -62,7 +91,7 @@ def run_place_trade(
             "text": "Type d'ordre invalide: market, limit, stop ou stop_limit.",
             "error": "invalid_order_type",
         }
-    notional = qty * 200
+    notional = _estimate_notional(ticker, qty, args.limit_price)
     if notional > _MAX_NOTIONAL_PER_ORDER:
         return {
             "text": f"## Ordre non exécuté — montant estimé trop élevé\nTicker: {ticker}\nQuantité: {qty}\nEstimation: {_fmt_usd(notional)} (max: {_fmt_usd(_MAX_NOTIONAL_PER_ORDER)})",

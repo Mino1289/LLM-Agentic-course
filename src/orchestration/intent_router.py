@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from typing import Any
 
@@ -12,6 +13,8 @@ from src.orchestration.tool_domains import (
     detect_tool_domains,
     resolve_route_from_domains,
 )
+
+_LOGGER = logging.getLogger("src.orchestration.intent_router")
 
 
 def route_after_intent_router(state: HubSpokeState) -> str:
@@ -98,7 +101,7 @@ async def intent_router_node(agent: Any, state: HubSpokeState) -> HubSpokeState:
                 "stats": stats,
             }
     except Exception:
-        pass
+        _LOGGER.warning("Intent classifier LLM failed; falling back to simple route.", exc_info=True)
 
     stats.update(
         {

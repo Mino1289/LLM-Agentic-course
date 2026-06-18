@@ -122,6 +122,25 @@ def fetch_account_activities(
         return []
 
 
+def fetch_latest_price(symbol: str) -> float | None:
+    """Dernier prix négocié via l'API data Alpaca. None si indisponible."""
+    if not _check_keys():
+        return None
+    url = f"{_data_base_url()}/v2/stocks/{symbol}/trades/latest"
+    headers = {
+        "APCA-API-KEY-ID": _api_key(),
+        "APCA-API-SECRET-KEY": _secret_key(),
+    }
+    try:
+        resp = httpx.get(url, headers=headers, timeout=10)
+        resp.raise_for_status()
+        price = resp.json().get("trade", {}).get("p")
+        return float(price) if price is not None else None
+    except Exception as exc:
+        _LOGGER.warning("Latest price fetch failed for %s: %s", symbol, exc)
+        return None
+
+
 def format_alpaca_error(exc: Exception) -> str:
     msg = str(exc)
     if "401" in msg:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 from src.graph.tracing import traceable
@@ -18,6 +19,18 @@ COMPLIANCE_TOOLS = [
     "portfolio_info_tool",
     "account_activity_tool",
 ]
+
+# Nombre de passages Compliance avant d'arrêter la boucle PM↔Compliance.
+_MAX_COMPLIANCE_ATTEMPTS = 2
+
+
+def _overrule_enabled() -> bool:
+    """Forcer le trade malgré un FAIL après N tentatives (désactivé par défaut)."""
+    return os.getenv("COMPLIANCE_ALLOW_OVERRULE", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
 
 
 @traceable(name="compliance_validator")
@@ -67,13 +80,26 @@ Retourne PASS ou FAIL avec des raisons spécifiques et actionnables."""
         first_word = result_lower.split(maxsplit=1)[0] if result_lower else ""
         verdict = "PASS" if first_word == "pass" else "FAIL"
         reasons = _extract_reasons(result)
+        exhausted = False
+        answer: str | None = None
 
-        if verdict == "FAIL" and compliance_count >= 2:
-            verdict = "OVERRULED"
-            reasons = [
-                "Maximum de tentatives atteint. Décision forcée après révision.",
-                *reasons,
-            ]
+        if verdict == "FAIL" and compliance_count >= _MAX_COMPLIANCE_ATTEMPTS:
+            if _overrule_enabled():
+                verdict = "OVERRULED"
+                reasons = [
+                    "Maximum de tentatives atteint. Décision forcée après révision "
+                    "(COMPLIANCE_ALLOW_OVERRULE actif).",
+                    *reasons,
+                ]
+            else:
+                # Garde-fou strict : on ne force pas, on arrête la boucle proprement.
+                exhausted = True
+                answer = (
+                    "❌ **Ordre bloqué par la conformité**\n\n"
+                    f"Après {compliance_count} tentatives, le Compliance Validator "
+                    "maintient son refus. Aucun ordre n'a été soumis.\n\n"
+                    f"Raison principale : {reasons[0] if reasons else 'non précisée'}"
+                )
 
         summary = reasons[0][:2000] if reasons else "Aucune raison détaillée."
         spoke_events.append(
@@ -88,13 +114,17 @@ Retourne PASS ou FAIL avec des raisons spécifiques et actionnables."""
 
         merged_stats = dict(state.get("stats") or {})
         merged_stats.update(spoke_stats)
-        return {
+        result_state: dict[str, Any] = {
             "compliance_verdict": verdict,
             "compliance_reasons": reasons,
             "compliance_detail": result,
+            "compliance_exhausted": exhausted,
             "spoke_events": spoke_events,
             "stats": merged_stats,
         }
+        if answer is not None:
+            result_state["answer"] = answer
+        return result_state
     except Exception as e:
         _LOGGER.exception("Compliance validator failed")
         spoke_events.append(

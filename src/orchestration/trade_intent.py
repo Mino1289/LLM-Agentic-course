@@ -95,4 +95,7 @@ def route_after_compliance(state: dict[str, Any]) -> str:
     verdict = state.get("compliance_verdict", "FAIL")
     if verdict in ("PASS", "OVERRULED"):
         return "human_review"
+    # FAIL après épuisement des tentatives : on arrête au lieu de reboucler à l'infini.
+    if state.get("compliance_exhausted"):
+        return "__end__"
     return "pm_plan"

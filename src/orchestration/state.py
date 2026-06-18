@@ -22,6 +22,7 @@ class HubSpokeState(GraphState, total=False):
     compliance_verdict: str
     compliance_reasons: list[str]
     compliance_detail: str
+    compliance_exhausted: bool
     human_approved: bool
     human_review_pending: bool
     trade_result: dict[str, Any]

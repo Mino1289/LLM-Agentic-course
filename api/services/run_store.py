@@ -46,6 +46,13 @@ class PendingRun:
 
 
 class RunStore:
+    """Stockage **en mémoire** des conversations et runs en attente.
+
+    Limite connue : l'état est perdu au redémarrage de l'API et n'est pas partagé
+    entre process. Lancer uvicorn en mono-worker (pas de ``--workers N``).
+    Pour de la persistance, remplacer les dicts par une couche SQLite/Redis.
+    """
+
     def __init__(self) -> None:
         self.conversations: dict[str, ConversationRecord] = {}
         self.pending_runs: dict[str, PendingRun] = {}
