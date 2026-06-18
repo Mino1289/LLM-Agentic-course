@@ -20,8 +20,9 @@ from src.tools.descriptions import (
 )
 
 
-def get_tool_definitions() -> list[dict[str, Any]]:
-    return [
+def get_tool_definitions(*, exclude_trading: bool = False) -> list[dict[str, Any]]:
+    trade_tools = frozenset({"place_trade_tool", "close_position_tool"})
+    tools = [
         {
             "type": "function",
             "function": {
@@ -263,3 +264,10 @@ def get_tool_definitions() -> list[dict[str, Any]]:
             },
         },
     ]
+    if exclude_trading:
+        return [
+            tool
+            for tool in tools
+            if tool.get("function", {}).get("name") not in trade_tools
+        ]
+    return tools

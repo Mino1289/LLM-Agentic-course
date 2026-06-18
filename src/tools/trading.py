@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from datetime import UTC, datetime
 from typing import Any
 
@@ -16,6 +17,19 @@ _NOT_CONFIGURED_TEXT = (
     "Configure ALPACA_API_KEY et ALPACA_SECRET_KEY dans .env."
 )
 
+_APPROVAL_REQUIRED_TEXT = (
+    "## Ordre non exécuté — approbation humaine requise\n"
+    "Les ordres ne peuvent être soumis qu'après validation Compliance "
+    "et approbation explicite de l'utilisateur."
+)
+
+
+def _trade_allowed_without_approval(state: dict[str, Any] | None) -> bool:
+    if (state or {}).get("human_approved"):
+        return True
+    flag = os.getenv("ALLOW_TRADE_WITHOUT_APPROVAL", "").strip().lower()
+    return flag in {"1", "true", "yes"}
+
 
 def _fmt_usd(value: float) -> str:
     if abs(value) >= 1_000_000:
@@ -25,7 +39,11 @@ def _fmt_usd(value: float) -> str:
     return f"${value:.2f}"
 
 
-def run_place_trade(args: PlaceTradeArgs) -> dict[str, Any]:
+def run_place_trade(
+    args: PlaceTradeArgs, *, state: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    if not _trade_allowed_without_approval(state):
+        return {"text": _APPROVAL_REQUIRED_TEXT, "error": "human_approval_required"}
     from src.alpaca.client import get_alpaca_client, format_alpaca_error
 
     ticker = args.ticker.upper().strip()
@@ -127,7 +145,11 @@ def run_place_trade(args: PlaceTradeArgs) -> dict[str, Any]:
     }
 
 
-def run_close_position(args: ClosePositionArgs) -> dict[str, Any]:
+def run_close_position(
+    args: ClosePositionArgs, *, state: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    if not _trade_allowed_without_approval(state):
+        return {"text": _APPROVAL_REQUIRED_TEXT, "error": "human_approval_required"}
     from src.alpaca.client import get_alpaca_client, format_alpaca_error
 
     client = get_alpaca_client()

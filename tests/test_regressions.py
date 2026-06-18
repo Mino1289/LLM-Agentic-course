@@ -520,6 +520,7 @@ class ConfigurationTests(unittest.TestCase):
         # 10 tools: sec_filings_rag, market_price, export_report, validate_claims,
         # portfolio_info, place_trade, close_position, get_news, portfolio_history, account_activity
         self.assertEqual(len(get_tool_definitions()), 10)
+        self.assertEqual(len(get_tool_definitions(exclude_trading=True)), 8)
 
     def test_parse_openai_tool_calls(self):
         raw = [
@@ -615,7 +616,10 @@ class AgentToolsTests(unittest.TestCase):
         from unittest.mock import patch
 
         with patch("src.alpaca.client.get_alpaca_client", return_value=None):
-            result = run_place_trade(PlaceTradeArgs(ticker="ZZZZ", side="buy", qty=10))
+            result = run_place_trade(
+                PlaceTradeArgs(ticker="ZZZZ", side="buy", qty=10),
+                state={"human_approved": True},
+            )
         # Ticker validation happens before API call
         self.assertEqual(result.get("error"), "invalid_ticker")
 

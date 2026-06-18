@@ -1,5 +1,6 @@
 import unittest
 
+from src.orchestration.pm_decision import parse_dollar_amount
 from src.orchestration.tool_domains import (
     detect_tool_domains,
     resolve_route_from_domains,
@@ -81,6 +82,37 @@ class TradeIntentTests(unittest.TestCase):
             "compliance_verdict": "PASS",
         }
         self.assertEqual(route_after_compliance(state), "__end__")
+
+    def test_informal_trade_phrasing_routes_complex(self):
+        query = "mets 500$ sur MSFT"
+        domains = detect_tool_domains(query)
+        route = resolve_route_from_domains(domains)
+        self.assertIn("trade", domains)
+        self.assertEqual(route, ("complex", "action_keyword"))
+
+    def test_parse_dollar_amount_from_query(self):
+        self.assertEqual(parse_dollar_amount("investis 500$ dans NVDA"), 500.0)
+        self.assertEqual(parse_dollar_amount("buy $1,250 of MSFT"), 1250.0)
+
+    def test_place_trade_requires_human_approval(self):
+        from src.tools.schemas import PlaceTradeArgs
+        from src.tools.trading import run_place_trade
+
+        result = run_place_trade(PlaceTradeArgs(ticker="MSFT", side="buy", qty=1))
+        self.assertEqual(result.get("error"), "human_approval_required")
+
+    def test_place_trade_allowed_when_human_approved(self):
+        from unittest.mock import patch
+
+        from src.tools.schemas import PlaceTradeArgs
+        from src.tools.trading import run_place_trade
+
+        with patch("src.alpaca.client.get_alpaca_client", return_value=None):
+            result = run_place_trade(
+                PlaceTradeArgs(ticker="MSFT", side="buy", qty=1),
+                state={"human_approved": True},
+            )
+        self.assertEqual(result.get("error"), "alpaca_not_configured")
 
 
 if __name__ == "__main__":

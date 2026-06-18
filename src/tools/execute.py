@@ -113,9 +113,9 @@ def execute_tool(
     if name == "portfolio_info_tool":
         return run_portfolio_info(args)
     if name == "place_trade_tool":
-        return run_place_trade(args)
+        return run_place_trade(args, state=state or {})
     if name == "close_position_tool":
-        return run_close_position(args)
+        return run_close_position(args, state=state or {})
     if name == "get_news_tool":
         return run_get_news(args)
     if name == "portfolio_history_tool":

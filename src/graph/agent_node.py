@@ -40,7 +40,7 @@ async def agent_node(agent: Any, state: GraphState) -> GraphState:
     llm_t0 = time.perf_counter()
     async for stream_chunk in agent.rag.provider.ainvoke_with_tools_stream(
         lc_messages,
-        tools=get_tool_definitions(),
+        tools=get_tool_definitions(exclude_trading=True),
         temperature=0.2,
         max_tokens=2500,
     ):

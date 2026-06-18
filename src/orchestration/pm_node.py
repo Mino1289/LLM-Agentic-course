@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from src.graph.tracing import traceable
-from src.orchestration.pm_decision import parse_pm_response
+from src.orchestration.pm_decision import parse_dollar_amount, parse_pm_response
 from src.orchestration.prompts import PM_SYSTEM_PROMPT
 from src.orchestration.state import HubSpokeState
 from src.orchestration.trade_intent import is_trade_requested
@@ -30,6 +30,12 @@ async def pm_plan_node(agent: Any, state: HubSpokeState) -> HubSpokeState:
     )
 
     context = f"User request: {query}\n"
+    budget = parse_dollar_amount(query)
+    if budget is not None and is_trade_requested(state):
+        context += (
+            f"\nUser budget constraint: ${budget:,.2f} maximum notional for this trade. "
+            "Convert to share quantity using the latest price and do not exceed this amount.\n"
+        )
     if compliance_reasons:
         context += f"\nPrevious Compliance rejection reasons:\n" + "\n".join(
             f"- {r}" for r in compliance_reasons
@@ -160,7 +166,14 @@ RESPONSE (French, human-readable): ..."""
 
 Current date: {today}
 {synthesis_instructions}
+"""
+    budget = parse_dollar_amount(state.get("normalized_query") or state.get("query", ""))
+    if budget is not None and trade_requested:
+        synthesis_prompt += f"""
+User budget constraint: ${budget:,.2f} maximum notional. Quantity must respect this cap.
+"""
 
+    synthesis_prompt += f"""
 FUNDAMENTAL REPORT:
 {fundamental_report}
 

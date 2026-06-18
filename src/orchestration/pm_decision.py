@@ -1,6 +1,52 @@
 from __future__ import annotations
 
+import re
 from typing import Any
+
+
+_DOLLAR_PATTERNS = (
+    r"(\d[\d\s,.]*)\s*\$",
+    r"\$\s*(\d[\d\s,.]*)",
+    r"(\d[\d\s,.]*)\s*(?:dollars?|usd)\b",
+    r"(\d[\d\s,.]*)\s*€",
+    r"(\d[\d\s,.]*)\s*(?:euros?)\b",
+)
+
+
+def _normalize_amount(raw: str) -> float | None:
+    cleaned = raw.strip().replace(" ", "")
+    if not cleaned:
+        return None
+    if "," in cleaned and "." in cleaned:
+        if cleaned.rfind(",") > cleaned.rfind("."):
+            cleaned = cleaned.replace(".", "").replace(",", ".")
+        else:
+            cleaned = cleaned.replace(",", "")
+    elif "," in cleaned:
+        left, _, right = cleaned.partition(",")
+        if right.isdigit() and len(right) <= 2:
+            cleaned = f"{left}.{right}"
+        else:
+            cleaned = cleaned.replace(",", "")
+    try:
+        value = float(cleaned)
+    except ValueError:
+        return None
+    return value if value > 0 else None
+
+
+def parse_dollar_amount(query: str) -> float | None:
+    text = (query or "").strip()
+    if not text:
+        return None
+    for pattern in _DOLLAR_PATTERNS:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        value = _normalize_amount(match.group(1))
+        if value is not None:
+            return value
+    return None
 
 
 def parse_pm_response(text: str) -> dict[str, Any]:

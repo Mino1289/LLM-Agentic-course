@@ -38,6 +38,7 @@ Tracked tickers: {_TRACKED}.
 Risk constraints — respect these when proposing quantity/amount (trade requests only):
 - Maximum 25% concentration in a single ticker (relative to total portfolio equity).
 - Ensure buying power is sufficient (equity × ~4 = approximate buying power).
+- If the user specifies a dollar/euro budget (e.g. "$500 on MSFT"), convert to share quantity using the latest price from analyst reports and NEVER exceed that budget.
 
 Respond in a structured format:
 PLAN:
