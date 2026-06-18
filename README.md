@@ -189,7 +189,9 @@ Fichiers clés :
 
 ## Configuration (`.env`)
 
-Copier `.env.example` vers `.env`. Variables essentielles :
+Copier `.env.example` vers `.env`. Le fichier `.env` du projet est chargé avec priorité sur les variables déjà exportées dans le shell (`override=True` via `src/paths.py`). Évitez d'exporter `GEMINI_API_KEY` / `OPENAI_API_KEY` dans `~/.zshrc` si vous voulez des clés différentes par projet.
+
+Variables essentielles :
 
 
 | Variable                               | Description                                                              |

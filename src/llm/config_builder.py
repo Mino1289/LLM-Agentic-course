@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Optional
 
 from src.llm.types import LLMConfig
+
+_LOGGER = logging.getLogger("src.llm.config_builder")
 
 SUPPORTED_CHAT_PROVIDERS = {
     "openai",
@@ -48,6 +51,32 @@ def _require_env(name: str) -> str:
     if not value:
         raise ValueError(f"Missing required environment variable: {name}")
     return value
+
+
+def mask_api_key(value: str | None, visible_suffix: int = 6) -> str:
+    raw = (value or "").strip()
+    if not raw:
+        return "(unset)"
+    if len(raw) <= visible_suffix:
+        return "***"
+    return f"...{raw[-visible_suffix:]}"
+
+
+def _log_effective_config(provider: str, chat_model: str, api_key: str) -> None:
+    key_label = {
+        "openai": "OPENAI_API_KEY",
+        "github_models": "GITHUB_MODELS_API_KEY",
+        "gemini": "GEMINI_API_KEY",
+        "azure_openai": "AZURE_OPENAI_API_KEY",
+        "nvidia_nim": "NVIDIA_NIM_API_KEY",
+    }.get(provider, "API_KEY")
+    _LOGGER.info(
+        "LLM config: provider=%s model=%s %s=%s",
+        provider,
+        chat_model,
+        key_label,
+        mask_api_key(api_key),
+    )
 
 
 def _build_openai_style_embedding_config(
@@ -115,10 +144,12 @@ def build_llm_config_from_env() -> LLMConfig:
 
     if provider == "openai":
         api_key = _require_env("OPENAI_API_KEY")
+        chat_model = os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini")
+        _log_effective_config(provider, chat_model, api_key)
         raw_base_url = os.getenv("OPENAI_BASE_URL", "").strip()
         return LLMConfig(
             provider=provider,
-            chat_model=os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini"),
+            chat_model=chat_model,
             embedding_model=embed_model,
             api_key=api_key,
             base_url=raw_base_url or OPENAI_DEFAULT_BASE_URL,
@@ -130,11 +161,13 @@ def build_llm_config_from_env() -> LLMConfig:
 
     if provider == "github_models":
         api_key = _require_env("GITHUB_MODELS_API_KEY")
+        chat_model = _normalize_github_model_id(
+            os.getenv("GITHUB_CHAT_MODEL", GITHUB_DEFAULT_CHAT_MODEL)
+        )
+        _log_effective_config(provider, chat_model, api_key)
         return LLMConfig(
             provider=provider,
-            chat_model=_normalize_github_model_id(
-                os.getenv("GITHUB_CHAT_MODEL", GITHUB_DEFAULT_CHAT_MODEL)
-            ),
+            chat_model=chat_model,
             embedding_model=embed_model,
             api_key=api_key,
             base_url=os.getenv(
@@ -150,11 +183,13 @@ def build_llm_config_from_env() -> LLMConfig:
         api_key = _require_env("AZURE_OPENAI_API_KEY")
         endpoint = _require_env("AZURE_OPENAI_ENDPOINT")
         api_ver = os.getenv("AZURE_OPENAI_API_VERSION", AZURE_DEFAULT_API_VERSION)
+        chat_model = os.getenv(
+            "AZURE_OPENAI_CHAT_DEPLOYMENT", AZURE_DEFAULT_CHAT_DEPLOYMENT
+        )
+        _log_effective_config(provider, chat_model, api_key)
         return LLMConfig(
             provider=provider,
-            chat_model=os.getenv(
-                "AZURE_OPENAI_CHAT_DEPLOYMENT", AZURE_DEFAULT_CHAT_DEPLOYMENT
-            ),
+            chat_model=chat_model,
             embedding_model=embed_model,
             api_key=api_key,
             base_url=endpoint,
@@ -167,11 +202,11 @@ def build_llm_config_from_env() -> LLMConfig:
 
     if provider == "nvidia_nim":
         api_key = _require_env("NVIDIA_NIM_API_KEY")
+        chat_model = os.getenv("NVIDIA_NIM_CHAT_MODEL", NVIDIA_NIM_DEFAULT_CHAT_MODEL)
+        _log_effective_config(provider, chat_model, api_key)
         return LLMConfig(
             provider=provider,
-            chat_model=os.getenv(
-                "NVIDIA_NIM_CHAT_MODEL", NVIDIA_NIM_DEFAULT_CHAT_MODEL
-            ),
+            chat_model=chat_model,
             embedding_model=embed_model,
             api_key=api_key,
             base_url=os.getenv("NVIDIA_NIM_BASE_URL", "").strip()
@@ -183,9 +218,11 @@ def build_llm_config_from_env() -> LLMConfig:
         )
 
     api_key = _require_env("GEMINI_API_KEY")
+    chat_model = os.getenv("GEMINI_CHAT_MODEL", "gemini-2.0-flash")
+    _log_effective_config(provider, chat_model, api_key)
     return LLMConfig(
         provider=provider,
-        chat_model=os.getenv("GEMINI_CHAT_MODEL", "gemini-2.0-flash"),
+        chat_model=chat_model,
         embedding_model=embed_model,
         api_key=api_key,
         base_url=None,

@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import os
 
-from dotenv import load_dotenv
-
-from src.paths import ENV_FILE
+from src.paths import load_project_env
 
 LANGSMITH_ENDPOINTS = {
     "us": "https://api.smith.langchain.com",
@@ -15,7 +13,7 @@ LANGSMITH_ENDPOINTS = {
 
 
 def ensure_langsmith_env() -> None:
-    load_dotenv(ENV_FILE)
+    load_project_env()
     tracing = os.getenv("LANGSMITH_TRACING", "").strip().lower() in {"1", "true", "yes"}
     if not tracing:
         return

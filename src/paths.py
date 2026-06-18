@@ -31,6 +31,21 @@ SEC_FILINGS_METADATA = PROJECT_ROOT / "data" / "sec_filings_metadata.json"
 REPORTS_DIR = PROJECT_ROOT / "reports"
 ENV_FILE = PROJECT_ROOT / ".env"
 
+_env_loaded = False
+
+
+def load_project_env(*, override: bool = True) -> None:
+    """Load project `.env`; with override=True, file values win over shell exports."""
+    global _env_loaded
+    from dotenv import load_dotenv
+
+    if ENV_FILE.is_file():
+        load_dotenv(ENV_FILE, override=override)
+    _env_loaded = True
+
+
+load_project_env()
+
 
 def ensure_dir(path: Path) -> Path:
     path.mkdir(parents=True, exist_ok=True)

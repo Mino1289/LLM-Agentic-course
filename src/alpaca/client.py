@@ -9,11 +9,10 @@ from functools import lru_cache
 from typing import Any
 
 import httpx
-from dotenv import load_dotenv
 
-from src.paths import ENV_FILE
+from src.paths import load_project_env
 
-load_dotenv(ENV_FILE)
+load_project_env()
 
 _LOGGER = logging.getLogger("src.alpaca.client")
 

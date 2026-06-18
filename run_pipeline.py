@@ -14,27 +14,14 @@ Usage:
 """
 
 import argparse
-import os
 import subprocess
 import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(PROJECT_ROOT))
 
-
-def load_dotenv(path: Path) -> None:
-    if not path.is_file():
-        return
-    with open(path) as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            line = line.split("#")[0].strip()
-            key, _, val = line.partition("=")
-            key, val = key.strip(), val.strip().strip("\"'")
-            if not os.environ.get(key):
-                os.environ.setdefault(key, val)
+from src.paths import ENV_FILE, load_project_env
 
 
 def run(cmd: list[str], description: str) -> None:
@@ -79,7 +66,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    load_dotenv(PROJECT_ROOT / ".env")
+    load_project_env()
 
     data_dir = PROJECT_ROOT / "data"
     htm_files = sorted(data_dir.glob("*.htm")) if data_dir.is_dir() else []

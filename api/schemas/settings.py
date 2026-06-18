@@ -50,4 +50,7 @@ class ConfigResponse(BaseModel):
     chat_model: str
     embedding_provider: str
     embedding_model: str
+    chat_api_key_suffix: str | None = Field(default=None, alias="chatApiKeySuffix")
     defaults: AgentSettings
+
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)

@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from api.schemas.settings import AgentSettings, ConfigResponse
 from src.llm import build_llm_config_from_env
+from src.llm.config_builder import mask_api_key
 
 router = APIRouter(prefix="/api", tags=["config"])
 
@@ -16,5 +17,6 @@ async def get_config() -> ConfigResponse:
         chat_model=llm_config.chat_model,
         embedding_provider=llm_config.embedding_provider,
         embedding_model=llm_config.embedding_model,
+        chat_api_key_suffix=mask_api_key(llm_config.api_key),
         defaults=AgentSettings.from_env_defaults(),
     )
