@@ -34,6 +34,7 @@ interface ChatAreaProps {
     priceHigh: string;
     priceLow: string;
     pricePeriod: string;
+    priceNoData: string;
     allTickers: string;
     allSections: string;
     download: string;
@@ -119,6 +120,7 @@ export function ChatArea({
             priceHigh: artifactLabels.priceHigh,
             priceLow: artifactLabels.priceLow,
             pricePeriod: artifactLabels.pricePeriod,
+            priceNoData: artifactLabels.priceNoData,
             allTickers: artifactLabels.allTickers,
             allSections: artifactLabels.allSections,
             download: artifactLabels.download,

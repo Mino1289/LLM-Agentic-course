@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
+
+_LOGGER = logging.getLogger("api.services.artifact_mapper")
 
 from api.schemas.artifacts import (
     AgentStep,
@@ -154,6 +157,22 @@ def reports_to_artifacts(
     return results
 
 
+def _normalize_price_point(raw: Any, fallback_date: str) -> PricePoint | None:
+    if not isinstance(raw, dict):
+        return None
+    date_val = raw.get("date") or raw.get("Date") or fallback_date
+    if not date_val:
+        return None
+    close_raw = raw.get("close", raw.get("Close"))
+    try:
+        close_val = float(close_raw)
+    except (TypeError, ValueError):
+        return None
+    if not (close_val == close_val):  # NaN
+        return None
+    return PricePoint(date=str(date_val), close=close_val)
+
+
 def price_series_to_artifacts(
     price_series: list[dict[str, Any]],
 ) -> list[PriceSeriesArtifact]:
@@ -170,11 +189,18 @@ def price_series_to_artifacts(
             high_date=raw_stats.get("high_date"),
             low_date=raw_stats.get("low_date"),
         )
-        points = [
-            PricePoint(date=str(p.get("date", "")), close=float(p.get("close", 0)))
-            for p in (series.get("points") or [])
-            if p.get("date")
-        ]
+        start_date = str(series.get("start_date", ""))
+        points: list[PricePoint] = []
+        for point_idx, raw_point in enumerate(series.get("points") or []):
+            fallback_date = start_date or f"point-{point_idx + 1}"
+            normalized = _normalize_price_point(raw_point, fallback_date)
+            if normalized is not None:
+                points.append(normalized)
+        if raw_stats and not points:
+            _LOGGER.warning(
+                "Price series for %s has stats but no chart points after mapping",
+                series.get("ticker", "N/A"),
+            )
         charts.append(
             PriceSeriesArtifact(
                 id=f"p{idx}",

@@ -1,9 +1,14 @@
+import json
 import unittest
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
 
-from api.services.artifact_mapper import price_series_to_artifacts, state_to_artifacts
+from api.services.artifact_mapper import (
+    price_series_to_artifacts,
+    state_to_artifacts,
+    state_to_response,
+)
 from src.graph.tool_nodes import fetch_price_data
 
 
@@ -60,6 +65,44 @@ class PriceSeriesTests(unittest.TestCase):
 
     def test_price_series_to_artifacts_empty(self):
         self.assertEqual(price_series_to_artifacts([]), [])
+
+    def test_price_series_to_artifacts_accepts_capitalized_keys(self):
+        charts = price_series_to_artifacts(
+            [
+                {
+                    "ticker": "MSFT",
+                    "start_date": "2026-03-18",
+                    "end_date": "2026-06-18",
+                    "points": [{"Date": "2026-03-18", "Close": 390.5}],
+                    "stats": {"perf_pct": -3.08},
+                }
+            ]
+        )
+        self.assertEqual(len(charts), 1)
+        self.assertEqual(charts[0].points[0].close, 390.5)
+
+    def test_chat_response_serializes_multi_point_chart(self):
+        agent = MagicMock()
+        agent.price_max_points = 60
+        dates = pd.date_range("2026-03-18", periods=65, freq="B")
+        close = pd.Series([380 + (i % 20) - 10 for i in range(65)], index=dates)
+        frame = pd.DataFrame({"Close": close})
+
+        with patch("src.graph.tool_nodes.yf.download", return_value=frame):
+            payload = fetch_price_data(agent, ["MSFT"], "2026-03-18", "2026-06-18")
+
+        state = {
+            "price_series": payload["series"],
+            "stats": {},
+            "tool_events": [],
+            "answer": "MSFT price summary",
+        }
+        response = state_to_response(state, "conv-1", "run-1", locale="fr")
+        payload_json = json.loads(response.model_dump_json(by_alias=True))
+        charts = payload_json["artifacts"]["priceCharts"]
+        self.assertEqual(len(charts), 1)
+        self.assertGreaterEqual(len(charts[0]["points"]), 2)
+        self.assertIsNotNone(charts[0]["stats"]["perfPct"])
 
 
 if __name__ == "__main__":

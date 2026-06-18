@@ -38,6 +38,7 @@
     "priceHigh": "Plus haut",
     "priceLow": "Plus bas",
     "pricePeriod": "Période",
+    "priceNoData": "Données insuffisantes pour tracer le graphique",
     "allTickers": "Tous tickers",
     "allSections": "Toutes sections",
     "download": "Télécharger"

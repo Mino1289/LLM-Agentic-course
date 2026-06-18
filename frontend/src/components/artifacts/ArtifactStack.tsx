@@ -22,6 +22,7 @@ interface ArtifactStackProps {
     priceHigh: string;
     priceLow: string;
     pricePeriod: string;
+    priceNoData: string;
     allTickers: string;
     allSections: string;
     download: string;
@@ -46,6 +47,7 @@ export function ArtifactStack({ artifacts, labels }: ArtifactStackProps) {
     high: labels.priceHigh,
     low: labels.priceLow,
     period: labels.pricePeriod,
+    noData: labels.priceNoData,
   };
 
   return (

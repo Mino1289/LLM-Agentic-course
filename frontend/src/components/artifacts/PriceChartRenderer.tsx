@@ -1,6 +1,6 @@
 "use client";
 
-import type { PriceSeriesArtifact } from "@/lib/types/chat";
+import type { PricePoint, PriceSeriesArtifact } from "@/lib/types/chat";
 import { Accordion } from "@/components/ui/Accordion";
 
 interface PriceChartRendererProps {
@@ -14,11 +14,26 @@ interface PriceChartRendererProps {
     high: string;
     low: string;
     period: string;
+    noData?: string;
   };
   defaultOpen?: boolean;
 }
 
-function buildPath(
+const CHART_WIDTH = 320;
+const CHART_HEIGHT = 120;
+const CHART_PADDING = 8;
+
+function normalizePoints(points: PricePoint[] | undefined): { date: string; close: number }[] {
+  if (!points?.length) return [];
+  return points
+    .map((point, index) => ({
+      date: point.date || `point-${index + 1}`,
+      close: Number(point.close),
+    }))
+    .filter((point) => Number.isFinite(point.close));
+}
+
+function buildLinePath(
   points: { close: number }[],
   width: number,
   height: number,
@@ -41,6 +56,35 @@ function buildPath(
     .join(" ");
 }
 
+function buildAreaPath(
+  points: { close: number }[],
+  width: number,
+  height: number,
+  padding: number,
+): string {
+  const linePath = buildLinePath(points, width, height, padding);
+  if (!linePath) return "";
+  const innerW = width - padding * 2;
+  const innerH = height - padding * 2;
+  const baseline = padding + innerH;
+  const lastX = padding + innerW;
+  return `${linePath} L${lastX.toFixed(1)},${baseline.toFixed(1)} L${padding.toFixed(1)},${baseline.toFixed(1)} Z`;
+}
+
+function singlePointCoords(
+  point: { close: number },
+  width: number,
+  height: number,
+  padding: number,
+): { x: number; y: number } {
+  const innerW = width - padding * 2;
+  const innerH = height - padding * 2;
+  return {
+    x: padding + innerW / 2,
+    y: padding + innerH / 2,
+  };
+}
+
 function formatPct(value: number | undefined, locale: string) {
   if (value === undefined || Number.isNaN(value)) return "—";
   return `${value.toLocaleString(locale, { maximumFractionDigits: 2 })}%`;
@@ -61,7 +105,14 @@ function PriceChartCard({
   locale: string;
 }) {
   const stats = chart.stats;
-  const path = buildPath(chart.points, 320, 120, 8);
+  const points = normalizePoints(chart.points);
+  const linePath = buildLinePath(points, CHART_WIDTH, CHART_HEIGHT, CHART_PADDING);
+  const areaPath = buildAreaPath(points, CHART_WIDTH, CHART_HEIGHT, CHART_PADDING);
+  const noDataLabel = labels.noData ?? "Données insuffisantes pour tracer le graphique";
+  const singlePoint =
+    points.length === 1
+      ? singlePointCoords(points[0], CHART_WIDTH, CHART_HEIGHT, CHART_PADDING)
+      : null;
 
   return (
     <div className="price-chart-card">
@@ -73,11 +124,37 @@ function PriceChartCard({
       </div>
       <svg
         className="price-chart-svg"
-        viewBox="0 0 320 120"
+        viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
         role="img"
         aria-label={`${chart.ticker} price chart`}
       >
-        <path d={path} className="price-chart-line" fill="none" />
+        {points.length >= 2 && areaPath ? (
+          <path d={areaPath} className="price-chart-area" />
+        ) : null}
+        {points.length >= 2 && linePath ? (
+          <path
+            d={linePath}
+            fill="none"
+            stroke="var(--accent)"
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            vectorEffect="non-scaling-stroke"
+          />
+        ) : null}
+        {singlePoint ? (
+          <circle cx={singlePoint.x} cy={singlePoint.y} r={4} fill="var(--accent)" />
+        ) : null}
+        {points.length === 0 ? (
+          <text
+            x={CHART_WIDTH / 2}
+            y={CHART_HEIGHT / 2}
+            textAnchor="middle"
+            className="price-chart-empty"
+          >
+            {noDataLabel}
+          </text>
+        ) : null}
       </svg>
       <div className="price-chart-stats">
         <div>

@@ -100,7 +100,7 @@ async def stream_chat(
         )
         yield {
             "type": "human_review_required",
-            "payload": json.loads(payload.model_dump_json()),
+            "payload": json.loads(payload.model_dump_json(by_alias=True)),
         }
         return
 
@@ -122,7 +122,7 @@ async def stream_chat(
             else None,
         },
     )
-    yield {"type": "done", "payload": json.loads(response.model_dump_json())}
+    yield {"type": "done", "payload": json.loads(response.model_dump_json(by_alias=True))}
 
 
 async def resume_chat(run_id: str, approved: bool, locale: str = "fr") -> ChatResponse:

@@ -38,6 +38,7 @@
     "priceHigh": "High",
     "priceLow": "Low",
     "pricePeriod": "Period",
+    "priceNoData": "Not enough data to render the chart",
     "allTickers": "All tickers",
     "allSections": "All sections",
     "download": "Download"

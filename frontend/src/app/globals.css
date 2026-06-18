@@ -498,14 +498,25 @@ h4 {
 
   .price-chart-svg {
     width: 100%;
+    min-height: 120px;
     height: auto;
     border-radius: var(--radius-sm);
     background: color-mix(in oklch, var(--surface) 70%, transparent);
   }
 
+  .price-chart-area {
+    fill: color-mix(in oklch, var(--accent) 18%, transparent);
+    stroke: none;
+  }
+
   .price-chart-line {
     stroke: var(--accent);
     stroke-width: 2;
+  }
+
+  .price-chart-empty {
+    fill: var(--meta);
+    font-size: 11px;
   }
 
   .price-chart-stats {

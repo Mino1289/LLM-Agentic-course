@@ -103,6 +103,7 @@ export function AppShell() {
     priceHigh: tArtifacts("priceHigh"),
     priceLow: tArtifacts("priceLow"),
     pricePeriod: tArtifacts("pricePeriod"),
+    priceNoData: tArtifacts("priceNoData"),
     allTickers: tArtifacts("allTickers"),
     allSections: tArtifacts("allSections"),
     download: tArtifacts("download"),
