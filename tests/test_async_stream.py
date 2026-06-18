@@ -29,7 +29,7 @@ def _make_agent_with_mock_graph():
     mock_graph = unittest.mock.MagicMock()
     mock_graph.invoke.return_value = fake_state
 
-    async def fake_ainvoke(state):
+    async def fake_ainvoke(state, config=None):
         return fake_state
 
     mock_graph.ainvoke = fake_ainvoke

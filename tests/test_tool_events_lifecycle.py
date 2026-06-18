@@ -74,9 +74,10 @@ class ToolEventLifecycleTests(unittest.TestCase):
         chunks: list[str] = []
         metadatas: list[dict[str, Any]] = []
         price_context = ""
+        price_series: list[dict[str, Any]] = []
         artifacts: list[dict[str, Any]] = []
 
-        chunks, metadatas, price_context, artifacts, stats = _merge_tool_side_effects(
+        chunks, metadatas, price_context, price_series, artifacts, stats = _merge_tool_side_effects(
             "sec_filings_rag_tool",
             {
                 "final_chunks": ["nvda risk"],
@@ -97,11 +98,12 @@ class ToolEventLifecycleTests(unittest.TestCase):
             final_chunks=chunks,
             final_metadatas=metadatas,
             price_context=price_context,
+            price_series=price_series,
             report_artifacts=artifacts,
             stats=stats,
         )
 
-        chunks, metadatas, price_context, artifacts, stats = _merge_tool_side_effects(
+        chunks, metadatas, price_context, price_series, artifacts, stats = _merge_tool_side_effects(
             "sec_filings_rag_tool",
             {
                 "final_chunks": ["amd risk"],
@@ -122,11 +124,12 @@ class ToolEventLifecycleTests(unittest.TestCase):
             final_chunks=chunks,
             final_metadatas=metadatas,
             price_context=price_context,
+            price_series=price_series,
             report_artifacts=artifacts,
             stats=stats,
         )
 
-        chunks, metadatas, price_context, artifacts, stats = _merge_tool_side_effects(
+        chunks, metadatas, price_context, price_series, artifacts, stats = _merge_tool_side_effects(
             "sec_filings_rag_tool",
             {
                 "final_chunks": ["nvda risk"],
@@ -147,6 +150,7 @@ class ToolEventLifecycleTests(unittest.TestCase):
             final_chunks=chunks,
             final_metadatas=metadatas,
             price_context=price_context,
+            price_series=price_series,
             report_artifacts=artifacts,
             stats=stats,
         )

@@ -36,29 +36,9 @@ class AsyncNodeStructureTests(unittest.TestCase):
             "finalize_from_agent_state must be `async def`",
         )
 
-    def test_memory_read_node_is_coroutine(self):
-        from src.graph.memory_nodes import memory_read_node
-
-        self.assertTrue(
-            inspect.iscoroutinefunction(memory_read_node),
-            "memory_read_node must be `async def`",
-        )
-
-    def test_memory_write_node_is_coroutine(self):
-        from src.graph.memory_nodes import memory_write_node
-
-        self.assertTrue(
-            inspect.iscoroutinefunction(memory_write_node),
-            "memory_write_node must be `async def`",
-        )
-
-    def test_gc_node_is_coroutine(self):
-        from src.graph.memory_nodes import gc_node
-
-        self.assertTrue(
-            inspect.iscoroutinefunction(gc_node),
-            "gc_node must be `async def`",
-        )
+    # NOTE: tests memory_read_node / memory_write_node / gc_node supprimés —
+    # ces nœuds async distincts ont été consolidés en un seul nœud synchrone
+    # `memory_context_node` (src/graph/memory_nodes.py).
 
     def test_prepare_query_node_is_coroutine(self):
         from src.graph.prepare_node import prepare_query_node
@@ -116,7 +96,6 @@ class AsyncNodeThreadWrappingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_agent_node_calls_ainvoke_with_tools_stream(self):
         # agent_node now uses ainvoke_with_tools_stream (async, no to_thread wrap)
-        from src.nodes import agent_nodes
         from src.graph.agent_node import agent_node
         from src.llm.provider import LLMStreamChunk
 
@@ -214,46 +193,12 @@ class AsyncNodeThreadWrappingTests(unittest.IsolatedAsyncioTestCase):
             "tools_node must wrap execute_tool in asyncio.to_thread for sync tools",
         )
 
-    async def test_memory_read_node_wraps_memory_store_in_to_thread(self):
-        from src.nodes import memory_nodes
-        from src.graph.memory_nodes import memory_read_node
-
-        wrapped: list = []
-        spy = await self._spy_to_thread(wrapped, exc=asyncio.CancelledError())
-
-        class _StubStore:
-            def get_summary(self, *a, **kw):
-                return ""
-
-            def get_window(self, *a, **kw):
-                return []
-
-        _stub_store = _StubStore()
-
-        class _StubAgent:
-            memory_store = _stub_store
-
-        state = {"conversation_id": "x", "query": "q", "messages": []}
-        with unittest.mock.patch.object(
-            memory_nodes.asyncio, "to_thread", side_effect=spy
-        ):
-            try:
-                await memory_read_node(_StubAgent(), state)
-            except asyncio.CancelledError:
-                pass
-        # At least one wrapped function should be a bound method of _stub_store
-        bound_names = [
-            getattr(f, "__name__", "")
-            for f in wrapped
-            if getattr(f, "__self__", None) is _stub_store
-        ]
-        self.assertTrue(
-            any(n in {"get_summary", "get_window"} for n in bound_names),
-            f"memory_read_node must wrap memory_store.get_summary/get_window; got {bound_names}",
-        )
+    # NOTE: test_memory_read_node_wraps_memory_store_in_to_thread supprimé —
+    # le nœud `memory_read_node` n'existe plus (mémoire consolidée dans
+    # `memory_context_node`).
 
     async def test_multi_retrieve_node_wraps_rag_retrieve_in_to_thread(self):
-        from src.nodes import retrieval_node
+        from src.graph import retrieval_node
         from src.graph.retrieval_node import multi_retrieve_node
 
         wrapped: list = []

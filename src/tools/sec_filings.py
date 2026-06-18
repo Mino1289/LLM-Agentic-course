@@ -68,6 +68,11 @@ async def run_sec_filings_rag(
     retrieve_result = await multi_retrieve_node(agent, rag_state)
     rag_state.update(retrieve_result)
     candidates = rag_state.get("candidate_indices", [])
+    _LOGGER.info(
+        "retrieve took %.2fs (candidates=%d)",
+        time.perf_counter() - retrieve_t0,
+        len(candidates),
+    )
     if not candidates:
         return {
             "text": format_rag_excerpts([], []),
@@ -76,7 +81,13 @@ async def run_sec_filings_rag(
             "stats": rag_state.get("stats", {}),
         }
 
+    rerank_t0 = time.perf_counter()
     top_indices = await _balanced_rerank_indices(agent, rag_state, candidates)
+    _LOGGER.info(
+        "rerank took %.2fs (kept=%d)",
+        time.perf_counter() - rerank_t0,
+        len(top_indices),
+    )
     final_chunks = [agent.rag.documents[idx] for idx in top_indices]
     final_metadatas = [agent.rag.doc_metadata[idx] for idx in top_indices]
     stats = rag_state.get("stats", {})
