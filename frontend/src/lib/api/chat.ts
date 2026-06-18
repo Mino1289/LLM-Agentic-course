@@ -148,12 +148,17 @@ export async function resumeTrade(
   runId: string,
   approved: boolean,
   locale: string,
+  conversationId?: string,
 ): Promise<ChatResponsePayload> {
   return apiFetch<ChatResponsePayload>(
     `/api/chat/resume?locale=${encodeURIComponent(locale)}`,
     {
       method: "POST",
-      body: JSON.stringify({ run_id: runId, approved }),
+      body: JSON.stringify({
+        run_id: runId,
+        approved,
+        conversation_id: conversationId,
+      }),
     },
   );
 }

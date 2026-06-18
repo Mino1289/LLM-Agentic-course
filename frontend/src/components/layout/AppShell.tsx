@@ -66,27 +66,35 @@ export function AppShell() {
   };
 
   const handleApprove = async () => {
-    const result = await tradeApproval.approve();
-    if (result) {
-      appendAssistantMessage({
-        id: `assistant-${Date.now()}`,
-        role: "assistant",
-        content: result.content,
-        timestamp: result.timestamp,
-        artifacts: result.artifacts,
-      });
+    try {
+      const result = await tradeApproval.approve();
+      if (result) {
+        appendAssistantMessage({
+          id: `assistant-${Date.now()}`,
+          role: "assistant",
+          content: result.content,
+          timestamp: result.timestamp,
+          artifacts: result.artifacts,
+        });
+      }
+    } catch {
+      // submitDecision handles errors internally
     }
   };
 
   const handleCancel = async () => {
-    const result = await tradeApproval.cancel();
-    if (result) {
-      appendAssistantMessage({
-        id: `assistant-${Date.now()}`,
-        role: "assistant",
-        content: result.content,
-        timestamp: result.timestamp,
-      });
+    try {
+      const result = await tradeApproval.cancel();
+      if (result) {
+        appendAssistantMessage({
+          id: `assistant-${Date.now()}`,
+          role: "assistant",
+          content: result.content,
+          timestamp: result.timestamp,
+        });
+      }
+    } catch {
+      // submitDecision handles errors internally
     }
   };
 
@@ -147,6 +155,9 @@ export function AppShell() {
       <div className="main-panel">
         <Topbar title={conversationTitle} onToggleSidebar={toggleSidebar} />
         {error ? <div className="px-6 py-2 text-xs text-[var(--danger)]">{error}</div> : null}
+        {tradeApproval.error ? (
+          <div className="px-6 py-2 text-xs text-[var(--danger)]">{tradeApproval.error}</div>
+        ) : null}
         {isLoading ? (
           <div className="chat-empty">
             <h2>...</h2>

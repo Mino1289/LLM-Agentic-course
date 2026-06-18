@@ -105,6 +105,11 @@ async def chat_stream(body: ChatStreamRequest) -> StreamingResponse:
 @router.post("/chat/resume", response_model=ChatResponse)
 async def chat_resume(body: ChatResumeRequest, locale: str = "fr") -> ChatResponse:
     try:
-        return await resume_chat(body.run_id, body.approved, locale)
+        return await resume_chat(
+            body.run_id,
+            body.approved,
+            locale,
+            conversation_id=body.conversation_id,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

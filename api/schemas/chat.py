@@ -24,6 +24,7 @@ class ChatStreamRequest(BaseModel):
 class ChatResumeRequest(BaseModel):
     run_id: str
     approved: bool
+    conversation_id: str | None = None
 
 
 class ChatResponse(BaseModel):

@@ -21,6 +21,44 @@ def _format_time() -> str:
     return datetime.now(timezone.utc).strftime("%H:%M")
 
 
+def _idempotent_cancel_response(
+    run_id: str,
+    conversation_id: str | None,
+    locale: str,
+) -> ChatResponse:
+    """Cancel is safe to repeat when the pending run was already consumed or lost."""
+    answer = "Ordre annulé par l'utilisateur."
+    conv_id = conversation_id or ""
+    if conv_id and run_store.get_conversation(conv_id) is not None:
+        assistant_msg = message_dto_from_assistant(
+            {"answer": answer, "human_review_pending": False},
+            message_id=str(uuid.uuid4()),
+            timestamp=_format_time(),
+            locale=locale,
+        )
+        run_store.append_message(
+            conv_id,
+            {
+                "role": "assistant",
+                "content": assistant_msg.content,
+                "artifacts": assistant_msg.artifacts.model_dump(by_alias=True)
+                if assistant_msg.artifacts
+                else None,
+            },
+        )
+        return ChatResponse(
+            conversation_id=conv_id,
+            run_id=run_id,
+            answer=answer,
+            message=assistant_msg,
+        )
+    return ChatResponse(
+        conversation_id=conv_id,
+        run_id=run_id,
+        answer=answer,
+    )
+
+
 async def stream_chat(
     conversation_id: str,
     message: str,
@@ -125,9 +163,16 @@ async def stream_chat(
     yield {"type": "done", "payload": json.loads(response.model_dump_json(by_alias=True))}
 
 
-async def resume_chat(run_id: str, approved: bool, locale: str = "fr") -> ChatResponse:
+async def resume_chat(
+    run_id: str,
+    approved: bool,
+    locale: str = "fr",
+    conversation_id: str | None = None,
+) -> ChatResponse:
     pending = run_store.pop_pending_run(run_id)
     if pending is None:
+        if not approved:
+            return _idempotent_cancel_response(run_id, conversation_id, locale)
         raise ValueError("Pending run not found")
 
     hub = agent_factory.get_hub_graph(pending.settings)

@@ -66,7 +66,7 @@ function payloadToMessage(
 export function useChat(
   locale: AppLocale,
   settings: AgentSettings,
-  onHumanReview?: (runId: string, messageId: string) => void,
+  onHumanReview?: (runId: string, messageId: string, conversationId: string) => void,
 ) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
@@ -234,7 +234,7 @@ export function useChat(
               setMessages((prev) =>
                 prev.map((msg) => (msg.id === assistantId ? finalMessage : msg)),
               );
-              onHumanReview?.(payload.run_id, assistantId);
+              onHumanReview?.(payload.run_id, assistantId, payload.conversation_id);
               void refreshHistory();
             },
             onError: (message) => {
