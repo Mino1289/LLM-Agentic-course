@@ -36,6 +36,7 @@ class GraphState(TypedDict, total=False):
     off_topic_blocked: bool
     clarification_question: str
     price_context: str
+    price_series: list[dict[str, Any]]
     price_tickers: list[str]
     price_window_start: str
     price_window_end: str

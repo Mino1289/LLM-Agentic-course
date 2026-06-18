@@ -169,6 +169,7 @@ async def analyze_parallel_node(agent: Any, state: HubSpokeState) -> HubSpokeSta
     merged: dict[str, Any] = {}
     all_events: list[dict[str, Any]] = []
     merged_stats: dict[str, Any] = dict(state.get("stats") or {})
+    merged_price_series: list[dict[str, Any]] = list(state.get("price_series") or [])
     all_chunks: list[str] = []
     all_metadatas: list[dict[str, Any]] = []
     for result in results:
@@ -178,6 +179,12 @@ async def analyze_parallel_node(agent: Any, state: HubSpokeState) -> HubSpokeSta
         result_stats = result.pop("stats", {})
         if result_stats:
             merged_stats.update(result_stats)
+            if result_stats.get("price_series"):
+                from src.graph.tool_execution_node import _merge_price_series
+
+                merged_price_series = _merge_price_series(
+                    merged_price_series, result_stats.get("price_series") or []
+                )
             chunks = result_stats.pop("final_chunks", [])
             metadatas = result_stats.pop("final_metadatas", [])
             if chunks:
@@ -186,6 +193,8 @@ async def analyze_parallel_node(agent: Any, state: HubSpokeState) -> HubSpokeSta
         merged.update(result)
     merged["spoke_events"] = all_events
     merged["stats"] = merged_stats
+    if merged_price_series:
+        merged["price_series"] = merged_price_series
     if all_chunks:
         merged["final_chunks"] = all_chunks
         merged["final_metadatas"] = all_metadatas

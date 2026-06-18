@@ -38,6 +38,19 @@ async def run_spoke_agent(
     tool_call_count = 0
     accumulated_chunks: list[str] = []
     accumulated_metadatas: list[dict[str, Any]] = []
+    accumulated_price_series: list[dict[str, Any]] = []
+
+    def _stats_payload(**extra: Any) -> dict[str, Any]:
+        payload = {
+            "spoke_llm_iterations": extra.pop("spoke_llm_iterations", 0),
+            "spoke_tool_calls": tool_call_count,
+            "final_chunks": accumulated_chunks,
+            "final_metadatas": accumulated_metadatas,
+        }
+        if accumulated_price_series:
+            payload["price_series"] = list(accumulated_price_series)
+        payload.update(extra)
+        return payload
 
     for iteration in range(max_iterations):
         try:
@@ -47,20 +60,16 @@ async def run_spoke_agent(
             )
         except asyncio.TimeoutError:
             _LOGGER.warning("Spoke LLM timed out after %ss", LLM_TIMEOUT)
-            return f"Analyse interrompue (timeout LLM après {LLM_TIMEOUT}s).", {
-                "spoke_llm_iterations": iteration + 1,
-                "spoke_tool_calls": tool_call_count,
-                "final_chunks": accumulated_chunks,
-                "final_metadatas": accumulated_metadatas,
-            }
+            return (
+                f"Analyse interrompue (timeout LLM après {LLM_TIMEOUT}s).",
+                _stats_payload(spoke_llm_iterations=iteration + 1),
+            )
         except Exception as e:
             _LOGGER.warning("Spoke LLM error: %s", e)
-            return f"Erreur LLM: {e}", {
-                "spoke_llm_iterations": iteration + 1,
-                "spoke_tool_calls": tool_call_count,
-                "final_chunks": accumulated_chunks,
-                "final_metadatas": accumulated_metadatas,
-            }
+            return (
+                f"Erreur LLM: {e}",
+                _stats_payload(spoke_llm_iterations=iteration + 1),
+            )
 
         if final_tool_calls:
             messages.append(
@@ -88,6 +97,13 @@ async def run_spoke_agent(
                         accumulated_metadatas.extend(
                             outcome.result["final_metadatas"] or []
                         )
+                    if outcome.result and outcome.result.get("price_series"):
+                        from src.graph.tool_execution_node import _merge_price_series
+
+                        accumulated_price_series[:] = _merge_price_series(
+                            accumulated_price_series,
+                            outcome.result.get("price_series") or [],
+                        )
                 except asyncio.TimeoutError:
                     _LOGGER.warning("Tool %s timed out", tc.name)
                     messages.append(
@@ -111,19 +127,9 @@ async def run_spoke_agent(
                         }
                     )
         else:
-            return full_text.strip(), {
-                "spoke_llm_iterations": iteration + 1,
-                "spoke_tool_calls": tool_call_count,
-                "final_chunks": accumulated_chunks,
-                "final_metadatas": accumulated_metadatas,
-            }
+            return full_text.strip(), _stats_payload(spoke_llm_iterations=iteration + 1)
 
-    return "Max iterations atteint.", {
-        "spoke_llm_iterations": max_iterations,
-        "spoke_tool_calls": tool_call_count,
-        "final_chunks": accumulated_chunks,
-        "final_metadatas": accumulated_metadatas,
-    }
+    return "Max iterations atteint.", _stats_payload(spoke_llm_iterations=max_iterations)
 
 
 async def run_spoke_agent_stream(

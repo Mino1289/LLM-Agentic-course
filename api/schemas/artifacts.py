@@ -33,6 +33,35 @@ class StatItem(BaseModel):
     value: str
 
 
+class PricePoint(BaseModel):
+    date: str
+    close: float
+
+
+class PriceSeriesStats(BaseModel):
+    perf_pct: float | None = None
+    vol_ann_pct: float | None = None
+    max_drawdown_pct: float | None = None
+    close_min: float | None = None
+    close_max: float | None = None
+    close_last: float | None = None
+    high_date: str | None = None
+    low_date: str | None = None
+
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+
+class PriceSeriesArtifact(BaseModel):
+    id: str
+    ticker: str
+    start_date: str = Field(alias="startDate")
+    end_date: str = Field(alias="endDate")
+    points: list[PricePoint] = []
+    stats: PriceSeriesStats | None = None
+
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+
 class TradeProposal(BaseModel):
     ticker: str
     side: str
@@ -52,6 +81,7 @@ class MessageArtifacts(BaseModel):
     sources: list[SourceItem] = []
     reports: list[ReportArtifact] = []
     stats: list[StatItem] = []
+    price_charts: list[PriceSeriesArtifact] = Field(default_factory=list, alias="priceCharts")
     trade: TradeProposal | None = None
 
     model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)

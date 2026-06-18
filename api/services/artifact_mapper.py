@@ -6,6 +6,9 @@ from typing import Any
 from api.schemas.artifacts import (
     AgentStep,
     MessageArtifacts,
+    PricePoint,
+    PriceSeriesArtifact,
+    PriceSeriesStats,
     ReportArtifact,
     SourceItem,
     StatItem,
@@ -151,6 +154,40 @@ def reports_to_artifacts(
     return results
 
 
+def price_series_to_artifacts(
+    price_series: list[dict[str, Any]],
+) -> list[PriceSeriesArtifact]:
+    charts: list[PriceSeriesArtifact] = []
+    for idx, series in enumerate(price_series, start=1):
+        raw_stats = series.get("stats") or {}
+        stats = PriceSeriesStats(
+            perf_pct=raw_stats.get("perf_pct"),
+            vol_ann_pct=raw_stats.get("vol_ann_pct"),
+            max_drawdown_pct=raw_stats.get("max_drawdown_pct"),
+            close_min=raw_stats.get("close_min"),
+            close_max=raw_stats.get("close_max"),
+            close_last=raw_stats.get("close_last"),
+            high_date=raw_stats.get("high_date"),
+            low_date=raw_stats.get("low_date"),
+        )
+        points = [
+            PricePoint(date=str(p.get("date", "")), close=float(p.get("close", 0)))
+            for p in (series.get("points") or [])
+            if p.get("date")
+        ]
+        charts.append(
+            PriceSeriesArtifact(
+                id=f"p{idx}",
+                ticker=str(series.get("ticker", "N/A")),
+                start_date=str(series.get("start_date", "")),
+                end_date=str(series.get("end_date", "")),
+                points=points,
+                stats=stats,
+            )
+        )
+    return charts
+
+
 def _enrich_pm_decision(state: dict[str, Any]) -> dict[str, Any]:
     return enrich_pm_decision(state)
 
@@ -192,6 +229,7 @@ def state_to_artifacts(state: dict[str, Any], locale: str = "fr") -> MessageArti
     tool_events = state.get("tool_events") or []
     stats = state.get("stats") or {}
     report_artifacts = state.get("report_artifacts") or []
+    price_series = state.get("price_series") or []
 
     trade = None
     if state.get("human_review_pending"):
@@ -202,6 +240,7 @@ def state_to_artifacts(state: dict[str, Any], locale: str = "fr") -> MessageArti
         sources=build_sources(chunks, metadatas),
         reports=reports_to_artifacts(report_artifacts),
         stats=stats_to_items(stats, locale),
+        price_charts=price_series_to_artifacts(price_series),
         trade=trade,
     )
 

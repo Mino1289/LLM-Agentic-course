@@ -159,6 +159,24 @@ def _merge_rag_stats(stats, tool_stats, final_chunks, final_metadatas):
     return merged
 
 
+def _merge_price_series(
+    existing: list[dict[str, Any]], new_series: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    if not new_series:
+        return existing
+    seen = {
+        (s.get("ticker"), s.get("start_date"), s.get("end_date")) for s in existing
+    }
+    merged = list(existing)
+    for item in new_series:
+        key = (item.get("ticker"), item.get("start_date"), item.get("end_date"))
+        if key in seen:
+            continue
+        merged.append(item)
+        seen.add(key)
+    return merged
+
+
 def _merge_tool_side_effects(
     tool_name,
     result,
@@ -166,11 +184,19 @@ def _merge_tool_side_effects(
     final_chunks,
     final_metadatas,
     price_context,
+    price_series,
     report_artifacts,
     stats,
 ):
     if not result:
-        return final_chunks, final_metadatas, price_context, report_artifacts, stats
+        return (
+            final_chunks,
+            final_metadatas,
+            price_context,
+            price_series,
+            report_artifacts,
+            stats,
+        )
     if tool_name == "sec_filings_rag_tool":
         final_chunks, final_metadatas = _merge_rag_context(
             final_chunks,
@@ -182,9 +208,14 @@ def _merge_tool_side_effects(
             stats, result.get("stats") or {}, final_chunks, final_metadatas
         )
         stats["rag_tool_used"] = True
-    if tool_name == "market_price_tool" and result.get("price_context"):
-        price_context = result["price_context"]
-        stats["price_tool_used"] = True
+    if tool_name == "market_price_tool":
+        if result.get("price_context"):
+            price_context = result["price_context"]
+            stats["price_tool_used"] = True
+        if result.get("price_series"):
+            price_series = _merge_price_series(
+                price_series, result.get("price_series") or []
+            )
     if tool_name == "export_investment_report_tool" and result.get("path"):
         report_artifacts.append(
             {
@@ -200,7 +231,14 @@ def _merge_tool_side_effects(
         stats.update(result.get("stats") or {})
     if tool_name in ("portfolio_info_tool", "place_trade_tool", "close_position_tool"):
         stats["alpaca_tool_used"] = True
-    return final_chunks, final_metadatas, price_context, report_artifacts, stats
+    return (
+        final_chunks,
+        final_metadatas,
+        price_context,
+        price_series,
+        report_artifacts,
+        stats,
+    )
 
 
 @traceable(name="tools_node")
@@ -211,6 +249,7 @@ async def tools_node(agent: Any, state: GraphState) -> GraphState:
     final_chunks = list(state.get("final_chunks") or [])
     final_metadatas = list(state.get("final_metadatas") or [])
     price_context = state.get("price_context", "")
+    price_series = list(state.get("price_series") or [])
     report_artifacts = list(state.get("report_artifacts") or [])
     tool_events = list(state.get("tool_events") or [])
     executor = ToolExecutor(agent=agent, state=state)
@@ -229,13 +268,14 @@ async def tools_node(agent: Any, state: GraphState) -> GraphState:
         lc_messages.append(outcome.message)
         if outcome.event.get("status") == "completed":
             completed_signatures.add(signature)
-        final_chunks, final_metadatas, price_context, report_artifacts, stats = (
+        final_chunks, final_metadatas, price_context, price_series, report_artifacts, stats = (
             _merge_tool_side_effects(
                 outcome.tool_call.name,
                 outcome.result,
                 final_chunks=final_chunks,
                 final_metadatas=final_metadatas,
                 price_context=price_context,
+                price_series=price_series,
                 report_artifacts=report_artifacts,
                 stats=stats,
             )
@@ -247,6 +287,7 @@ async def tools_node(agent: Any, state: GraphState) -> GraphState:
         "final_chunks": final_chunks,
         "final_metadatas": final_metadatas,
         "price_context": price_context,
+        "price_series": price_series,
         "report_artifacts": report_artifacts,
         "tool_events": tool_events,
         "stats": stats,

@@ -217,11 +217,13 @@ def format_price_index(idx: Any) -> str:
     return str(idx)
 
 
-def fetch_price_context(
+def fetch_price_data(
     agent: Any, tickers: list[str], start_date: str, end_date: str
-) -> str:
-    lines = []
+) -> dict[str, Any]:
+    lines: list[str] = []
+    series: list[dict[str, Any]] = []
     per_ticker_point_budget = max(5, agent.price_max_points // max(1, len(tickers)))
+    chart_point_cap = min(max(per_ticker_point_budget, 30), 120)
     for ticker in tickers:
         try:
             df = yf.download(
@@ -241,6 +243,8 @@ def fetch_price_context(
         perf = ((close.iloc[-1] / close.iloc[0]) - 1) * 100 if len(close) > 1 else 0.0
         vol = returns.std() * (252**0.5) * 100 if not returns.empty else 0.0
         drawdown = ((close / close.cummax()) - 1).min() * 100 if len(close) > 1 else 0.0
+        high_idx = close.idxmax()
+        low_idx = close.idxmin()
         lines.append(
             f"- {ticker}: perf={perf:.2f}%, vol_ann={vol:.2f}%, max_drawdown={drawdown:.2f}%, close_min={close.min():.2f}, close_max={close.max():.2f}, close_last={close.iloc[-1]:.2f}"
         )
@@ -251,6 +255,37 @@ def fetch_price_context(
             for idx, val in sampled.items()
         )
         lines.append(f"  points[{ticker}]: {points}")
+        chart_step = max(1, len(close) // chart_point_cap)
+        chart_close = close.iloc[::chart_step] if len(close) > chart_point_cap else close
+        chart_points = [
+            {"date": format_price_index(idx), "close": round(float(val), 2)}
+            for idx, val in chart_close.items()
+        ]
+        series.append(
+            {
+                "ticker": ticker,
+                "start_date": start_date,
+                "end_date": end_date,
+                "points": chart_points,
+                "stats": {
+                    "perf_pct": round(float(perf), 2),
+                    "vol_ann_pct": round(float(vol), 2),
+                    "max_drawdown_pct": round(float(drawdown), 2),
+                    "close_min": round(float(close.min()), 2),
+                    "close_max": round(float(close.max()), 2),
+                    "close_last": round(float(close.iloc[-1]), 2),
+                    "high_date": format_price_index(high_idx),
+                    "low_date": format_price_index(low_idx),
+                },
+            }
+        )
     if not lines:
-        return ""
-    return f"Fenetre prix: {start_date} -> {end_date}\n" + "\n".join(lines)
+        return {"text": "", "series": []}
+    text = f"Fenetre prix: {start_date} -> {end_date}\n" + "\n".join(lines)
+    return {"text": text, "series": series}
+
+
+def fetch_price_context(
+    agent: Any, tickers: list[str], start_date: str, end_date: str
+) -> str:
+    return fetch_price_data(agent, tickers, start_date, end_date).get("text", "")

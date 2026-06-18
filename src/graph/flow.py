@@ -103,6 +103,7 @@ class FinanceLangGraphAgent:
             "final_chunks": [],
             "final_metadatas": [],
             "price_context": "",
+            "price_series": [],
             "report_artifacts": [],
             "tool_events": [],
             "stats": {},

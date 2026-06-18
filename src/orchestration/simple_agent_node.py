@@ -50,6 +50,7 @@ async def simple_agent_node(agent: Any, state: HubSpokeState) -> HubSpokeState:
             "answer": answer,
             "tool_events": tool_events,
             "stats": result_state.get("stats", {}),
+            "price_series": list(result_state.get("price_series") or []),
             "spoke_events": spoke_events,
             "conversation_id": result_state.get("conversation_id"),
             "lc_messages": list(result_state.get("lc_messages") or []),

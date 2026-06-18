@@ -32,7 +32,7 @@ def run_market_price_tool(
     agent: Any,
 ) -> dict[str, Any]:
     from src.tools.descriptions import _tracked_tickers_text
-    from src.graph.tool_nodes import fetch_price_context
+    from src.graph.tool_nodes import fetch_price_data
 
     normalized = _normalize_tickers(args.tickers)
     start_date, end_date = _widen_single_day(args.start_date, args.end_date)
@@ -40,11 +40,18 @@ def run_market_price_tool(
         return {
             "text": f"No valid tickers provided. Use {_tracked_tickers_text()}.",
             "price_context": "",
+            "price_series": [],
         }
-    summary = fetch_price_context(agent, normalized, start_date, end_date)
+    payload = fetch_price_data(agent, normalized, start_date, end_date)
+    summary = payload.get("text", "")
     if not summary:
         return {
             "text": f"No price data for {normalized} between {start_date} and {end_date}.",
             "price_context": "",
+            "price_series": [],
         }
-    return {"text": summary, "price_context": summary}
+    return {
+        "text": summary,
+        "price_context": summary,
+        "price_series": payload.get("series") or [],
+    }
