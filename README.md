@@ -3,6 +3,7 @@
 Assistant financier conversationnel pour le cours **8INF829** — du RAG sur rapports SEC à l'orchestration multi-agents (architecture Hub-and-Spoke), avec interface web Next.js et API FastAPI.
 
 Capacités principales :
+
 - RAG sur filings SEC (10-K, 10-Q, 8-K, 20-F, 6-K) et transcripts
 - Prix de marché, news, portefeuille paper trading (Alpaca)
 - Validation d'affirmations et export de rapports (Markdown/PDF)
@@ -64,15 +65,45 @@ uvicorn api.main:app --reload --reload-dir api --reload-dir src --port 8000
 cd frontend && npm install && npm run dev
 ```
 
-| Service | URL |
-|---------|-----|
-| **Interface** | http://localhost:3000 |
-| **API** | http://localhost:8000 |
-| **Health check** | http://localhost:8000/api/health |
 
-Le frontend proxifie les appels `/api/*` vers le backend (voir `frontend/next.config.ts`).
+| Service          | URL                                                                  |
+| ---------------- | -------------------------------------------------------------------- |
+| **Interface**    | [http://localhost:3000](http://localhost:3000)                       |
+| **API**          | [http://localhost:8000](http://localhost:8000)                       |
+| **Health check** | [http://localhost:8000/api/health](http://localhost:8000/api/health) |
+
+
+Le frontend proxifie les appels `/api/`* vers le backend (voir `frontend/next.config.ts`).
 
 > L'ancienne interface Streamlit (`ui/app_rag.py`) est **dépréciée**. Utiliser Next.js + FastAPI.
+
+### Ports alternatifs
+
+Si les ports 8000 (API) ou 3000 (UI) sont déjà utilisés :
+
+```bash
+# Terminal 1 — API sur 8080
+uvicorn api.main:app --reload --reload-dir api --reload-dir src --port 8080
+
+# Terminal 2 — UI sur 3030
+cd frontend && npm run dev -- -p 3030
+```
+
+Configurer `[frontend/.env.local](frontend/.env.local)` :
+
+```env
+NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8080
+API_PROXY_TARGET=http://127.0.0.1:8080
+PORT=3030
+```
+
+Et dans `.env` (racine), autoriser l'origine du frontend :
+
+```env
+CORS_ORIGINS=http://localhost:3030,http://127.0.0.1:3030
+```
+
+Redémarrer les deux serveurs après modification des variables d'environnement.
 
 ---
 
@@ -80,15 +111,17 @@ Le frontend proxifie les appels `/api/*` vers le backend (voir `frontend/next.co
 
 L'UI Next.js (`frontend/`) propose :
 
-| Zone | Description |
-|------|-------------|
-| **Barre latérale** | Historique des conversations, nouvelle conversation, bascule FR/EN |
-| **Zone de chat** | Questions en langage naturel, réponses streamées en temps réel |
+
+| Zone                      | Description                                                                                |
+| ------------------------- | ------------------------------------------------------------------------------------------ |
+| **Barre latérale**        | Historique des conversations, nouvelle conversation, bascule FR/EN                         |
+| **Zone de chat**          | Questions en langage naturel, réponses streamées en temps réel                             |
 | **Pipeline multi-agents** | LEDs de statut par agent (Intent Router, PM, Analystes, Compliance…) pendant le traitement |
-| **Raisonnements** | Panneau déroulant des étapes intermédiaires (mode streaming) |
-| **Artefacts** | Sources RAG, étapes outils, stats debug, rapports exportés |
-| **Approbation trade** | Carte d'approbation humaine si un ordre buy/sell est proposé (pas pour une simple analyse) |
-| **Paramètres** | Panneau de config (chunks max, sous-requêtes, fenêtre prix, itérations agent…) |
+| **Raisonnements**         | Panneau déroulant des étapes intermédiaires (mode streaming)                               |
+| **Artefacts**             | Sources RAG, étapes outils, stats debug, rapports exportés                                 |
+| **Approbation trade**     | Carte d'approbation humaine si un ordre buy/sell est proposé (pas pour une simple analyse) |
+| **Paramètres**            | Panneau de config (chunks max, sous-requêtes, fenêtre prix, itérations agent…)             |
+
 
 ### Exemples de questions
 
@@ -105,10 +138,12 @@ Achète 5 actions NVDA          → déclenche le flux trade + approbation humai
 
 L'**Intent Router** choisit le mode d'exécution :
 
-| Mode | Quand | Comportement |
-|------|-------|--------------|
-| **Agent simple** | Une seule famille d'outils (news seule, prix seul, SEC seul…) | Agent LangGraph direct avec outils |
+
+| Mode              | Quand                                                             | Comportement                                                                         |
+| ----------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| **Agent simple**  | Une seule famille d'outils (news seule, prix seul, SEC seul…)     | Agent LangGraph direct avec outils                                                   |
 | **Hub-and-Spoke** | Plusieurs familles d'outils (ex. SEC + perf) ou action de trading | PM → analystes en parallèle → synthèse → compliance (si trade) → approbation humaine |
+
 
 Familles d'outils détectées : filings SEC, news, prix/perf, portefeuille, trading, export rapport.
 
@@ -134,18 +169,21 @@ Requête → Intent Router
 
 ### Agents Hub-and-Spoke
 
-| Agent | Outils | Rôle |
-|-------|--------|------|
-| **Portfolio Manager** | — | Planifie, délègue, synthétise |
-| **Analyste fondamental** | `sec_filings_rag_tool`, `get_news_tool` | Risques SEC, news, sentiment |
-| **Analyste quantitatif** | `market_price_tool`, `portfolio_history_tool` | Prix, perf, volatilité |
-| **Compliance Validator** | `validate_claims_tool`, `portfolio_info_tool`, `account_activity_tool` | Garde-fous avant trade |
-| **Executor Trader** | `place_trade_tool`, `close_position_tool` | Exécution paper trading (après PASS + approbation) |
+
+| Agent                    | Outils                                                                 | Rôle                                               |
+| ------------------------ | ---------------------------------------------------------------------- | -------------------------------------------------- |
+| **Portfolio Manager**    | —                                                                      | Planifie, délègue, synthétise                      |
+| **Analyste fondamental** | `sec_filings_rag_tool`, `get_news_tool`                                | Risques SEC, news, sentiment                       |
+| **Analyste quantitatif** | `market_price_tool`, `portfolio_history_tool`                          | Prix, perf, volatilité                             |
+| **Compliance Validator** | `validate_claims_tool`, `portfolio_info_tool`, `account_activity_tool` | Garde-fous avant trade                             |
+| **Executor Trader**      | `place_trade_tool`, `close_position_tool`                              | Exécution paper trading (après PASS + approbation) |
+
 
 Fichiers clés :
-- Graphe simple : [`src/graph/flow.py`](src/graph/flow.py)
-- Graphe Hub-and-Spoke : [`src/orchestration/hub_graph.py`](src/orchestration/hub_graph.py)
-- API streaming SSE : [`api/services/hub_runner.py`](api/services/hub_runner.py)
+
+- Graphe simple : `[src/graph/flow.py](src/graph/flow.py)`
+- Graphe Hub-and-Spoke : `[src/orchestration/hub_graph.py](src/orchestration/hub_graph.py)`
+- API streaming SSE : `[api/services/hub_runner.py](api/services/hub_runner.py)`
 
 ---
 
@@ -153,15 +191,17 @@ Fichiers clés :
 
 Copier `.env.example` vers `.env`. Variables essentielles :
 
-| Variable | Description |
-|----------|-------------|
-| `LLM_PROVIDER` | `openai`, `github_models`, `gemini`, `azure_openai`, `nvidia_nim` |
-| `OPENAI_API_KEY` | Clé OpenAI (chat + embeddings par défaut) |
-| `GITHUB_MODELS_API_KEY` | Alternative gratuite (chat + embeddings) |
-| `EMBEDDING_PROVIDER` | Provider embeddings si différent du chat (ex. `openai` avec chat Gemini) |
-| `SEC_USER_AGENT` | Identité requise par la SEC (`NomApp email@domaine.com`) |
-| `ALPACA_API_KEY` / `ALPACA_SECRET_KEY` | Paper trading (optionnel) |
-| `LANGSMITH_*` | Traçabilité LangSmith (optionnel) |
+
+| Variable                               | Description                                                              |
+| -------------------------------------- | ------------------------------------------------------------------------ |
+| `LLM_PROVIDER`                         | `openai`, `github_models`, `gemini`, `azure_openai`, `nvidia_nim`        |
+| `OPENAI_API_KEY`                       | Clé OpenAI (chat + embeddings par défaut)                                |
+| `GITHUB_MODELS_API_KEY`                | Alternative gratuite (chat + embeddings)                                 |
+| `EMBEDDING_PROVIDER`                   | Provider embeddings si différent du chat (ex. `openai` avec chat Gemini) |
+| `SEC_USER_AGENT`                       | Identité requise par la SEC (`NomApp email@domaine.com`)                 |
+| `ALPACA_API_KEY` / `ALPACA_SECRET_KEY` | Paper trading (optionnel)                                                |
+| `LANGSMITH_`*                          | Traçabilité LangSmith (optionnel)                                        |
+
 
 Voir `.env.example` pour la liste complète (quota embeddings, fenêtres prix, mémoire conversationnelle…).
 
@@ -174,8 +214,8 @@ docker compose run --rm bootstrap              # pipeline complète (indexation)
 docker compose up finance-rag-api finance-rag-web
 ```
 
-- UI : http://localhost:3000
-- API : http://localhost:8000
+- UI : [http://localhost:3000](http://localhost:3000)
+- API : [http://localhost:8000](http://localhost:8000)
 
 Variables utiles : `SKIP_DOWNLOAD_IF_EXISTS`, `BOOTSTRAP_MIN_YEAR`, `BOOTSTRAP_SECTIONS`, `EMBEDDING_BATCH_SIZE`, `EMBEDDING_RPM`.
 
@@ -183,35 +223,39 @@ Variables utiles : `SKIP_DOWNLOAD_IF_EXISTS`, `BOOTSTRAP_MIN_YEAR`, `BOOTSTRAP_S
 
 ## Outils agent
 
-| Outil | Description |
-|-------|-------------|
-| `sec_filings_rag_tool` | Recherche RAG dans les rapports SEC indexés |
-| `market_price_tool` | Prix et performance (yfinance) |
-| `get_news_tool` | Actualités récentes par ticker |
-| `validate_claims_tool` | Validation d'affirmations vs sources RAG |
-| `portfolio_info_tool` | État du compte paper Alpaca |
-| `portfolio_history_tool` | Historique de performance du portefeuille |
-| `account_activity_tool` | Activité récente du compte |
-| `place_trade_tool` / `close_position_tool` | Ordres paper trading |
-| `export_investment_report_tool` | Export Markdown/PDF dans `reports/` |
+
+| Outil                                      | Description                                 |
+| ------------------------------------------ | ------------------------------------------- |
+| `sec_filings_rag_tool`                     | Recherche RAG dans les rapports SEC indexés |
+| `market_price_tool`                        | Prix et performance (yfinance)              |
+| `get_news_tool`                            | Actualités récentes par ticker              |
+| `validate_claims_tool`                     | Validation d'affirmations vs sources RAG    |
+| `portfolio_info_tool`                      | État du compte paper Alpaca                 |
+| `portfolio_history_tool`                   | Historique de performance du portefeuille   |
+| `account_activity_tool`                    | Activité récente du compte                  |
+| `place_trade_tool` / `close_position_tool` | Ordres paper trading                        |
+| `export_investment_report_tool`            | Export Markdown/PDF dans `reports/`         |
+
 
 ---
 
 ## Backends LLM supportés
 
-| Provider | Chat | Embeddings |
-|----------|------|------------|
-| OpenAI | ✓ | ✓ |
-| GitHub Models | ✓ | ✓ |
-| Azure OpenAI | ✓ | ✓ |
-| NVIDIA NIM | ✓ | ✓ |
-| Gemini | ✓ | via `EMBEDDING_PROVIDER` |
+
+| Provider      | Chat | Embeddings               |
+| ------------- | ---- | ------------------------ |
+| OpenAI        | ✓    | ✓                        |
+| GitHub Models | ✓    | ✓                        |
+| Azure OpenAI  | ✓    | ✓                        |
+| NVIDIA NIM    | ✓    | ✓                        |
+| Gemini        | ✓    | via `EMBEDDING_PROVIDER` |
+
 
 ---
 
 ## Univers suivi
 
-Tickers par défaut : `NVDA`, `ASML`, `AMD`, `ARM`, `MSFT` — configurables dans [`src/config/__init__.py`](src/config/__init__.py).
+Tickers par défaut : `NVDA`, `ASML`, `AMD`, `ARM`, `MSFT` — configurables dans `[src/config/__init__.py](src/config/__init__.py)`.
 
 Documents indexés : 10-K, 10-Q, 8-K (item 2.02), 20-F, 6-K, transcripts earnings.
 
@@ -254,12 +298,14 @@ python3 -m unittest tests.test_intent_router tests.test_trade_intent -v
 
 ## Dépannage
 
-| Problème | Piste |
-|----------|-------|
-| UI sans réponse | Vérifier que l'API tourne sur le port 8000 |
-| Erreur embeddings / quota | Ajuster `EMBEDDING_RPM`, `EMBEDDING_BATCH_SIZE` ou attendre reset quota |
-| ChromaDB vide | Relancer `python run_pipeline.py` |
-| Trade non exécuté | Normal si la requête est analytique ; l'approbation n'apparaît que pour un ordre explicite |
-| SEC 403 | Renseigner `SEC_USER_AGENT` avec un email valide |
 
-Pour le contexte pédagogique du cours (phases RAG → agent → orchestration), voir [`scope.md`](scope.md).
+| Problème                  | Piste                                                                                              |
+| ------------------------- | -------------------------------------------------------------------------------------------------- |
+| UI sans réponse           | Vérifier que l'API tourne ; si ports custom, vérifier `NEXT_PUBLIC_API_BASE_URL` et `CORS_ORIGINS` |
+| Erreur embeddings / quota | Ajuster `EMBEDDING_RPM`, `EMBEDDING_BATCH_SIZE` ou attendre reset quota                            |
+| ChromaDB vide             | Relancer `python run_pipeline.py`                                                                  |
+| Trade non exécuté         | Normal si la requête est analytique ; l'approbation n'apparaît que pour un ordre explicite         |
+| SEC 403                   | Renseigner `SEC_USER_AGENT` avec un email valide                                                   |
+
+
+Pour le contexte pédagogique du cours (phases RAG → agent → orchestration), voir `[scope.md](scope.md)`.
