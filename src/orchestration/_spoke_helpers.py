@@ -230,7 +230,10 @@ async def _collect_llm_response(
         messages,
         tools=tools,
         temperature=0.1,
-        max_tokens=4096,
+        # Sorties internes (rapports analystes, verdict compliance, exécution) :
+        # tronquées en aval (≈6000 car. avant synthèse). Cap aligné pour éviter
+        # de générer du texte qui sera coupé — gain de latence sans perte.
+        max_tokens=2048,
     ):
         if stream_chunk.delta:
             full_text += stream_chunk.delta

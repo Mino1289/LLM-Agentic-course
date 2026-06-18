@@ -74,7 +74,8 @@ async def pm_plan_node(agent: Any, state: HubSpokeState) -> HubSpokeState:
             messages,
             tools=None,
             temperature=0.2,
-            max_tokens=4096,
+            # Le plan (délégation aux analystes) est court et interne.
+            max_tokens=2048,
         ):
             if chunk.delta:
                 full_response += chunk.delta
