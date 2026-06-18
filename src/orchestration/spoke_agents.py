@@ -178,18 +178,27 @@ async def analyze_parallel_node(agent: Any, state: HubSpokeState) -> HubSpokeSta
             all_events.extend(events)
         result_stats = result.pop("stats", {})
         if result_stats:
-            merged_stats.update(result_stats)
-            if result_stats.get("price_series"):
+            # Extraire les données internes AVANT de fusionner, sinon elles
+            # polluent les stats affichées (chunks RAG, séries de prix).
+            chunks = result_stats.pop("final_chunks", [])
+            metadatas = result_stats.pop("final_metadatas", [])
+            spoke_series = result_stats.pop("price_series", None)
+            if spoke_series:
                 from src.graph.tool_execution_node import _merge_price_series
 
                 merged_price_series = _merge_price_series(
-                    merged_price_series, result_stats.get("price_series") or []
+                    merged_price_series, spoke_series
                 )
-            chunks = result_stats.pop("final_chunks", [])
-            metadatas = result_stats.pop("final_metadatas", [])
             if chunks:
                 all_chunks.extend(chunks)
                 all_metadatas.extend(metadatas)
+            # Sommer les compteurs par spoke au lieu de les écraser.
+            for counter in ("spoke_tool_calls", "spoke_llm_iterations"):
+                if counter in result_stats:
+                    merged_stats[counter] = (
+                        merged_stats.get(counter, 0) + result_stats.pop(counter)
+                    )
+            merged_stats.update(result_stats)
         merged.update(result)
     merged["spoke_events"] = all_events
     merged["stats"] = merged_stats
