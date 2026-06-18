@@ -40,7 +40,11 @@ class MarketPriceArgsTests(unittest.TestCase):
 
         with self.assertRaises(ValidationError):
             MarketPriceArgs.model_validate(
-                {"tickers": ["NVDA"], "start_date": "01/01/2024", "end_date": "2024-12-31"}
+                {
+                    "tickers": ["NVDA"],
+                    "start_date": "01/01/2024",
+                    "end_date": "2024-12-31",
+                }
             )
 
     def test_requires_at_least_one_ticker(self) -> None:
@@ -103,7 +107,9 @@ class PlaceTradeArgsTests(unittest.TestCase):
     def test_requires_ticker_side_qty(self) -> None:
         from src.tools.schemas import PlaceTradeArgs
 
-        args = PlaceTradeArgs.model_validate({"ticker": "NVDA", "side": "buy", "qty": 10})
+        args = PlaceTradeArgs.model_validate(
+            {"ticker": "NVDA", "side": "buy", "qty": 10}
+        )
         self.assertEqual(args.ticker, "NVDA")
         self.assertEqual(args.side, "buy")
         self.assertEqual(args.qty, 10)
@@ -190,9 +196,7 @@ class ExportReportArgsTests(unittest.TestCase):
     def test_default_format_is_md(self) -> None:
         from src.tools.schemas import ExportReportArgs
 
-        args = ExportReportArgs.model_validate(
-            {"title": "Report", "content": "Body"}
-        )
+        args = ExportReportArgs.model_validate({"title": "Report", "content": "Body"})
         self.assertEqual(args.format, "md")
 
     def test_rejects_unknown_format(self) -> None:

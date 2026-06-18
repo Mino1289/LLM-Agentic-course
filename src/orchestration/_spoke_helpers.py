@@ -24,8 +24,11 @@ async def run_spoke_agent(
     max_iterations: int = 2,
 ) -> tuple[str, dict[str, Any]]:
     from src.tools.definitions import get_tool_definitions
+
     all_tools = get_tool_definitions()
-    allowed_tools = [t for t in all_tools if t.get("function", {}).get("name") in tool_names]
+    allowed_tools = [
+        t for t in all_tools if t.get("function", {}).get("name") in tool_names
+    ]
 
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": system_prompt},
@@ -44,13 +47,29 @@ async def run_spoke_agent(
             )
         except asyncio.TimeoutError:
             _LOGGER.warning("Spoke LLM timed out after %ss", LLM_TIMEOUT)
-            return f"Analyse interrompue (timeout LLM après {LLM_TIMEOUT}s).", {"spoke_llm_iterations": iteration + 1, "spoke_tool_calls": tool_call_count, "final_chunks": accumulated_chunks, "final_metadatas": accumulated_metadatas}
+            return f"Analyse interrompue (timeout LLM après {LLM_TIMEOUT}s).", {
+                "spoke_llm_iterations": iteration + 1,
+                "spoke_tool_calls": tool_call_count,
+                "final_chunks": accumulated_chunks,
+                "final_metadatas": accumulated_metadatas,
+            }
         except Exception as e:
             _LOGGER.warning("Spoke LLM error: %s", e)
-            return f"Erreur LLM: {e}", {"spoke_llm_iterations": iteration + 1, "spoke_tool_calls": tool_call_count, "final_chunks": accumulated_chunks, "final_metadatas": accumulated_metadatas}
+            return f"Erreur LLM: {e}", {
+                "spoke_llm_iterations": iteration + 1,
+                "spoke_tool_calls": tool_call_count,
+                "final_chunks": accumulated_chunks,
+                "final_metadatas": accumulated_metadatas,
+            }
 
         if final_tool_calls:
-            messages.append({"role": "assistant", "content": full_text, "tool_calls": final_tool_calls})
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": full_text,
+                    "tool_calls": final_tool_calls,
+                }
+            )
             executor = ToolExecutor(agent, state)
             for tc in final_tool_calls:
                 tool_call_count += 1
@@ -60,21 +79,51 @@ async def run_spoke_agent(
                     f"Exécution de {tc.name}...",
                 )
                 try:
-                    outcome = await asyncio.wait_for(executor.execute(tc), timeout=TOOL_TIMEOUT)
+                    outcome = await asyncio.wait_for(
+                        executor.execute(tc), timeout=TOOL_TIMEOUT
+                    )
                     messages.append(outcome.message)
                     if outcome.result and "final_chunks" in outcome.result:
                         accumulated_chunks.extend(outcome.result["final_chunks"] or [])
-                        accumulated_metadatas.extend(outcome.result["final_metadatas"] or [])
+                        accumulated_metadatas.extend(
+                            outcome.result["final_metadatas"] or []
+                        )
                 except asyncio.TimeoutError:
                     _LOGGER.warning("Tool %s timed out", tc.name)
-                    messages.append({"role": "tool", "tool_call_id": tc.id, "name": tc.name, "content": json.dumps({"error": f"Tool timed out after {TOOL_TIMEOUT}s"})})
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "name": tc.name,
+                            "content": json.dumps(
+                                {"error": f"Tool timed out after {TOOL_TIMEOUT}s"}
+                            ),
+                        }
+                    )
                 except Exception as e:
                     _LOGGER.warning("Spoke tool %s failed: %s", tc.name, e)
-                    messages.append({"role": "tool", "tool_call_id": tc.id, "name": tc.name, "content": json.dumps({"error": str(e)})})
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "name": tc.name,
+                            "content": json.dumps({"error": str(e)}),
+                        }
+                    )
         else:
-            return full_text.strip(), {"spoke_llm_iterations": iteration + 1, "spoke_tool_calls": tool_call_count, "final_chunks": accumulated_chunks, "final_metadatas": accumulated_metadatas}
+            return full_text.strip(), {
+                "spoke_llm_iterations": iteration + 1,
+                "spoke_tool_calls": tool_call_count,
+                "final_chunks": accumulated_chunks,
+                "final_metadatas": accumulated_metadatas,
+            }
 
-    return "Max iterations atteint.", {"spoke_llm_iterations": max_iterations, "spoke_tool_calls": tool_call_count, "final_chunks": accumulated_chunks, "final_metadatas": accumulated_metadatas}
+    return "Max iterations atteint.", {
+        "spoke_llm_iterations": max_iterations,
+        "spoke_tool_calls": tool_call_count,
+        "final_chunks": accumulated_chunks,
+        "final_metadatas": accumulated_metadatas,
+    }
 
 
 async def run_spoke_agent_stream(
@@ -86,8 +135,11 @@ async def run_spoke_agent_stream(
     max_iterations: int = 2,
 ) -> AsyncIterator[str]:
     from src.tools.definitions import get_tool_definitions
+
     all_tools = get_tool_definitions()
-    allowed_tools = [t for t in all_tools if t.get("function", {}).get("name") in tool_names]
+    allowed_tools = [
+        t for t in all_tools if t.get("function", {}).get("name") in tool_names
+    ]
 
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": system_prompt},
@@ -111,22 +163,48 @@ async def run_spoke_agent_stream(
             return
 
         if final_tool_calls:
-            messages.append({"role": "assistant", "content": full_text, "tool_calls": final_tool_calls})
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": full_text,
+                    "tool_calls": final_tool_calls,
+                }
+            )
             executor = ToolExecutor(agent, state)
             for tc in final_tool_calls:
                 try:
-                    outcome = await asyncio.wait_for(executor.execute(tc), timeout=TOOL_TIMEOUT)
+                    outcome = await asyncio.wait_for(
+                        executor.execute(tc), timeout=TOOL_TIMEOUT
+                    )
                     messages.append(outcome.message)
                     if outcome.result and "final_chunks" in outcome.result:
                         accumulated_chunks.extend(outcome.result["final_chunks"] or [])
-                        accumulated_metadatas.extend(outcome.result["final_metadatas"] or [])
+                        accumulated_metadatas.extend(
+                            outcome.result["final_metadatas"] or []
+                        )
                     yield f"\n[Tool {tc.name} completed]\n"
                 except asyncio.TimeoutError:
                     yield f"\n[Tool {tc.name} timed out]"
-                    messages.append({"role": "tool", "tool_call_id": tc.id, "name": tc.name, "content": json.dumps({"error": f"Timed out after {TOOL_TIMEOUT}s"})})
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "name": tc.name,
+                            "content": json.dumps(
+                                {"error": f"Timed out after {TOOL_TIMEOUT}s"}
+                            ),
+                        }
+                    )
                 except Exception as e:
                     yield f"\n[Tool {tc.name} failed: {e}]"
-                    messages.append({"role": "tool", "tool_call_id": tc.id, "name": tc.name, "content": json.dumps({"error": str(e)})})
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "name": tc.name,
+                            "content": json.dumps({"error": str(e)}),
+                        }
+                    )
         else:
             yield full_text.strip()
             return
@@ -143,7 +221,10 @@ async def _collect_llm_response(
     tool_calls_dict: dict[str | int, dict[str, Any]] = {}
 
     async for stream_chunk in agent.rag.provider.ainvoke_with_tools_stream(
-        messages, tools=tools, temperature=0.1, max_tokens=4096,
+        messages,
+        tools=tools,
+        temperature=0.1,
+        max_tokens=4096,
     ):
         if stream_chunk.delta:
             full_text += stream_chunk.delta
@@ -163,10 +244,17 @@ async def _collect_llm_response(
                 if tc_delta.get("name"):
                     tool_calls_dict[tc_key]["name"] = tc_delta["name"]
                 if tc_delta.get("arguments"):
-                    tool_calls_dict[tc_key]["arguments_parts"].append(tc_delta["arguments"])
+                    tool_calls_dict[tc_key]["arguments_parts"].append(
+                        tc_delta["arguments"]
+                    )
 
     final_tool_calls = [
-        ToolCall(id=tc["id"], name=tc["name"], arguments="".join(tc["arguments_parts"]), thought_signature=tc.get("thought_signature"))
+        ToolCall(
+            id=tc["id"],
+            name=tc["name"],
+            arguments="".join(tc["arguments_parts"]),
+            thought_signature=tc.get("thought_signature"),
+        )
         for tc in tool_calls_dict.values()
         if tc["name"]
     ]

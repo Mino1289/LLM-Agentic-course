@@ -29,8 +29,26 @@ from src.graph.memory_store import format_chat_context, format_memory_context
 
 _ENC = tiktoken.get_encoding("cl100k_base")
 _TICKERS_20 = [
-    "NVDA", "ASML", "TSM", "AMD", "AVGO", "ARM", "MSFT", "AAPL", "INTC", "QCOM",
-    "MC.PA", "RMS.PA", "KER.PA", "AIR.PA", "TTE.PA", "BRK-B", "JPM", "CAT", "NKE", "XOM",
+    "NVDA",
+    "ASML",
+    "TSM",
+    "AMD",
+    "AVGO",
+    "ARM",
+    "MSFT",
+    "AAPL",
+    "INTC",
+    "QCOM",
+    "MC.PA",
+    "RMS.PA",
+    "KER.PA",
+    "AIR.PA",
+    "TTE.PA",
+    "BRK-B",
+    "JPM",
+    "CAT",
+    "NKE",
+    "XOM",
 ]
 _TICKERS_INDEXED = ["AMD", "ARM", "MSFT", "NVDA", "AAPL", "AVGO"]
 
@@ -103,8 +121,10 @@ def audit_p1a_rag_excerpts() -> list[dict]:
 
         m = _measure(f"P1-A/{ticker}", legacy_payload, toon_payload)
         results.append(m)
-        print(f"  {ticker:6s}: legacy={m['json_tokens']:4d} tok → TOON={m['toon_tokens']:4d} tok "
-              f"(saved {m['saved_tokens']:+d} = {m['saved_percent']:+.1f}%)")
+        print(
+            f"  {ticker:6s}: legacy={m['json_tokens']:4d} tok → TOON={m['toon_tokens']:4d} tok "
+            f"(saved {m['saved_tokens']:+d} = {m['saved_percent']:+.1f}%)"
+        )
 
     return results
 
@@ -113,42 +133,54 @@ def audit_p1b_tool_schema() -> list[dict]:
     """P1-B theoretical gain on tool JSON schemas (blocked by OpenAI API)."""
     print("\n=== P1-B : Tool schema JSON → TOON (BLOCKED) ===")
 
-    tool_schema_json = json.dumps({
-        "type": "function",
-        "function": {
-            "name": "sec_filings_rag_tool",
-            "description": "Recherche dans les rapports SEC 10-K/10-Q/8-K indexés.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "Question utilisateur"},
-                    "tickers": {"type": "array", "items": {"type": "string"}},
-                    "year_min": {"type": "integer"},
-                    "year_max": {"type": "integer"},
-                    "top_k": {"type": "integer", "default": 5},
+    tool_schema_json = json.dumps(
+        {
+            "type": "function",
+            "function": {
+                "name": "sec_filings_rag_tool",
+                "description": "Recherche dans les rapports SEC 10-K/10-Q/8-K indexés.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Question utilisateur",
+                        },
+                        "tickers": {"type": "array", "items": {"type": "string"}},
+                        "year_min": {"type": "integer"},
+                        "year_max": {"type": "integer"},
+                        "top_k": {"type": "integer", "default": 5},
+                    },
+                    "required": ["query"],
                 },
-                "required": ["query"],
             },
         },
-    }, indent=2)
+        indent=2,
+    )
 
     try:
         toon_payload = toon_format.encode(json.loads(tool_schema_json))
     except Exception as e:
-        return [{
-            "name": "P1-B/tool_schema",
-            "json_tokens": _count(tool_schema_json),
-            "toon_tokens": 0,
-            "saved_tokens": 0,
-            "saved_percent": 0,
-            "note": f"encode failed: {e}",
-        }]
+        return [
+            {
+                "name": "P1-B/tool_schema",
+                "json_tokens": _count(tool_schema_json),
+                "toon_tokens": 0,
+                "saved_tokens": 0,
+                "saved_percent": 0,
+                "note": f"encode failed: {e}",
+            }
+        ]
 
     m = _measure("P1-B/tool_schema", tool_schema_json, toon_payload)
-    m["note"] = "BLOCKED: OpenAI API requires tools: [{type: function, function: {...}}] JSON"
+    m["note"] = (
+        "BLOCKED: OpenAI API requires tools: [{type: function, function: {...}}] JSON"
+    )
     m["theoretical"] = True
-    print(f"  Theoretical: legacy={m['json_tokens']} tok → TOON={m['toon_tokens']} tok "
-          f"(saved {m['saved_percent']:+.1f}%)")
+    print(
+        f"  Theoretical: legacy={m['json_tokens']} tok → TOON={m['toon_tokens']} tok "
+        f"(saved {m['saved_percent']:+.1f}%)"
+    )
     print(f"  Status: BLOCKED by OpenAI API contract — needs upstream validation")
 
     return [m]
@@ -172,24 +204,37 @@ def audit_p2c_memory_context() -> list[dict]:
         {"role": "user", "content": "Et pour AMD ?"},
         {"role": "assistant", "content": "AMD a des risques similaires mais aussi..."},
         {"role": "user", "content": "Compare les data centers"},
-        {"role": "assistant", "content": "Les data centers représentent 78% du CA NVDA..."},
+        {
+            "role": "assistant",
+            "content": "Les data centers représentent 78% du CA NVDA...",
+        },
         {"role": "user", "content": "Et le pricing H100 ?"},
-        {"role": "assistant", "content": "Le H100 se vendait entre 25-40K$ début 2024..."},
+        {
+            "role": "assistant",
+            "content": "Le H100 se vendait entre 25-40K$ début 2024...",
+        },
         {"role": "user", "content": "Quel est l'impact sur la marge ?"},
         {"role": "assistant", "content": "La marge brute NVDA est de 75.7%..."},
     ]
     toon_payload = format_memory_context(summary, turns)
-    legacy_json = json.dumps({"summary": summary, "turns": turns}, ensure_ascii=False, indent=2)
+    legacy_json = json.dumps(
+        {"summary": summary, "turns": turns}, ensure_ascii=False, indent=2
+    )
 
     m = _measure("P2-C/memory_context", legacy_json, toon_payload)
     results.append(m)
-    print(f"  memory_context: legacy={m['json_tokens']:4d} tok → TOON={m['toon_tokens']:4d} tok "
-          f"(saved {m['saved_percent']:+.1f}%)")
+    print(
+        f"  memory_context: legacy={m['json_tokens']:4d} tok → TOON={m['toon_tokens']:4d} tok "
+        f"(saved {m['saved_percent']:+.1f}%)"
+    )
 
     # Chat context (5 turns)
     chat = [
         {"role": "user", "content": "Analyse NVDA 2025"},
-        {"role": "assistant", "content": "Le rapport 10-K de NVDA pour FY2025 montre..."},
+        {
+            "role": "assistant",
+            "content": "Le rapport 10-K de NVDA pour FY2025 montre...",
+        },
         {"role": "user", "content": "Et le risk factors ?"},
         {"role": "assistant", "content": "Item 1A liste 12 risques principaux..."},
         {"role": "user", "content": "Focus sur la supply chain"},
@@ -199,8 +244,10 @@ def audit_p2c_memory_context() -> list[dict]:
     legacy_chat = json.dumps({"messages": chat}, ensure_ascii=False, indent=2)
     m2 = _measure("P2-C/chat_context", legacy_chat, toon_chat)
     results.append(m2)
-    print(f"  chat_context:   legacy={m2['json_tokens']:4d} tok → TOON={m2['toon_tokens']:4d} tok "
-          f"(saved {m2['saved_percent']:+.1f}%)")
+    print(
+        f"  chat_context:   legacy={m2['json_tokens']:4d} tok → TOON={m2['toon_tokens']:4d} tok "
+        f"(saved {m2['saved_percent']:+.1f}%)"
+    )
 
     return results
 
@@ -210,32 +257,42 @@ def audit_p3_other_serializers() -> list[dict]:
     print("\n=== P3 : scan autres serializers rag/ ===")
 
     # P3-A: NLI judge prompt (mixed format)
-    nli_json = json.dumps({
-        "claim": "NVDA a généré 60.9B$ de revenus en FY2024",
-        "context_chunks": [
-            "Total revenue for fiscal 2024 was $60.9 billion, up 125% year over year.",
-            "Data Center revenue was a record $47.5 billion.",
-        ],
-        "metadata": {"ticker": "NVDA", "year": 2024, "form": "10-K"},
-        "instruction": "Classify the claim as supported/partial/unsupported.",
-    }, ensure_ascii=False, indent=2)
+    nli_json = json.dumps(
+        {
+            "claim": "NVDA a généré 60.9B$ de revenus en FY2024",
+            "context_chunks": [
+                "Total revenue for fiscal 2024 was $60.9 billion, up 125% year over year.",
+                "Data Center revenue was a record $47.5 billion.",
+            ],
+            "metadata": {"ticker": "NVDA", "year": 2024, "form": "10-K"},
+            "instruction": "Classify the claim as supported/partial/unsupported.",
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
 
     try:
         toon_nli = toon_format.encode(json.loads(nli_json))
     except Exception as e:
-        return [{
-            "name": "P3/nli_prompt",
-            "json_tokens": _count(nli_json),
-            "toon_tokens": 0,
-            "saved_tokens": 0,
-            "saved_percent": 0,
-            "note": f"encode failed: {e}",
-        }]
+        return [
+            {
+                "name": "P3/nli_prompt",
+                "json_tokens": _count(nli_json),
+                "toon_tokens": 0,
+                "saved_tokens": 0,
+                "saved_percent": 0,
+                "note": f"encode failed: {e}",
+            }
+        ]
 
     m = _measure("P3/nli_prompt", nli_json, toon_nli)
-    m["note"] = "NLI judge prompt — mixed format (text+structured), partial gain expected"
-    print(f"  NLI prompt:     legacy={m['json_tokens']:4d} tok → TOON={m['toon_tokens']:4d} tok "
-          f"(saved {m['saved_percent']:+.1f}%) — mixed-format, partial gain")
+    m["note"] = (
+        "NLI judge prompt — mixed format (text+structured), partial gain expected"
+    )
+    print(
+        f"  NLI prompt:     legacy={m['json_tokens']:4d} tok → TOON={m['toon_tokens']:4d} tok "
+        f"(saved {m['saved_percent']:+.1f}%) — mixed-format, partial gain"
+    )
 
     return [m]
 
@@ -247,7 +304,9 @@ def main() -> None:
     print("=" * 70)
     print(f"Univers 20 tickers : {len(_TICKERS_20)} (15 SEC + 5 .PA)")
     print(f"Indexés (partiel)  : {len(_TICKERS_INDEXED)} — {_TICKERS_INDEXED}")
-    print(f"Cause partielle    : GitHub Models rate limit 150/jour (text-embedding-3-small)")
+    print(
+        f"Cause partielle    : GitHub Models rate limit 150/jour (text-embedding-3-small)"
+    )
 
     all_results = []
     all_results += audit_p1a_rag_excerpts()
@@ -280,7 +339,9 @@ def main() -> None:
             "saved_percent": round(pct, 1),
         },
     }
-    out_path = Path("docs/superpowers/plans/2026-06-06-toon-audit-real-volume-data.json")
+    out_path = Path(
+        "docs/superpowers/plans/2026-06-06-toon-audit-real-volume-data.json"
+    )
     out_path.write_text(json.dumps(out, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"\nRésultats JSON : {out_path}")
 

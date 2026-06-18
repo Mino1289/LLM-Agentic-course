@@ -38,7 +38,9 @@ class BackoffRetryTests(unittest.TestCase):
 
         result = with_exponential_backoff(
             flaky,
-            config=BackoffConfig(max_retries=4, base_sec=1.0, cap_sec=60.0, jitter="full"),
+            config=BackoffConfig(
+                max_retries=4, base_sec=1.0, cap_sec=60.0, jitter="full"
+            ),
             sleep=fake_sleep,
         )
 
@@ -48,7 +50,7 @@ class BackoffRetryTests(unittest.TestCase):
         self.assertEqual(len(sleeps), 2)
         for attempt, slept in enumerate(sleeps, start=1):
             self.assertGreaterEqual(slept, 0.0)
-            self.assertLessEqual(slept, min(60.0, 1.0 * (2 ** attempt)))
+            self.assertLessEqual(slept, min(60.0, 1.0 * (2**attempt)))
 
     def test_gives_up_after_max_retries(self) -> None:
         def always_fail() -> None:
@@ -57,7 +59,9 @@ class BackoffRetryTests(unittest.TestCase):
         with self.assertRaises(_FakeTransientError):
             with_exponential_backoff(
                 always_fail,
-                config=BackoffConfig(max_retries=2, base_sec=0.0, cap_sec=1.0, jitter="none"),
+                config=BackoffConfig(
+                    max_retries=2, base_sec=0.0, cap_sec=1.0, jitter="none"
+                ),
                 sleep=lambda _value: None,
             )
 
@@ -71,7 +75,9 @@ class BackoffRetryTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             with_exponential_backoff(
                 fail_dim,
-                config=BackoffConfig(max_retries=5, base_sec=0.0, cap_sec=1.0, jitter="none"),
+                config=BackoffConfig(
+                    max_retries=5, base_sec=0.0, cap_sec=1.0, jitter="none"
+                ),
                 sleep=lambda _value: None,
             )
 
@@ -88,7 +94,9 @@ class BackoffRetryTests(unittest.TestCase):
         with self.assertRaises(_FakePermanentError):
             with_exponential_backoff(
                 fail_auth,
-                config=BackoffConfig(max_retries=5, base_sec=0.0, cap_sec=1.0, jitter="none"),
+                config=BackoffConfig(
+                    max_retries=5, base_sec=0.0, cap_sec=1.0, jitter="none"
+                ),
                 sleep=lambda _value: None,
             )
 
@@ -109,7 +117,9 @@ class BackoffRetryTests(unittest.TestCase):
         with self.assertRaises(_FakeTransientError):
             with_exponential_backoff(
                 always_fail,
-                config=BackoffConfig(max_retries=6, base_sec=1.0, cap_sec=8.0, jitter="full"),
+                config=BackoffConfig(
+                    max_retries=6, base_sec=1.0, cap_sec=8.0, jitter="full"
+                ),
                 sleep=collect_sleep,
             )
 
@@ -117,7 +127,7 @@ class BackoffRetryTests(unittest.TestCase):
         self.assertEqual(len(sleeps), 5)
         for attempt, slept in enumerate(sleeps, start=1):
             self.assertGreaterEqual(slept, 0.0)
-            self.assertLessEqual(slept, min(8.0, 1.0 * (2 ** attempt)))
+            self.assertLessEqual(slept, min(8.0, 1.0 * (2**attempt)))
 
 
 class QuotaStateTests(unittest.TestCase):
@@ -228,7 +238,6 @@ class QuotaStateAtomicWriteTests(unittest.TestCase):
         self.assertEqual(payload["quota_used"], 7)
         self.assertEqual(payload["last_batch_size"], 7)
         self.assertEqual(payload["last_error"], "transient_429")
-
 
 
 class BackoffConfigEnvTests(unittest.TestCase):

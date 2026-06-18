@@ -15,12 +15,14 @@ async def simple_agent_node(agent: Any, state: HubSpokeState) -> HubSpokeState:
     query = state.get("normalized_query") or state.get("query", "")
     spoke_events = list(state.get("spoke_events") or [])
 
-    spoke_events.append({
-        "agent": "Simple Agent (Phase 2)",
-        "status": "running",
-        "message": "Traitement de la requête simple...",
-        "tool_events": [],
-    })
+    spoke_events.append(
+        {
+            "agent": "Simple Agent (Phase 2)",
+            "status": "running",
+            "message": "Traitement de la requête simple...",
+            "tool_events": [],
+        }
+    )
     emit_agent_progress(
         "Simple Agent",
         "running",
@@ -28,17 +30,21 @@ async def simple_agent_node(agent: Any, state: HubSpokeState) -> HubSpokeState:
     )
 
     try:
-        result_state = await agent.arun(query, state.get("conversation_id"), state.get("messages", []))
+        result_state = await agent.arun(
+            query, state.get("conversation_id"), state.get("messages", [])
+        )
 
         answer = result_state.get("answer", "")
         tool_events = result_state.get("tool_events", [])
 
-        spoke_events.append({
-            "agent": "Simple Agent (Phase 2)",
-            "status": "completed",
-            "message": "Requête traitée.",
-            "tool_events": [dict(te) for te in (tool_events or [])],
-        })
+        spoke_events.append(
+            {
+                "agent": "Simple Agent (Phase 2)",
+                "status": "completed",
+                "message": "Requête traitée.",
+                "tool_events": [dict(te) for te in (tool_events or [])],
+            }
+        )
 
         return {
             "answer": answer,
@@ -51,12 +57,14 @@ async def simple_agent_node(agent: Any, state: HubSpokeState) -> HubSpokeState:
         }
     except Exception as e:
         _LOGGER.exception("Simple agent failed")
-        spoke_events.append({
-            "agent": "Simple Agent (Phase 2)",
-            "status": "failed",
-            "message": f"Erreur: {e}",
-            "tool_events": [],
-        })
+        spoke_events.append(
+            {
+                "agent": "Simple Agent (Phase 2)",
+                "status": "failed",
+                "message": f"Erreur: {e}",
+                "tool_events": [],
+            }
+        )
         return {
             "answer": f"Erreur lors du traitement: {e}",
             "spoke_events": spoke_events,

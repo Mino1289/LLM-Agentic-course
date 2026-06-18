@@ -1,4 +1,5 @@
 """Lecture et conversion vers texte brut des formats SEC (HTML, PDF, CSV, JSON)."""
+
 from __future__ import annotations
 
 import csv
@@ -8,7 +9,11 @@ import re
 
 from bs4 import BeautifulSoup
 
-from src.preprocess.clean import clean_text, normalize_sec_text, compress_markdown_tables
+from src.preprocess.clean import (
+    clean_text,
+    normalize_sec_text,
+    compress_markdown_tables,
+)
 
 try:
     import pdfplumber
@@ -66,7 +71,9 @@ def html_to_text(content: str) -> str:
 
 def pdf_to_text(file_path: str) -> str:
     if pdfplumber is None:
-        raise ImportError("pdfplumber is required for PDF parsing. pip install pdfplumber")
+        raise ImportError(
+            "pdfplumber is required for PDF parsing. pip install pdfplumber"
+        )
     parts = []
     with pdfplumber.open(file_path) as pdf:
         for page in pdf.pages:
@@ -122,9 +129,14 @@ def json_to_text(file_path: str) -> str:
     if isinstance(data, list):
         if data and isinstance(data[0], dict):
             keys = list(data[0].keys())
-            lines = ["| " + " | ".join(keys) + " |", "| " + " | ".join(["---"] * len(keys)) + " |"]
+            lines = [
+                "| " + " | ".join(keys) + " |",
+                "| " + " | ".join(["---"] * len(keys)) + " |",
+            ]
             for item in data[:500]:
-                lines.append("| " + " | ".join(str(item.get(k, "")) for k in keys) + " |")
+                lines.append(
+                    "| " + " | ".join(str(item.get(k, "")) for k in keys) + " |"
+                )
             if len(data) > 500:
                 lines.append(f"\n... ({len(data) - 500} rows omitted)")
             return "\n".join(lines)

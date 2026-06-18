@@ -28,6 +28,7 @@ class SecPacingTests(unittest.TestCase):
         """Reload download_SEC_reports to re-read env-derived constants."""
         import importlib
         import src.fetchers.download_SEC_reports as mod
+
         importlib.reload(mod)
         return mod
 
@@ -70,7 +71,11 @@ class SecTickerFilterTests(unittest.TestCase):
         self.assertEqual(pa_tickers, set(), "no .PA ticker should be in SEC_TICKERS")
 
     def test_pa_tickers_listed_in_skipped(self):
-        from src.fetchers.download_SEC_reports import SEC_TICKERS, SKIPPED_TICKERS, TRACKED_TICKERS
+        from src.fetchers.download_SEC_reports import (
+            SEC_TICKERS,
+            SKIPPED_TICKERS,
+            TRACKED_TICKERS,
+        )
 
         all_pa = {t for t in TRACKED_TICKERS if t.endswith(".PA")}
         self.assertEqual(set(SKIPPED_TICKERS), all_pa)
@@ -107,8 +112,12 @@ class SecFormCoverageTests(unittest.TestCase):
                 }
             }
         )
-        with patch("src.fetchers.download_SEC_reports.requests.get", return_value=response), \
-             patch("src.fetchers.download_SEC_reports.rate_limit_sleep"):
+        with (
+            patch(
+                "src.fetchers.download_SEC_reports.requests.get", return_value=response
+            ),
+            patch("src.fetchers.download_SEC_reports.rate_limit_sleep"),
+        ):
             filings = get_filings("NVDA", "0001045810", 2024, 2026)
         self.assertGreater(len(filings), 0)
         forms = {f["form"] for f in filings}
@@ -132,10 +141,16 @@ class SecFormCoverageTests(unittest.TestCase):
                 }
             }
         )
-        with patch("src.fetchers.download_SEC_reports.requests.get", return_value=response), \
-             patch("src.fetchers.download_SEC_reports.rate_limit_sleep"):
+        with (
+            patch(
+                "src.fetchers.download_SEC_reports.requests.get", return_value=response
+            ),
+            patch("src.fetchers.download_SEC_reports.rate_limit_sleep"),
+        ):
             filings = get_filings("ASML", "0000937966", 2024, 2026)
-        self.assertGreater(len(filings), 0, "ASML should have foreign-issuer filings (20-F/6-K)")
+        self.assertGreater(
+            len(filings), 0, "ASML should have foreign-issuer filings (20-F/6-K)"
+        )
         forms = {f["form"] for f in filings}
         # Must include at least one 20-F (annual) and 6-K (interim)
         self.assertIn("20-F", forms)

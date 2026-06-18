@@ -1,4 +1,5 @@
 """Export report tool — Markdown / PDF report generation."""
+
 from __future__ import annotations
 
 import re
@@ -42,8 +43,13 @@ def _write_pdf_report(path: Any, title: str, content: str) -> None:
 
     styles = getSampleStyleSheet()
     doc = SimpleDocTemplate(
-        str(path), pagesize=letter, rightMargin=48, leftMargin=48,
-        topMargin=48, bottomMargin=48, title=title,
+        str(path),
+        pagesize=letter,
+        rightMargin=48,
+        leftMargin=48,
+        topMargin=48,
+        bottomMargin=48,
+        title=title,
     )
     story = [_markdown_line_to_pdf_flowable(f"# {title}", styles), Spacer(1, 12)]
     for line in content.splitlines():
@@ -69,5 +75,8 @@ def run_export_investment_report(args: ExportReportArgs) -> dict[str, Any]:
 
     return {
         "text": f"Report saved to {path}",
-        "path": str(path), "filename": path.name, "format": extension, "title": title,
+        "path": str(path),
+        "filename": path.name,
+        "format": extension,
+        "title": title,
     }

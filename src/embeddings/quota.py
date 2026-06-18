@@ -1,4 +1,5 @@
 """Gestion du quota d'embeddings avec persistance."""
+
 from __future__ import annotations
 
 import json
@@ -34,7 +35,9 @@ class QuotaState:
     def save(self, payload: dict[str, Any]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
-        tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         tmp.replace(self.path)
 
     def quota_used(self) -> int:
@@ -43,7 +46,9 @@ class QuotaState:
     def update(self, *, batch_size: int, last_error: Optional[str] = None) -> None:
         current = self.load()
         new_used = max(0, int(current["quota_used"])) + max(0, int(batch_size))
-        recorded_error = last_error if last_error is not None else current.get("last_error")
+        recorded_error = (
+            last_error if last_error is not None else current.get("last_error")
+        )
         payload = {
             "date": self._today(),
             "quota_used": new_used,

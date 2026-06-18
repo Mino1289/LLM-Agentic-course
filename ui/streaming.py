@@ -154,5 +154,6 @@ def run_phase3_stream(
         on_text_chunk("".join(streamed_text))
     return final_state
 
+
 # Backward-compatible alias for Phase 2 tests
 run_stream = run_phase2_stream

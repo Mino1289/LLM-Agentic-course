@@ -1,4 +1,5 @@
 """Recherche vectorielle dans ChromaDB."""
+
 from __future__ import annotations
 
 from typing import Optional
@@ -23,7 +24,9 @@ def vector_search(
         }
         if metadata_filter:
             filters = [{key: value} for key, value in metadata_filter.items()]
-            query_kwargs["where"] = filters[0] if len(filters) == 1 else {"$and": filters}
+            query_kwargs["where"] = (
+                filters[0] if len(filters) == 1 else {"$and": filters}
+            )
 
         results = collection.query(**query_kwargs)
         if not results["ids"] or not results["ids"][0]:
@@ -38,7 +41,9 @@ def vector_search(
         return []
 
 
-def apply_metadata_filter(indices: list[int], metadata_filter: Optional[dict], doc_metadata: list[dict]) -> list[int]:
+def apply_metadata_filter(
+    indices: list[int], metadata_filter: Optional[dict], doc_metadata: list[dict]
+) -> list[int]:
     if not metadata_filter:
         return indices
     filtered = []

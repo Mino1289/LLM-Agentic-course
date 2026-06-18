@@ -43,7 +43,9 @@ class DecomposeQueryCountDefaultTests(unittest.TestCase):
 
         # Pass a stub RAG so we don't load ChromaDB.
         rag_stub = SimpleNamespace(provider=MagicMock(), documents=[], doc_metadata=[])
-        with patch.object(FinanceLangGraphAgent, "_build_graph", return_value=MagicMock()):
+        with patch.object(
+            FinanceLangGraphAgent, "_build_graph", return_value=MagicMock()
+        ):
             agent = FinanceLangGraphAgent(rag=rag_stub)
         self.assertEqual(agent.decompose_query_count, 2)
 
@@ -52,7 +54,9 @@ class DecomposeQueryCountDefaultTests(unittest.TestCase):
         from src.graph.flow import FinanceLangGraphAgent
 
         rag_stub = SimpleNamespace(provider=MagicMock(), documents=[], doc_metadata=[])
-        with patch.object(FinanceLangGraphAgent, "_build_graph", return_value=MagicMock()):
+        with patch.object(
+            FinanceLangGraphAgent, "_build_graph", return_value=MagicMock()
+        ):
             agent = FinanceLangGraphAgent(rag=rag_stub, decompose_query_count=2)
         self.assertEqual(agent.decompose_query_count, 2)
 
@@ -61,7 +65,9 @@ class DecomposeQueryCountDefaultTests(unittest.TestCase):
         from src.graph.flow import FinanceLangGraphAgent
 
         rag_stub = SimpleNamespace(provider=MagicMock(), documents=[], doc_metadata=[])
-        with patch.object(FinanceLangGraphAgent, "_build_graph", return_value=MagicMock()):
+        with patch.object(
+            FinanceLangGraphAgent, "_build_graph", return_value=MagicMock()
+        ):
             agent = FinanceLangGraphAgent(rag=rag_stub, decompose_query_count=1)
         self.assertEqual(agent.decompose_query_count, 1)
 
@@ -74,11 +80,12 @@ class DecomposeQueryCountDefaultTests(unittest.TestCase):
         ``ensure_langsmith_env()``.
         """
         env = {k: v for k, v in os.environ.items() if k != "QUERY_DECOMPOSE_COUNT"}
-        with patch.dict(os.environ, env, clear=True), patch(
-            "rag.langsmith_env.load_dotenv"
-        ), patch("src.rag.core.HybridRAG"), patch(
-            "rag.langgraph_studio.FinanceLangGraphAgent"
-        ) as agent_cls:
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch("rag.langsmith_env.load_dotenv"),
+            patch("src.rag.core.HybridRAG"),
+            patch("rag.langgraph_studio.FinanceLangGraphAgent") as agent_cls,
+        ):
             agent_cls.return_value = MagicMock(graph=MagicMock())
             from src.graph.flow import build_graph
 
@@ -109,8 +116,14 @@ class RunSecFilingsRagSkipDecomposeTests(unittest.TestCase):
         from src.tools.schemas import SecFilingsRAGArgs
 
         agent = self._make_agent()
-        with patch("src.graph.decompose_node.decompose_query", new=AsyncMock()) as mock_decompose, patch(
-            "src.tools.sec_filings.multi_retrieve_node", new=AsyncMock(return_value={"candidate_indices": []})
+        with (
+            patch(
+                "src.graph.decompose_node.decompose_query", new=AsyncMock()
+            ) as mock_decompose,
+            patch(
+                "src.tools.sec_filings.multi_retrieve_node",
+                new=AsyncMock(return_value={"candidate_indices": []}),
+            ),
         ):
             result = self._run(
                 agent,
@@ -132,8 +145,14 @@ class RunSecFilingsRagSkipDecomposeTests(unittest.TestCase):
         from src.tools.schemas import SecFilingsRAGArgs
 
         agent = self._make_agent()
-        with patch("src.graph.decompose_node.decompose_query", new=AsyncMock()) as mock_decompose, patch(
-            "src.tools.sec_filings.multi_retrieve_node", new=AsyncMock(return_value={"candidate_indices": []})
+        with (
+            patch(
+                "src.graph.decompose_node.decompose_query", new=AsyncMock()
+            ) as mock_decompose,
+            patch(
+                "src.tools.sec_filings.multi_retrieve_node",
+                new=AsyncMock(return_value={"candidate_indices": []}),
+            ),
         ):
             self._run(
                 agent,
@@ -150,9 +169,15 @@ class RunSecFilingsRagSkipDecomposeTests(unittest.TestCase):
         from src.tools.schemas import SecFilingsRAGArgs
 
         agent = self._make_agent()
-        with patch("src.graph.decompose_node.decompose_query", new=AsyncMock(return_value=["q1", "q2"])) as mock_decompose, patch(
-            "src.tools.sec_filings.multi_retrieve_node",
-            new=AsyncMock(return_value={"candidate_indices": []}),
+        with (
+            patch(
+                "src.graph.decompose_node.decompose_query",
+                new=AsyncMock(return_value=["q1", "q2"]),
+            ) as mock_decompose,
+            patch(
+                "src.tools.sec_filings.multi_retrieve_node",
+                new=AsyncMock(return_value={"candidate_indices": []}),
+            ),
         ):
             self._run(
                 agent,
@@ -168,9 +193,15 @@ class RunSecFilingsRagSkipDecomposeTests(unittest.TestCase):
         from src.tools.schemas import SecFilingsRAGArgs
 
         agent = self._make_agent()
-        with patch("src.graph.decompose_node.decompose_query", new=AsyncMock(return_value=["q1", "q2"])) as mock_decompose, patch(
-            "src.tools.sec_filings.multi_retrieve_node",
-            new=AsyncMock(return_value={"candidate_indices": []}),
+        with (
+            patch(
+                "src.graph.decompose_node.decompose_query",
+                new=AsyncMock(return_value=["q1", "q2"]),
+            ) as mock_decompose,
+            patch(
+                "src.tools.sec_filings.multi_retrieve_node",
+                new=AsyncMock(return_value={"candidate_indices": []}),
+            ),
         ):
             self._run(
                 agent,
@@ -210,11 +241,19 @@ class RunSecFilingsRagTimingLogsTests(unittest.TestCase):
         agent.rag.documents = ["doc0", "doc1"]
         agent.rag.doc_metadata = [{"ticker": "NVDA"}, {"ticker": "MSFT"}]
 
-        with patch("src.graph.decompose_node.decompose_query", side_effect=fake_decompose), patch(
-            "src.tools.sec_filings.multi_retrieve_node", side_effect=fake_retrieve
-        ), patch("src.graph.rerank_node._balanced_rerank_indices", side_effect=fake_rerank), self.assertLogs(
-            "rag.tools", level="INFO"
-        ) as cm:
+        with (
+            patch(
+                "src.graph.decompose_node.decompose_query", side_effect=fake_decompose
+            ),
+            patch(
+                "src.tools.sec_filings.multi_retrieve_node", side_effect=fake_retrieve
+            ),
+            patch(
+                "src.graph.rerank_node._balanced_rerank_indices",
+                side_effect=fake_rerank,
+            ),
+            self.assertLogs("rag.tools", level="INFO") as cm,
+        ):
             asyncio.run(
                 run_sec_filings_rag(
                     SecFilingsRAGArgs(

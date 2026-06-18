@@ -1,4 +1,5 @@
 """TypedDicts pour le graphe d'état de l'agent financier."""
+
 from __future__ import annotations
 
 from typing import Any, Literal, TypedDict

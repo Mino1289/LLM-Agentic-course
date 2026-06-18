@@ -5,11 +5,26 @@ from typing import Any
 from src.orchestration.pm_decision import enrich_pm_decision
 from src.orchestration.tool_domains import detect_tool_domains
 
-_NON_TRADE_SIDES = frozenset({
-    "none", "n/a", "na", "hold", "neutral", "neutre", "wait",
-    "no action", "no trade", "informational", "analyse", "analysis",
-    "compare", "comparison", "monitor", "surveiller",
-})
+_NON_TRADE_SIDES = frozenset(
+    {
+        "none",
+        "n/a",
+        "na",
+        "hold",
+        "neutral",
+        "neutre",
+        "wait",
+        "no action",
+        "no trade",
+        "informational",
+        "analyse",
+        "analysis",
+        "compare",
+        "comparison",
+        "monitor",
+        "surveiller",
+    }
+)
 
 _SIDE_ALIASES = {
     "achat": "buy",

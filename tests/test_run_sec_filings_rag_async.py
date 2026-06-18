@@ -64,8 +64,18 @@ class RunSecFilingsRagAsyncTests(unittest.TestCase):
         class FakeRag:
             documents = {0: "nvda chunk A", 1: "nvda chunk B"}
             doc_metadata = [
-                {"ticker": "NVDA", "year": "2024", "source": "nvda-10-k_2024.htm", "section": "Item_1A"},
-                {"ticker": "NVDA", "year": "2024", "source": "nvda-10-k_2024.htm", "section": "Item_1A"},
+                {
+                    "ticker": "NVDA",
+                    "year": "2024",
+                    "source": "nvda-10-k_2024.htm",
+                    "section": "Item_1A",
+                },
+                {
+                    "ticker": "NVDA",
+                    "year": "2024",
+                    "source": "nvda-10-k_2024.htm",
+                    "section": "Item_1A",
+                },
             ]
 
             def __init__(self):
@@ -81,9 +91,16 @@ class RunSecFilingsRagAsyncTests(unittest.TestCase):
             def _rerank(self, **kwargs):
                 return kwargs.get("candidate_indices", [])
 
-        with patch("src.graph.rerank_node._balanced_rerank_indices", return_value=[0, 1]), \
-             patch("src.graph.rerank_node._ticker_counts", return_value={"NVDA": 2}), \
-             patch("src.graph.retrieval_node.asyncio.to_thread", side_effect=_inline_to_thread):
+        with (
+            patch(
+                "src.graph.rerank_node._balanced_rerank_indices", return_value=[0, 1]
+            ),
+            patch("src.graph.rerank_node._ticker_counts", return_value={"NVDA": 2}),
+            patch(
+                "src.graph.retrieval_node.asyncio.to_thread",
+                side_effect=_inline_to_thread,
+            ),
+        ):
             agent = SimpleNamespace(rag=FakeRag(), max_tool_iterations=6)
             args = SecFilingsRAGArgs(
                 query="NVDA 10-K risk factors 2024",
@@ -111,6 +128,7 @@ class ToolsNodeDispatchTests(unittest.TestCase):
         """tools_node should dispatch sec_filings_rag_tool via await,
         not via asyncio.to_thread (which would defeat the fix)."""
         import src.tools.execute as tool_executor_module
+
         source = inspect.getsource(tool_executor_module.ToolExecutor.dispatch)
         # The tool loop in tools_node must call execute_tool (sync wrapper)
         # for sync tools AND a separate path for async tools.

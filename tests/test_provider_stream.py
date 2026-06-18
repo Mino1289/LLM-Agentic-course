@@ -18,6 +18,7 @@ from typing import Any
 
 class _FakeAsyncIterator:
     """Async iterator that yields pre-set chunks in order."""
+
     def __init__(self, items: list[Any]):
         self._items = list(items)
         self._idx = 0
@@ -72,17 +73,21 @@ class _FakeChatCompletions:
 
 class _FakeAsyncClient:
     def __init__(self, chunks: list[_FakeChatCompletionChunk] | None = None):
-        self.chat = type("_Chat", (), {"completions": _FakeChatCompletions(chunks or [])})()
+        self.chat = type(
+            "_Chat", (), {"completions": _FakeChatCompletions(chunks or [])}
+        )()
 
 
 class LLMProviderAsyncInitTests(unittest.TestCase):
     def test_async_client_created_for_openai(self):
         from src.llm.provider import LLMProvider
+
         with unittest.mock.patch("src.llm.provider.AsyncOpenAI") as mock_async:
             mock_async.return_value = _FakeAsyncClient()
             provider = LLMProvider.__new__(LLMProvider)
             # Bypass normal __init__ to control AsyncOpenAI creation
             from src.llm.types import LLMConfig
+
             provider.config = LLMConfig(
                 provider="openai",
                 chat_model="gpt-4o-mini",
@@ -98,6 +103,7 @@ class LLMProviderAsyncInitTests(unittest.TestCase):
         # Gemini uses genai.aio (different path); async_client stays None
         from src.llm.types import LLMConfig
         from src.llm.provider import LLMProvider
+
         provider = LLMProvider.__new__(LLMProvider)
         provider.config = LLMConfig(
             provider="gemini",
@@ -114,6 +120,7 @@ class LLMProviderAsyncStreamTests(unittest.IsolatedAsyncioTestCase):
     def _make_provider(self, chunks: list[_FakeChatCompletionChunk]):
         from src.llm.types import LLMConfig
         from src.llm.provider import LLMProvider
+
         provider = LLMProvider.__new__(LLMProvider)
         provider.config = LLMConfig(
             provider="openai",
@@ -129,7 +136,9 @@ class LLMProviderAsyncStreamTests(unittest.IsolatedAsyncioTestCase):
         chunks = [
             _FakeChatCompletionChunk([_FakeChoice(_FakeDelta(content="Hello "))]),
             _FakeChatCompletionChunk([_FakeChoice(_FakeDelta(content="world"))]),
-            _FakeChatCompletionChunk([_FakeChoice(_FakeDelta(content="!"), finish_reason="stop")]),
+            _FakeChatCompletionChunk(
+                [_FakeChoice(_FakeDelta(content="!"), finish_reason="stop")]
+            ),
         ]
         provider = self._make_provider(chunks)
         tokens = []
@@ -145,6 +154,7 @@ class LLMProviderAsyncStreamTests(unittest.IsolatedAsyncioTestCase):
         ]
         provider = self._make_provider(chunks)
         from src.llm.provider import LLMStreamChunk
+
         stream_chunks: list = []
         async for chunk in provider.ainvoke_with_tools_stream(
             [{"role": "user", "content": "x"}],
@@ -159,25 +169,49 @@ class LLMProviderAsyncStreamTests(unittest.IsolatedAsyncioTestCase):
     async def test_ainvoke_with_tools_stream_accumulates_tool_calls(self):
         # Simulate a streaming tool call: chunks of name/arguments deltas
         chunks = [
-            _FakeChatCompletionChunk([
-                _FakeChoice(_FakeDelta(content="", tool_calls=[
-                    _FakeToolCall(id="c1", name="sec_filings_rag"),
-                ]))
-            ]),
-            _FakeChatCompletionChunk([
-                _FakeChoice(_FakeDelta(content="", tool_calls=[
-                    _FakeToolCall(id="c1", arguments='{"query":'),
-                ]))
-            ]),
-            _FakeChatCompletionChunk([
-                _FakeChoice(_FakeDelta(content="", tool_calls=[
-                    _FakeToolCall(id="c1", arguments='"risk"}'),
-                ]))
-            ]),
-            _FakeChatCompletionChunk([_FakeChoice(_FakeDelta(content=""), finish_reason="tool_calls")]),
+            _FakeChatCompletionChunk(
+                [
+                    _FakeChoice(
+                        _FakeDelta(
+                            content="",
+                            tool_calls=[
+                                _FakeToolCall(id="c1", name="sec_filings_rag"),
+                            ],
+                        )
+                    )
+                ]
+            ),
+            _FakeChatCompletionChunk(
+                [
+                    _FakeChoice(
+                        _FakeDelta(
+                            content="",
+                            tool_calls=[
+                                _FakeToolCall(id="c1", arguments='{"query":'),
+                            ],
+                        )
+                    )
+                ]
+            ),
+            _FakeChatCompletionChunk(
+                [
+                    _FakeChoice(
+                        _FakeDelta(
+                            content="",
+                            tool_calls=[
+                                _FakeToolCall(id="c1", arguments='"risk"}'),
+                            ],
+                        )
+                    )
+                ]
+            ),
+            _FakeChatCompletionChunk(
+                [_FakeChoice(_FakeDelta(content=""), finish_reason="tool_calls")]
+            ),
         ]
         provider = self._make_provider(chunks)
         from src.llm.provider import LLMStreamChunk
+
         stream_chunks: list = []
         async for chunk in provider.ainvoke_with_tools_stream(
             [{"role": "user", "content": "x"}],
@@ -189,7 +223,8 @@ class LLMProviderAsyncStreamTests(unittest.IsolatedAsyncioTestCase):
         # At least one chunk should carry a tool_call_delta
         tool_deltas = [c.tool_call_delta for c in stream_chunks if c.tool_call_delta]
         self.assertGreaterEqual(
-            len(tool_deltas), 1,
+            len(tool_deltas),
+            1,
             f"ainvoke_with_tools_stream must yield tool_call_delta chunks; got {len(tool_deltas)}",
         )
         # At least one chunk should have finish_reason set
@@ -205,6 +240,7 @@ class TokenSinkTests(unittest.IsolatedAsyncioTestCase):
     def _make_provider(self, chunks: list[_FakeChatCompletionChunk]):
         from src.llm.types import LLMConfig
         from src.llm.provider import LLMProvider
+
         provider = LLMProvider.__new__(LLMProvider)
         provider.config = LLMConfig(
             provider="openai",
@@ -218,6 +254,7 @@ class TokenSinkTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_sink_invoked_for_each_text_delta(self):
         from src.llm.sinks import token_sink
+
         chunks = [
             _FakeChatCompletionChunk([_FakeChoice(_FakeDelta(content="A"))]),
             _FakeChatCompletionChunk([_FakeChoice(_FakeDelta(content="B"))]),
@@ -231,8 +268,10 @@ class TokenSinkTests(unittest.IsolatedAsyncioTestCase):
 
         with token_sink(sink):
             async for _ in provider.ainvoke_with_tools_stream(
-                [{"role": "user", "content": "x"}], tools=None,
-                temperature=0.1, max_tokens=100,
+                [{"role": "user", "content": "x"}],
+                tools=None,
+                temperature=0.1,
+                max_tokens=100,
             ):
                 pass
 
@@ -240,6 +279,7 @@ class TokenSinkTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_sink_not_invoked_when_no_sink_registered(self):
         from src.llm.sinks import token_sink
+
         chunks = [
             _FakeChatCompletionChunk([_FakeChoice(_FakeDelta(content="A"))]),
         ]
@@ -247,13 +287,16 @@ class TokenSinkTests(unittest.IsolatedAsyncioTestCase):
         # No sink registered — must not raise
         with token_sink(None):
             async for _ in provider.ainvoke_with_tools_stream(
-                [{"role": "user", "content": "x"}], tools=None,
-                temperature=0.1, max_tokens=100,
+                [{"role": "user", "content": "x"}],
+                tools=None,
+                temperature=0.1,
+                max_tokens=100,
             ):
                 pass
 
     async def test_async_sink_is_awaited(self):
         from src.llm.sinks import token_sink
+
         chunks = [
             _FakeChatCompletionChunk([_FakeChoice(_FakeDelta(content="A"))]),
         ]
@@ -265,8 +308,10 @@ class TokenSinkTests(unittest.IsolatedAsyncioTestCase):
 
         with token_sink(async_sink):
             async for _ in provider.ainvoke_with_tools_stream(
-                [{"role": "user", "content": "x"}], tools=None,
-                temperature=0.1, max_tokens=100,
+                [{"role": "user", "content": "x"}],
+                tools=None,
+                temperature=0.1,
+                max_tokens=100,
             ):
                 pass
 

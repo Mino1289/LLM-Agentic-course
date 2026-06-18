@@ -1,4 +1,5 @@
 """Orchestrateur du graphe LangGraph — noeuds, arêtes, compilation, streaming."""
+
 from __future__ import annotations
 
 import asyncio
@@ -15,7 +16,11 @@ from src.graph.decompose_node import decompose_query_node
 from src.graph.guard import guard_node, route_after_guard
 from src.graph.retrieval_node import multi_retrieve_node
 from src.graph.rerank_node import rerank_node
-from src.graph.agent_node import agent_node, route_after_agent, finalize_from_agent_state
+from src.graph.agent_node import (
+    agent_node,
+    route_after_agent,
+    finalize_from_agent_state,
+)
 from src.graph.tool_execution_node import tools_node
 from src.graph.memory_nodes import memory_context_node
 
@@ -65,17 +70,28 @@ class FinanceLangGraphAgent:
         builder.add_node("finalize", finalize_from_agent_state)
         builder.set_entry_point("prepare")
         builder.add_edge("prepare", "guard")
-        builder.add_conditional_edges("guard", route_after_guard, {"agent": "agent", "finalize": "finalize", END: END})
+        builder.add_conditional_edges(
+            "guard",
+            route_after_guard,
+            {"agent": "agent", "finalize": "finalize", END: END},
+        )
         builder.add_edge("retrieve", "rerank")
         builder.add_edge("rerank", "memory")
         builder.add_edge("memory", "agent")
         builder.add_edge("decompose", "retrieve")
-        builder.add_conditional_edges("agent", route_after_agent, {"tools": "tools", "finalize": "finalize"})
+        builder.add_conditional_edges(
+            "agent", route_after_agent, {"tools": "tools", "finalize": "finalize"}
+        )
         builder.add_edge("tools", "agent")
         builder.add_edge("finalize", END)
         return builder.compile()
 
-    def _initial_state(self, query: str, conversation_id: str | None = None, messages: list[dict[str, str]] | None = None) -> GraphState:
+    def _initial_state(
+        self,
+        query: str,
+        conversation_id: str | None = None,
+        messages: list[dict[str, str]] | None = None,
+    ) -> GraphState:
         return {
             "query": query,
             "messages": messages or [],
@@ -92,25 +108,46 @@ class FinanceLangGraphAgent:
             "stats": {},
         }
 
-    async def ainvoke(self, state: GraphState, config: dict[str, Any] | None = None) -> GraphState:
+    async def ainvoke(
+        self, state: GraphState, config: dict[str, Any] | None = None
+    ) -> GraphState:
         return await self.graph.ainvoke(state, config)
 
-    def invoke(self, state: GraphState, config: dict[str, Any] | None = None) -> GraphState:
+    def invoke(
+        self, state: GraphState, config: dict[str, Any] | None = None
+    ) -> GraphState:
         return self.graph.invoke(state, config)
 
-    async def arun(self, query: str, conversation_id: str | None = None, messages: list[dict[str, str]] | None = None) -> GraphState:
+    async def arun(
+        self,
+        query: str,
+        conversation_id: str | None = None,
+        messages: list[dict[str, str]] | None = None,
+    ) -> GraphState:
         return await self.ainvoke(self._initial_state(query, conversation_id, messages))
 
-    def run(self, query: str, conversation_id: str | None = None, messages: list[dict[str, str]] | None = None) -> GraphState:
+    def run(
+        self,
+        query: str,
+        conversation_id: str | None = None,
+        messages: list[dict[str, str]] | None = None,
+    ) -> GraphState:
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             loop = None
         if loop is not None and loop.is_running():
-            raise RuntimeError("Cannot call run() from inside a running event loop. Use await arun() instead.")
+            raise RuntimeError(
+                "Cannot call run() from inside a running event loop. Use await arun() instead."
+            )
         return asyncio.run(self.arun(query, conversation_id, messages))
 
-    async def astream(self, query: str, conversation_id: str | None = None, messages: list[dict[str, str]] | None = None) -> AsyncIterator[dict]:
+    async def astream(
+        self,
+        query: str,
+        conversation_id: str | None = None,
+        messages: list[dict[str, str]] | None = None,
+    ) -> AsyncIterator[dict]:
         initial_state = self._initial_state(query, conversation_id, messages)
         last_state: GraphState | None = None
         async for event in self.graph.astream_events(initial_state, version="v2"):

@@ -1,4 +1,5 @@
 """Décomposition de requête en sous-requêtes pour améliorer le rappel RAG."""
+
 from __future__ import annotations
 
 import asyncio
@@ -15,7 +16,9 @@ def parse_query_list(raw: str) -> list[str]:
     text = raw.strip()
     if not text:
         return []
-    fence_match = re.match(r"^```(?:json)?\s*(.*?)\s*```$", text, flags=re.DOTALL | re.IGNORECASE)
+    fence_match = re.match(
+        r"^```(?:json)?\s*(.*?)\s*```$", text, flags=re.DOTALL | re.IGNORECASE
+    )
     if fence_match:
         text = fence_match.group(1).strip()
     try:
@@ -34,7 +37,8 @@ def parse_query_list(raw: str) -> list[str]:
             pass
     lines = [ln.strip("-• \t") for ln in text.splitlines()]
     return [
-        ln for ln in lines
+        ln
+        for ln in lines
         if ln and ln not in {"```", "```json", "[", "]"} and not ln.startswith("```")
     ]
 
@@ -51,7 +55,10 @@ async def decompose_query(agent: Any, query: str) -> list[str]:
         f"- a JSON array with {agent.decompose_query_count} to {agent.decompose_query_count + 2} short strings."
     )
     raw = await asyncio.to_thread(
-        agent.rag.provider.generate, prompt, temperature=0.0, max_tokens=350,
+        agent.rag.provider.generate,
+        prompt,
+        temperature=0.0,
+        max_tokens=350,
     )
     parsed = parse_query_list(raw)
     if not parsed:

@@ -34,6 +34,7 @@ def _build_agent_with_astream_events(raw_events: list[dict]):
     """Build a FinanceLangGraphAgent with a graph.astream_events that
     yields the given raw events."""
     from src.graph.flow import FinanceLangGraphAgent
+
     agent = FinanceLangGraphAgent.__new__(FinanceLangGraphAgent)
 
     async def fake_astream_events(state, version=None):
@@ -49,10 +50,13 @@ def _build_agent_with_astream_events(raw_events: list[dict]):
 class RunStreamHelperTests(unittest.TestCase):
     def test_run_stream_invokes_asyncio_run(self):
         from ui.streaming import run_stream
-        agent = _build_agent_with_astream_events([
-            {"event": "on_chain_start", "name": "agent_node", "data": {}},
-            {"event": "on_graph_end", "state": {"answer": "ok", "tool_events": []}},
-        ])
+
+        agent = _build_agent_with_astream_events(
+            [
+                {"event": "on_chain_start", "name": "agent_node", "data": {}},
+                {"event": "on_graph_end", "state": {"answer": "ok", "tool_events": []}},
+            ]
+        )
         text = _FakeTextContainer()
         status = _FakeStatusContainer()
         # run_stream is sync (uses asyncio.run internally)
@@ -62,14 +66,20 @@ class RunStreamHelperTests(unittest.TestCase):
 
     def test_run_stream_flushes_word_buffer_on_separator(self):
         from ui.streaming import run_stream
+
         # Stream yields "Hello" " " "world" "!" as 4 separate on_llm_token events
-        agent = _build_agent_with_astream_events([
-            {"event": "on_llm_token", "token": "Hello"},
-            {"event": "on_llm_token", "token": " "},
-            {"event": "on_llm_token", "token": "world"},
-            {"event": "on_llm_token", "token": "."},
-            {"event": "on_graph_end", "state": {"answer": "Hello world.", "tool_events": []}},
-        ])
+        agent = _build_agent_with_astream_events(
+            [
+                {"event": "on_llm_token", "token": "Hello"},
+                {"event": "on_llm_token", "token": " "},
+                {"event": "on_llm_token", "token": "world"},
+                {"event": "on_llm_token", "token": "."},
+                {
+                    "event": "on_graph_end",
+                    "state": {"answer": "Hello world.", "tool_events": []},
+                },
+            ]
+        )
         text = _FakeTextContainer()
         status = _FakeStatusContainer()
         run_stream(agent, "query", "cid", [], text, status)
@@ -77,7 +87,8 @@ class RunStreamHelperTests(unittest.TestCase):
         #  - first with "Hello " (separator triggered)
         #  - then with "Hello world." (separator or final flush)
         self.assertGreaterEqual(
-            len(text.markdown_calls), 2,
+            len(text.markdown_calls),
+            2,
             f"run_stream must flush word buffer on separator; got {text.markdown_calls}",
         )
         # Last markdown call should contain the full streamed text
@@ -86,17 +97,21 @@ class RunStreamHelperTests(unittest.TestCase):
 
     def test_run_stream_updates_status_on_chain_start(self):
         from ui.streaming import run_stream
-        agent = _build_agent_with_astream_events([
-            {"event": "on_chain_start", "name": "agent_node", "data": {}},
-            {"event": "on_chain_start", "name": "tools_node", "data": {}},
-            {"event": "on_graph_end", "state": {"answer": "x", "tool_events": []}},
-        ])
+
+        agent = _build_agent_with_astream_events(
+            [
+                {"event": "on_chain_start", "name": "agent_node", "data": {}},
+                {"event": "on_chain_start", "name": "tools_node", "data": {}},
+                {"event": "on_graph_end", "state": {"answer": "x", "tool_events": []}},
+            ]
+        )
         text = _FakeTextContainer()
         status = _FakeStatusContainer()
         run_stream(agent, "query", "cid", [], text, status)
         # Status container must have been updated with the node names
         self.assertGreaterEqual(
-            len(status.update_calls), 2,
+            len(status.update_calls),
+            2,
             f"status must be updated on each on_chain_start; got {status.update_calls}",
         )
         self.assertTrue(
@@ -106,6 +121,7 @@ class RunStreamHelperTests(unittest.TestCase):
 
     def test_run_stream_returns_state_from_on_graph_end(self):
         from ui.streaming import run_stream
+
         final_state = {
             "answer": "Réponse finale",
             "tool_events": [
@@ -114,9 +130,11 @@ class RunStreamHelperTests(unittest.TestCase):
             "final_chunks": ["x"],
             "stats": {"chunks_used": 1},
         }
-        agent = _build_agent_with_astream_events([
-            {"event": "on_graph_end", "state": final_state},
-        ])
+        agent = _build_agent_with_astream_events(
+            [
+                {"event": "on_graph_end", "state": final_state},
+            ]
+        )
         text = _FakeTextContainer()
         status = _FakeStatusContainer()
         final = run_stream(agent, "query", "cid", [], text, status)

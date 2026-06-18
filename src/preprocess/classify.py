@@ -1,4 +1,5 @@
 """Classification des fichiers par type SEC et extraction de métadonnées."""
+
 from __future__ import annotations
 
 import os

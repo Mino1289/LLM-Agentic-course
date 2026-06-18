@@ -1,4 +1,5 @@
 """Types communs pour le module RAG."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -72,7 +73,9 @@ class EmbeddingPlan:
                 "\nℹ️ Des chunks restent reportés par la limite configurée pour ce run."
             )
         else:
-            lines.append("\n✅ Tout peut être indexé aujourd'hui avec le quota restant.")
+            lines.append(
+                "\n✅ Tout peut être indexé aujourd'hui avec le quota restant."
+            )
         return "\n".join(lines)
 
 
@@ -89,4 +92,3 @@ class RetrievalResult:
 
 def embedding_sleep_seconds(rpm_limit: int = DEFAULT_EMBEDDING_RPM) -> float:
     return 60.0 / max(rpm_limit, 1)
-

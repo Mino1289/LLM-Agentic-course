@@ -1,4 +1,5 @@
 """Gestion du token sink pour le streaming vers l'UI."""
+
 from __future__ import annotations
 
 import contextvars

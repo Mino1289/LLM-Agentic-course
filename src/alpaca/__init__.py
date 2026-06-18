@@ -1,4 +1,5 @@
 """Module Alpaca — client API + trading tools."""
+
 from src.alpaca.client import (
     AlpacaNotConfiguredError,
     fetch_account_activities,

@@ -1,13 +1,18 @@
 """Extraction de métadonnées depuis les noms de fichiers et sources.
 Réutilise les fonctions de classification depuis src/preprocess/classify.
 """
+
 from __future__ import annotations
 
 import os
 import re
 
-from src.preprocess.classify import extract_year_from_filename as extract_year_from_source
-from src.preprocess.classify import extract_ticker_from_filename as extract_ticker_from_source
+from src.preprocess.classify import (
+    extract_year_from_filename as extract_year_from_source,
+)
+from src.preprocess.classify import (
+    extract_ticker_from_filename as extract_ticker_from_source,
+)
 
 
 def parse_processed_filename(file_path: str) -> tuple[str, str]:

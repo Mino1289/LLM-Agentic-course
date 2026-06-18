@@ -43,7 +43,9 @@ async def stream_chat(
         "message": "Pipeline démarré...",
     }
 
-    api_messages = [{"role": m["role"], "content": m["content"]} for m in record.messages]
+    api_messages = [
+        {"role": m["role"], "content": m["content"]} for m in record.messages
+    ]
 
     final_state: dict[str, Any] | None = None
 

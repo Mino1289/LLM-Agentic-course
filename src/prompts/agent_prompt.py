@@ -1,4 +1,5 @@
 """Prompt système et constructeur de messages pour l'agent conversationnel."""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -66,12 +67,21 @@ def build_lc_messages(agent: Any, state: GraphState) -> list[dict[str, Any]]:
     lc_messages: list[dict[str, Any]] = list(state.get("lc_messages") or [])
     if lc_messages:
         return lc_messages
-    messages: list[dict[str, Any]] = [{"role": "system", "content": AGENT_SYSTEM_PROMPT}]
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": AGENT_SYSTEM_PROMPT}
+    ]
     memory_summary = state.get("memory_summary", "")
     if memory_summary:
-        messages.append({"role": "system", "content": f"Conversation memory:\n{memory_summary}"})
+        messages.append(
+            {"role": "system", "content": f"Conversation memory:\n{memory_summary}"}
+        )
     universe = format_universe_hint(agent, max_items=12)
-    messages.append({"role": "system", "content": f"Tracked tickers: {universe}. Today (UTC): {datetime.now(UTC).date().isoformat()}."})
+    messages.append(
+        {
+            "role": "system",
+            "content": f"Tracked tickers: {universe}. Today (UTC): {datetime.now(UTC).date().isoformat()}.",
+        }
+    )
     history = _format_chat_history(state.get("messages", []), keep_last=8)
     if history:
         messages.append({"role": "system", "content": f"Recent chat:\n{history}"})

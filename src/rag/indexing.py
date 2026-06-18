@@ -1,4 +1,5 @@
 """Indexation vectorielle et embedding des chunks."""
+
 from __future__ import annotations
 
 import time
@@ -24,7 +25,7 @@ DEFAULT_QUOTA_STATE_PATH = DATA_DIR / "embedding_quota_state.json"
 def iter_batches(items: list[int], batch_size: int):
     size = max(1, batch_size)
     for start in range(0, len(items), size):
-        yield items[start: start + size]
+        yield items[start : start + size]
 
 
 def remove_stale_index_entries(collection: Any, valid_ids: list[str]) -> int:
@@ -102,7 +103,9 @@ def load_and_index_data(
     """Charge et indexe les données dans ChromaDB."""
     print(f"Loading and indexing data (chunk_strategy={chunk_strategy})...")
 
-    all_chunks, all_metadata, all_ids, _ = build_corpus(chunk_strategy=chunk_strategy, max_files=max_files)
+    all_chunks, all_metadata, all_ids, _ = build_corpus(
+        chunk_strategy=chunk_strategy, max_files=max_files
+    )
 
     state_path = quota_state_path or DEFAULT_QUOTA_STATE_PATH
     quota_state = QuotaState(state_path)
@@ -118,7 +121,9 @@ def load_and_index_data(
     plan = get_embedding_plan(
         chunk_strategy=chunk_strategy,
         collection=collection,
-        corpus_fn=lambda **_: build_corpus(chunk_strategy=chunk_strategy, max_files=max_files),
+        corpus_fn=lambda **_: build_corpus(
+            chunk_strategy=chunk_strategy, max_files=max_files
+        ),
         max_files=max_files,
         daily_quota_used=daily_quota_used,
         daily_quota_limit=daily_quota_limit,
@@ -148,7 +153,9 @@ def load_and_index_data(
     missing_indices = [i for i, cid in enumerate(all_ids) if cid not in existing_ids]
     indices_to_embed = missing_indices[: plan.embeddable_now]
 
-    print(f"\nEmbedding {len(indices_to_embed)} / {plan.missing_chunks} chunks manquants...")
+    print(
+        f"\nEmbedding {len(indices_to_embed)} / {plan.missing_chunks} chunks manquants..."
+    )
 
     sleep_sec = embedding_sleep_seconds(rpm_limit)
     config = backoff_config or BackoffConfig(max_retries=max_embedding_retries)
@@ -192,10 +199,14 @@ def load_and_index_data(
         embedded += len(batch_indices)
         quota_state.update(batch_size=len(batch_indices), last_error=None)
         if batch_num % 5 == 0 or embedded == len(indices_to_embed):
-            print(f"  Progression : {embedded}/{len(indices_to_embed)} (quota-used={quota_state.quota_used():,})")
+            print(
+                f"  Progression : {embedded}/{len(indices_to_embed)} (quota-used={quota_state.quota_used():,})"
+            )
         time.sleep(sleep_sec)
 
     print(f"Vector indexing complete. Total in DB: {collection.count()}")
     if plan.deferred_chunks > 0:
-        print(f"⏳ {plan.deferred_chunks} chunks restants — l'état quota est persisté dans {state_path}.")
+        print(
+            f"⏳ {plan.deferred_chunks} chunks restants — l'état quota est persisté dans {state_path}."
+        )
     return plan, all_chunks, all_metadata, all_ids

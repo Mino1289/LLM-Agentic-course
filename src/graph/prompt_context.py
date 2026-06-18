@@ -1,4 +1,5 @@
 """Contexte d'univers (tickers couverts) pour les invites LLM."""
+
 from __future__ import annotations
 
 from typing import Any

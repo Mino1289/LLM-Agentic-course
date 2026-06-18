@@ -1,4 +1,5 @@
 """Construction de la configuration LLM depuis les variables d'environnement."""
+
 from __future__ import annotations
 
 import os
@@ -6,8 +7,19 @@ from typing import Optional
 
 from src.llm.types import LLMConfig
 
-SUPPORTED_CHAT_PROVIDERS = {"openai", "github_models", "gemini", "azure_openai", "nvidia_nim"}
-SUPPORTED_EMBEDDING_PROVIDERS = {"openai", "github_models", "azure_openai", "nvidia_nim"}
+SUPPORTED_CHAT_PROVIDERS = {
+    "openai",
+    "github_models",
+    "gemini",
+    "azure_openai",
+    "nvidia_nim",
+}
+SUPPORTED_EMBEDDING_PROVIDERS = {
+    "openai",
+    "github_models",
+    "azure_openai",
+    "nvidia_nim",
+}
 GITHUB_MODELS_BASE_URL = "https://models.inference.ai.azure.com"
 GITHUB_DEFAULT_CHAT_MODEL = "gpt-4.1-mini"
 GITHUB_DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
@@ -38,7 +50,9 @@ def _require_env(name: str) -> str:
     return value
 
 
-def _build_openai_style_embedding_config(provider: str) -> tuple[str, str, Optional[str]]:
+def _build_openai_style_embedding_config(
+    provider: str,
+) -> tuple[str, str, Optional[str]]:
     if provider == "openai":
         return (
             os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"),
@@ -62,7 +76,9 @@ def _build_openai_style_embedding_config(provider: str) -> tuple[str, str, Optio
 
 def _build_azure_openai_embedding_config() -> tuple[str, str, str, str]:
     return (
-        os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT", AZURE_DEFAULT_EMBEDDING_DEPLOYMENT),
+        os.getenv(
+            "AZURE_OPENAI_EMBEDDING_DEPLOYMENT", AZURE_DEFAULT_EMBEDDING_DEPLOYMENT
+        ),
         _require_env("AZURE_OPENAI_API_KEY"),
         _require_env("AZURE_OPENAI_ENDPOINT"),
         os.getenv("AZURE_OPENAI_API_VERSION", AZURE_DEFAULT_API_VERSION),
@@ -78,7 +94,9 @@ def build_llm_config_from_env() -> LLMConfig:
         )
 
     default_embedding = "openai" if provider == "gemini" else provider
-    embedding_provider = os.getenv("EMBEDDING_PROVIDER", default_embedding).strip().lower()
+    embedding_provider = (
+        os.getenv("EMBEDDING_PROVIDER", default_embedding).strip().lower()
+    )
     if embedding_provider not in SUPPORTED_EMBEDDING_PROVIDERS:
         raise ValueError(
             f"Unsupported EMBEDDING_PROVIDER='{embedding_provider}'. "
@@ -86,9 +104,13 @@ def build_llm_config_from_env() -> LLMConfig:
         )
 
     if embedding_provider == "azure_openai":
-        embed_model, embed_key, embed_base, embed_api_ver = _build_azure_openai_embedding_config()
+        embed_model, embed_key, embed_base, embed_api_ver = (
+            _build_azure_openai_embedding_config()
+        )
     else:
-        embed_model, embed_key, embed_base = _build_openai_style_embedding_config(embedding_provider)
+        embed_model, embed_key, embed_base = _build_openai_style_embedding_config(
+            embedding_provider
+        )
         embed_api_ver = None
 
     if provider == "openai":
@@ -115,7 +137,9 @@ def build_llm_config_from_env() -> LLMConfig:
             ),
             embedding_model=embed_model,
             api_key=api_key,
-            base_url=os.getenv("GITHUB_MODELS_BASE_URL", GITHUB_MODELS_BASE_URL).strip(),
+            base_url=os.getenv(
+                "GITHUB_MODELS_BASE_URL", GITHUB_MODELS_BASE_URL
+            ).strip(),
             embedding_provider=embedding_provider,
             embedding_api_key=embed_key,
             embedding_base_url=embed_base,
@@ -128,7 +152,9 @@ def build_llm_config_from_env() -> LLMConfig:
         api_ver = os.getenv("AZURE_OPENAI_API_VERSION", AZURE_DEFAULT_API_VERSION)
         return LLMConfig(
             provider=provider,
-            chat_model=os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT", AZURE_DEFAULT_CHAT_DEPLOYMENT),
+            chat_model=os.getenv(
+                "AZURE_OPENAI_CHAT_DEPLOYMENT", AZURE_DEFAULT_CHAT_DEPLOYMENT
+            ),
             embedding_model=embed_model,
             api_key=api_key,
             base_url=endpoint,
@@ -143,10 +169,13 @@ def build_llm_config_from_env() -> LLMConfig:
         api_key = _require_env("NVIDIA_NIM_API_KEY")
         return LLMConfig(
             provider=provider,
-            chat_model=os.getenv("NVIDIA_NIM_CHAT_MODEL", NVIDIA_NIM_DEFAULT_CHAT_MODEL),
+            chat_model=os.getenv(
+                "NVIDIA_NIM_CHAT_MODEL", NVIDIA_NIM_DEFAULT_CHAT_MODEL
+            ),
             embedding_model=embed_model,
             api_key=api_key,
-            base_url=os.getenv("NVIDIA_NIM_BASE_URL", "").strip() or NVIDIA_NIM_BASE_URL,
+            base_url=os.getenv("NVIDIA_NIM_BASE_URL", "").strip()
+            or NVIDIA_NIM_BASE_URL,
             embedding_provider=embedding_provider,
             embedding_api_key=embed_key,
             embedding_base_url=embed_base,

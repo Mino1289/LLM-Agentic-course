@@ -13,12 +13,14 @@ _LOGGER = logging.getLogger("src.orchestration.human_review_node")
 async def human_review_node(agent: Any, state: HubSpokeState) -> HubSpokeState:
     spoke_events = list(state.get("spoke_events") or [])
 
-    spoke_events.append({
-        "agent": "Human Review",
-        "status": "running",
-        "message": "En attente de l'approbation humaine...",
-        "tool_events": [],
-    })
+    spoke_events.append(
+        {
+            "agent": "Human Review",
+            "status": "running",
+            "message": "En attente de l'approbation humaine...",
+            "tool_events": [],
+        }
+    )
 
     verdict = state.get("compliance_verdict", "N/A")
     answer = (
@@ -27,12 +29,14 @@ async def human_review_node(agent: Any, state: HubSpokeState) -> HubSpokeState:
         "Consultez les détails complets ci-dessous et approuvez ou annulez."
     )
 
-    spoke_events.append({
-        "agent": "Human Review",
-        "status": "completed",
-        "message": "En attente d'approbation...",
-        "tool_events": [],
-    })
+    spoke_events.append(
+        {
+            "agent": "Human Review",
+            "status": "completed",
+            "message": "En attente d'approbation...",
+            "tool_events": [],
+        }
+    )
 
     merged_stats = dict(state.get("stats") or {})
     return {
@@ -46,12 +50,14 @@ async def human_review_node(agent: Any, state: HubSpokeState) -> HubSpokeState:
 @traceable(name="human_approve")
 async def human_approve_node(agent: Any, state: HubSpokeState) -> HubSpokeState:
     spoke_events = list(state.get("spoke_events") or [])
-    spoke_events.append({
-        "agent": "Human Review",
-        "status": "completed",
-        "message": "Trade approuvé par l'humain.",
-        "tool_events": [],
-    })
+    spoke_events.append(
+        {
+            "agent": "Human Review",
+            "status": "completed",
+            "message": "Trade approuvé par l'humain.",
+            "tool_events": [],
+        }
+    )
     return {
         "human_approved": True,
         "human_review_pending": False,
@@ -62,12 +68,14 @@ async def human_approve_node(agent: Any, state: HubSpokeState) -> HubSpokeState:
 @traceable(name="human_reject")
 async def human_reject_node(agent: Any, state: HubSpokeState) -> HubSpokeState:
     spoke_events = list(state.get("spoke_events") or [])
-    spoke_events.append({
-        "agent": "Human Review",
-        "status": "completed",
-        "message": "Trade refusé par l'humain.",
-        "tool_events": [],
-    })
+    spoke_events.append(
+        {
+            "agent": "Human Review",
+            "status": "completed",
+            "message": "Trade refusé par l'humain.",
+            "tool_events": [],
+        }
+    )
     return {
         "human_approved": False,
         "human_review_pending": False,

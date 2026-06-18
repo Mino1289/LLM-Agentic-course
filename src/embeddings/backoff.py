@@ -1,4 +1,5 @@
 """Exponential backoff pour les appels API avec gestion des erreurs permanentes."""
+
 from __future__ import annotations
 
 import random
@@ -9,13 +10,24 @@ from typing import Callable, Optional, TypeVar
 T = TypeVar("T")
 
 _PERMANENT_TYPE_TOKENS = (
-    "Authentication", "Permission", "InvalidApiKey", "Unauthorized",
-    "Forbidden", "AccessDenied", "DimMismatch", "DimensionMismatch",
+    "Authentication",
+    "Permission",
+    "InvalidApiKey",
+    "Unauthorized",
+    "Forbidden",
+    "AccessDenied",
+    "DimMismatch",
+    "DimensionMismatch",
 )
 
 _PERMANENT_MESSAGE_TOKENS = (
-    "401", "403", "invalid api key", "unauthorized", "forbidden",
-    "dim mismatch", "dimension mismatch",
+    "401",
+    "403",
+    "invalid api key",
+    "unauthorized",
+    "forbidden",
+    "dim mismatch",
+    "dimension mismatch",
 )
 
 

@@ -15,6 +15,7 @@ import streamlit as st
 os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
 try:
     from transformers.utils import logging as transformers_logging
+
     transformers_logging.set_verbosity_error()
 except Exception:
     pass
@@ -22,6 +23,7 @@ except Exception:
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.graph.tracing import ensure_langsmith_env
+
 ensure_langsmith_env()
 
 from src.rag.core import HybridRAG
@@ -31,7 +33,9 @@ from src.llm import build_llm_config_from_env
 from src.tools.definitions import get_tool_definitions
 from ui.streaming import run_phase3_stream
 
-st.set_page_config(page_title="Finance RAG Hub-and-Spoke", page_icon="📈", layout="wide")
+st.set_page_config(
+    page_title="Finance RAG Hub-and-Spoke", page_icon="📈", layout="wide"
+)
 
 if "conversation_id" not in st.session_state:
     st.session_state.conversation_id = str(uuid.uuid4())
@@ -80,7 +84,9 @@ def format_counts(counts: dict[str, int] | None) -> str:
     return " | ".join(f"{key}: {value}" for key, value in sorted(counts.items()))
 
 
-def build_sources(chunks: list[str], metadatas: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def build_sources(
+    chunks: list[str], metadatas: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
     sources = []
     for i, chunk in enumerate(chunks):
         meta = metadatas[i] if i < len(metadatas) else {}
@@ -109,7 +115,9 @@ def render_tool_thoughts(tool_events: list[dict[str, Any]], key_prefix: str) -> 
             st.markdown(f"{idx}. L'agent utilise l'outil **{tool_name}** — {summary}")
 
 
-def render_report_downloads(report_artifacts: list[dict[str, Any]], key_prefix: str) -> None:
+def render_report_downloads(
+    report_artifacts: list[dict[str, Any]], key_prefix: str
+) -> None:
     if not report_artifacts:
         return
     st.markdown("**Rapports générés**")
@@ -144,7 +152,9 @@ def render_stats(stats: dict[str, Any]) -> None:
         items.append(("Appels outils", str(spoke_tc)))
     if spoke_llm:
         items.append(("Itérations LLM", str(spoke_llm)))
-    total_tokens = stats.get("llm_total_tokens", 0) + stats.get("guard_total_tokens", 0) or stats.get("estimated_context_tokens", 0)
+    total_tokens = stats.get("llm_total_tokens", 0) + stats.get(
+        "guard_total_tokens", 0
+    ) or stats.get("estimated_context_tokens", 0)
     if total_tokens:
         items.append(("Tokens", str(total_tokens)))
     if stats.get("chunks_used"):
@@ -152,7 +162,12 @@ def render_stats(stats: dict[str, Any]) -> None:
     if stats.get("retrieval_candidate_count"):
         items.append(("Candidats", str(stats["retrieval_candidate_count"])))
     if stats.get("rerank_final_count", stats.get("chunks_used")):
-        items.append(("Final", str(stats.get("rerank_final_count") or stats.get("chunks_used", ""))))
+        items.append(
+            (
+                "Final",
+                str(stats.get("rerank_final_count") or stats.get("chunks_used", "")),
+            )
+        )
     if stats.get("price_tool_used"):
         items.append(("Prix", "oui"))
     if stats.get("rag_tool_used"):
@@ -173,18 +188,31 @@ def render_sources(sources: list[dict[str, Any]], key_prefix: str) -> None:
     if not sources:
         return
     counts = Counter(str(source.get("ticker", "UNKNOWN")) for source in sources)
-    summary = ", ".join(f"{ticker}: {count}" for ticker, count in sorted(counts.items()))
+    summary = ", ".join(
+        f"{ticker}: {count}" for ticker, count in sorted(counts.items())
+    )
     with st.expander(f"Sources consultées ({len(sources)} chunks | {summary})"):
-        tickers = ["Tous"] + sorted({str(source.get("ticker", "UNKNOWN")) for source in sources})
-        sections = ["Toutes"] + sorted({str(source.get("section", "unknown")) for source in sources})
+        tickers = ["Tous"] + sorted(
+            {str(source.get("ticker", "UNKNOWN")) for source in sources}
+        )
+        sections = ["Toutes"] + sorted(
+            {str(source.get("section", "unknown")) for source in sources}
+        )
         col1, col2 = st.columns(2)
-        selected_ticker = col1.selectbox("Ticker", tickers, key=f"{key_prefix}_source_ticker")
-        selected_section = col2.selectbox("Section", sections, key=f"{key_prefix}_source_section")
+        selected_ticker = col1.selectbox(
+            "Ticker", tickers, key=f"{key_prefix}_source_ticker"
+        )
+        selected_section = col2.selectbox(
+            "Section", sections, key=f"{key_prefix}_source_section"
+        )
         visible_sources = []
         for source in sources:
             if selected_ticker != "Tous" and source.get("ticker") != selected_ticker:
                 continue
-            if selected_section != "Toutes" and source.get("section") != selected_section:
+            if (
+                selected_section != "Toutes"
+                and source.get("section") != selected_section
+            ):
                 continue
             visible_sources.append(source)
         for source_idx, source in enumerate(visible_sources, start=1):
@@ -276,7 +304,9 @@ def render_human_review(state: dict[str, Any]) -> None:
             st.markdown(f"**Prix limite:** {decision['limit_price']}")
     with col2:
         st.metric("Buying Power", "À vérifier")
-        st.metric("Risque", "Faible" if state.get("compliance_verdict") == "PASS" else "Élevé")
+        st.metric(
+            "Risque", "Faible" if state.get("compliance_verdict") == "PASS" else "Élevé"
+        )
 
     with st.expander("Justification complète"):
         st.markdown(decision.get("response", "N/A"))
@@ -300,8 +330,12 @@ st.sidebar.caption("Routeur d'intention → agents spécialisés Hub-and-Spoke")
 try:
     llm_config = build_llm_config_from_env()
     st.sidebar.subheader("Modèles")
-    st.sidebar.markdown(f"**Chat** : `{llm_config.provider}` · `{llm_config.chat_model}`")
-    st.sidebar.markdown(f"**Embeddings** : `{llm_config.embedding_provider}` · `{llm_config.embedding_model}`")
+    st.sidebar.markdown(
+        f"**Chat** : `{llm_config.provider}` · `{llm_config.chat_model}`"
+    )
+    st.sidebar.markdown(
+        f"**Embeddings** : `{llm_config.embedding_provider}` · `{llm_config.embedding_model}`"
+    )
     if os.getenv("LANGSMITH_TRACING", "").strip().lower() in {"1", "true", "yes"}:
         region = os.getenv("LANGSMITH_REGION", "us").upper()
         project = os.getenv("LANGSMITH_PROJECT", "")
@@ -310,7 +344,9 @@ except Exception as config_exc:
     st.sidebar.error(f"Config LLM : {config_exc}")
 
 st.sidebar.subheader("Outils disponibles")
-st.sidebar.caption("10 outils (contrat type MCP). Les agents les appellent dynamiquement.")
+st.sidebar.caption(
+    "10 outils (contrat type MCP). Les agents les appellent dynamiquement."
+)
 for tool in get_tool_definitions():
     fn = tool.get("function", {})
     name = fn.get("name", "outil")
@@ -324,7 +360,9 @@ for tool in get_tool_definitions():
             st.markdown("**Paramètres**")
             for param_name, param_info in properties.items():
                 req = " *(requis)*" if param_name in required else ""
-                st.markdown(f"- `{param_name}`{req} — {param_info.get('description', '')}")
+                st.markdown(
+                    f"- `{param_name}`{req} — {param_info.get('description', '')}"
+                )
 
 st.sidebar.divider()
 st.sidebar.subheader("Configuration")
@@ -336,13 +374,33 @@ price_max_tickers_default = int(os.getenv("PRICE_MAX_TICKERS", "3"))
 price_default_days_default = int(os.getenv("PRICE_DEFAULT_DAYS", "90"))
 max_tool_iterations_default = int(os.getenv("MAX_TOOL_ITERATIONS", "6"))
 
-max_context_chunks = st.sidebar.slider("Chunks max", min_value=4, max_value=12, value=max_context_chunks_default)
-decompose_query_count = st.sidebar.slider("Nb sous-requêtes", min_value=1, max_value=8, value=decompose_query_count_default)
-price_max_days = st.sidebar.slider("Prix max jours", min_value=30, max_value=365, value=price_max_days_default)
-price_max_points = st.sidebar.slider("Prix max points", min_value=10, max_value=120, value=price_max_points_default)
-price_max_tickers = st.sidebar.slider("Prix max tickers", min_value=1, max_value=5, value=price_max_tickers_default)
-price_default_days = st.sidebar.slider("Prix fenêtre défaut (jours)", min_value=15, max_value=180, value=price_default_days_default)
-max_tool_iterations = st.sidebar.slider("Max itérations agent/outils", min_value=2, max_value=10, value=max_tool_iterations_default)
+max_context_chunks = st.sidebar.slider(
+    "Chunks max", min_value=4, max_value=12, value=max_context_chunks_default
+)
+decompose_query_count = st.sidebar.slider(
+    "Nb sous-requêtes", min_value=1, max_value=8, value=decompose_query_count_default
+)
+price_max_days = st.sidebar.slider(
+    "Prix max jours", min_value=30, max_value=365, value=price_max_days_default
+)
+price_max_points = st.sidebar.slider(
+    "Prix max points", min_value=10, max_value=120, value=price_max_points_default
+)
+price_max_tickers = st.sidebar.slider(
+    "Prix max tickers", min_value=1, max_value=5, value=price_max_tickers_default
+)
+price_default_days = st.sidebar.slider(
+    "Prix fenêtre défaut (jours)",
+    min_value=15,
+    max_value=180,
+    value=price_default_days_default,
+)
+max_tool_iterations = st.sidebar.slider(
+    "Max itérations agent/outils",
+    min_value=2,
+    max_value=10,
+    value=max_tool_iterations_default,
+)
 
 if st.sidebar.button("Nouvelle conversation", use_container_width=True):
     st.session_state.conversation_id = str(uuid.uuid4())
@@ -439,23 +497,33 @@ if query:
                 "tool_events": tool_events if tool_events else [],
                 "report_artifacts": [],
             }
-            render_assistant_artifacts(message, key_prefix=f"live_{len(st.session_state.messages)}")
+            render_assistant_artifacts(
+                message, key_prefix=f"live_{len(st.session_state.messages)}"
+            )
             st.session_state.messages.append(message)
 
         except Exception as e:
             error_msg = f"Erreur lors de l'analyse: {e}"
             st.error(error_msg)
-            st.session_state.messages.append({"role": "assistant", "content": error_msg})
+            st.session_state.messages.append(
+                {"role": "assistant", "content": error_msg}
+            )
 
 # Traitement approve/reject : doit être HORS du bloc if query: pour survivre aux reruns
-if st.session_state.get("pending_trade_state") and st.session_state.get("pending_trade_approved") is None:
+if (
+    st.session_state.get("pending_trade_state")
+    and st.session_state.get("pending_trade_approved") is None
+):
     render_human_review(st.session_state.pending_trade_state)
 elif st.session_state.get("pending_trade_approved") is True:
     st.info("✅ Trade approuvé. Exécution en cours...")
     hub_graph = HubAndSpokeGraph(agent, max_spoke_iterations=3)
-    final_state = asyncio.run(hub_graph.resume_after_human(
-        st.session_state.pending_trade_state, approved=True,
-    ))
+    final_state = asyncio.run(
+        hub_graph.resume_after_human(
+            st.session_state.pending_trade_state,
+            approved=True,
+        )
+    )
     st.success(final_state.get("answer", "Trade exécuté."))
     st.session_state.pending_trade_state = None
     st.session_state.pending_trade_approved = None
@@ -465,4 +533,6 @@ elif st.session_state.get("pending_trade_approved") is False:
     st.session_state.pending_trade_approved = None
 
 st.divider()
-st.caption("OpenAI/GitHub Models/Gemini + ChromaDB + LangGraph · Orchestration Hub-and-Spoke multi-agents")
+st.caption(
+    "OpenAI/GitHub Models/Gemini + ChromaDB + LangGraph · Orchestration Hub-and-Spoke multi-agents"
+)

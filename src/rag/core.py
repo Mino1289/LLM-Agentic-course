@@ -1,4 +1,5 @@
 """Classe principale HybridRAG — point d'entrée pour la RAG financière."""
+
 from __future__ import annotations
 
 from typing import Generator, Optional
@@ -13,7 +14,11 @@ from src.rag.types import (
     RetrievalResult,
     ChunkStrategy,
 )
-from src.rag.search.vector import vector_search, apply_metadata_filter, deduplicate_indices
+from src.rag.search.vector import (
+    vector_search,
+    apply_metadata_filter,
+    deduplicate_indices,
+)
 from src.rag.search.rerank import rerank
 from src.rag.corpus import build_corpus
 from src.rag.indexing import load_and_index_data, get_embedding_plan
@@ -53,7 +58,14 @@ class HybridRAG:
         return get_embedding_plan(
             chunk_strategy=self.chunk_strategy,
             collection=self.collection,
-            corpus_fn=lambda **_: build_corpus(chunk_strategy=self.chunk_strategy, **({"max_files": kwargs.get("max_files")} if "max_files" in kwargs else {})),
+            corpus_fn=lambda **_: build_corpus(
+                chunk_strategy=self.chunk_strategy,
+                **(
+                    {"max_files": kwargs.get("max_files")}
+                    if "max_files" in kwargs
+                    else {}
+                ),
+            ),
             **kwargs,
         )
 
@@ -102,13 +114,21 @@ class HybridRAG:
         )
 
         candidate_indices = deduplicate_indices(candidate_indices)
-        candidate_indices = apply_metadata_filter(candidate_indices, metadata_filter, self.doc_metadata)
+        candidate_indices = apply_metadata_filter(
+            candidate_indices, metadata_filter, self.doc_metadata
+        )
 
         retrieval_latency_ms = (time.perf_counter() - start) * 1000
 
         rerank_start = time.perf_counter()
         if rerank_enabled and candidate_indices:
-            final_indices = rerank(query, candidate_indices, self.documents, self.reranker_model, top_k=top_k)
+            final_indices = rerank(
+                query,
+                candidate_indices,
+                self.documents,
+                self.reranker_model,
+                top_k=top_k,
+            )
         else:
             final_indices = candidate_indices[:top_k]
 
@@ -158,7 +178,12 @@ Format attendu:
         use_reranking: Optional[bool] = None,
         metadata_filter: Optional[dict] = None,
     ) -> tuple[str, RetrievalResult]:
-        retrieval = self.retrieve(query, search_mode=search_mode, use_reranking=use_reranking, metadata_filter=metadata_filter)
+        retrieval = self.retrieve(
+            query,
+            search_mode=search_mode,
+            use_reranking=use_reranking,
+            metadata_filter=metadata_filter,
+        )
         prompt = self.build_prompt(query, retrieval.chunks)
         response = self.provider.generate(prompt)
         return response, retrieval
@@ -170,7 +195,12 @@ Format attendu:
         use_reranking: Optional[bool] = None,
         metadata_filter: Optional[dict] = None,
     ) -> Generator[str, None, RetrievalResult]:
-        retrieval = self.retrieve(query, search_mode=search_mode, use_reranking=use_reranking, metadata_filter=metadata_filter)
+        retrieval = self.retrieve(
+            query,
+            search_mode=search_mode,
+            use_reranking=use_reranking,
+            metadata_filter=metadata_filter,
+        )
         prompt = self.build_prompt(query, retrieval.chunks)
         for chunk in self.provider.generate_stream(prompt):
             yield chunk

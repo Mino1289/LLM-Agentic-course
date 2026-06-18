@@ -9,11 +9,21 @@ from typing import Any, AsyncIterator
 from langgraph.graph import END, StateGraph
 
 from src.orchestration.state import HubSpokeState
-from src.orchestration.intent_router import intent_router_node, route_after_intent_router
+from src.orchestration.intent_router import (
+    intent_router_node,
+    route_after_intent_router,
+)
 from src.orchestration.pm_node import pm_plan_node, pm_synthesis_node
 from src.orchestration.spoke_agents import analyze_parallel_node
-from src.orchestration.compliance_node import compliance_validator_node, route_after_compliance
-from src.orchestration.human_review_node import human_review_node, human_approve_node, human_reject_node
+from src.orchestration.compliance_node import (
+    compliance_validator_node,
+    route_after_compliance,
+)
+from src.orchestration.human_review_node import (
+    human_review_node,
+    human_approve_node,
+    human_reject_node,
+)
 from src.orchestration.executor_node import executor_trader_node
 from src.orchestration.progress import bind_progress_queue, clear_progress_queue
 from src.orchestration.simple_agent_node import simple_agent_node
@@ -75,22 +85,34 @@ class HubAndSpokeGraph:
         builder.add_node("executor_trader", self._bind(executor_trader_node))
 
         builder.set_entry_point("intent_router")
-        builder.add_conditional_edges("intent_router", route_after_intent_router, {
-            "simple_agent": "simple_agent",
-            "pm_plan": "pm_plan",
-        })
+        builder.add_conditional_edges(
+            "intent_router",
+            route_after_intent_router,
+            {
+                "simple_agent": "simple_agent",
+                "pm_plan": "pm_plan",
+            },
+        )
         builder.add_edge("simple_agent", END)
         builder.add_edge("pm_plan", "analyze_parallel")
         builder.add_edge("analyze_parallel", "pm_synthesis")
-        builder.add_conditional_edges("pm_synthesis", route_after_pm_synthesis, {
-            "compliance_validator": "compliance_validator",
-            "__end__": END,
-        })
-        builder.add_conditional_edges("compliance_validator", route_after_compliance, {
-            "pm_plan": "pm_plan",
-            "human_review": "human_review",
-            "__end__": END,
-        })
+        builder.add_conditional_edges(
+            "pm_synthesis",
+            route_after_pm_synthesis,
+            {
+                "compliance_validator": "compliance_validator",
+                "__end__": END,
+            },
+        )
+        builder.add_conditional_edges(
+            "compliance_validator",
+            route_after_compliance,
+            {
+                "pm_plan": "pm_plan",
+                "human_review": "human_review",
+                "__end__": END,
+            },
+        )
         builder.add_edge("human_review", END)
         builder.add_edge("human_approve", "executor_trader")
         builder.add_edge("human_reject", END)
@@ -135,7 +157,9 @@ class HubAndSpokeGraph:
         except RuntimeError:
             loop = None
         if loop is not None and loop.is_running():
-            raise RuntimeError("Cannot call invoke() from inside a running event loop. Use await arun() instead.")
+            raise RuntimeError(
+                "Cannot call invoke() from inside a running event loop. Use await arun() instead."
+            )
         return asyncio.run(self.ainvoke(state))
 
     async def astream(
@@ -150,7 +174,9 @@ class HubAndSpokeGraph:
 
         async def pump_graph() -> None:
             try:
-                async for event in self._astream_graph(query, conversation_id, messages):
+                async for event in self._astream_graph(
+                    query, conversation_id, messages
+                ):
                     await graph_q.put(event)
             except Exception as exc:
                 _LOGGER.exception("Graph stream failed")

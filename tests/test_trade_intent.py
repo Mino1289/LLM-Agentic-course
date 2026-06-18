@@ -1,6 +1,9 @@
 import unittest
 
-from src.orchestration.tool_domains import detect_tool_domains, resolve_route_from_domains
+from src.orchestration.tool_domains import (
+    detect_tool_domains,
+    resolve_route_from_domains,
+)
 from src.orchestration.trade_intent import (
     has_trade_proposal,
     is_trade_requested,

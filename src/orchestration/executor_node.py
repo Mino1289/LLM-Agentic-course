@@ -21,12 +21,14 @@ async def executor_trader_node(agent: Any, state: HubSpokeState) -> HubSpokeStat
     compliance_detail = state.get("compliance_detail", "No compliance detail")
     spoke_events = list(state.get("spoke_events") or [])
 
-    spoke_events.append({
-        "agent": "Executor Trader",
-        "status": "running",
-        "message": "Exécution de l'ordre sur le marché...",
-        "tool_events": [],
-    })
+    spoke_events.append(
+        {
+            "agent": "Executor Trader",
+            "status": "running",
+            "message": "Exécution de l'ordre sur le marché...",
+            "tool_events": [],
+        }
+    )
 
     task = f"""Compliance approved this decision:
 {decision_text}
@@ -38,15 +40,21 @@ Confirm the execution result: ticker, side, quantity, filled price, status."""
 
     try:
         result, spoke_stats = await run_spoke_agent(
-            agent, EXECUTOR_PROMPT, task, EXECUTOR_TOOLS, dict(state),
+            agent,
+            EXECUTOR_PROMPT,
+            task,
+            EXECUTOR_TOOLS,
+            dict(state),
         )
 
-        spoke_events.append({
-            "agent": "Executor Trader",
-            "status": "completed",
-            "message": "Ordre exécuté avec succès.",
-            "tool_events": [],
-        })
+        spoke_events.append(
+            {
+                "agent": "Executor Trader",
+                "status": "completed",
+                "message": "Ordre exécuté avec succès.",
+                "tool_events": [],
+            }
+        )
 
         merged_stats = dict(state.get("stats") or {})
         merged_stats.update(spoke_stats)
@@ -58,12 +66,14 @@ Confirm the execution result: ticker, side, quantity, filled price, status."""
         }
     except Exception as e:
         _LOGGER.exception("Executor trader failed")
-        spoke_events.append({
-            "agent": "Executor Trader",
-            "status": "failed",
-            "message": f"Erreur: {e}",
-            "tool_events": [],
-        })
+        spoke_events.append(
+            {
+                "agent": "Executor Trader",
+                "status": "failed",
+                "message": f"Erreur: {e}",
+                "tool_events": [],
+            }
+        )
         return {
             "trade_result": {"status": "failed", "error": str(e)},
             "answer": f"Erreur lors de l'exécution: {e}",

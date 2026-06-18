@@ -1,4 +1,5 @@
 """Client Gemini pour les appels LLM et streaming."""
+
 from __future__ import annotations
 
 import asyncio
@@ -42,6 +43,7 @@ class GeminiClient:
     def _get_gemini_client(self):
         if self._gemini_client is None:
             from google import genai
+
             self._gemini_client = genai.Client(api_key=self.config.api_key)
         return self._gemini_client
 
@@ -55,6 +57,7 @@ class GeminiClient:
         client = self._get_gemini_client()
         # Note: sync call ne peut pas await, on skip le rate limit ici (peu utilisé)
         from google.genai import types
+
         system_instruction, contents = _gemini_contents_from_messages(messages)
         config_kwargs: dict[str, Any] = {
             "temperature": temperature,
@@ -86,7 +89,9 @@ class GeminiClient:
                 "prompt_tokens": usage_meta.prompt_token_count,
                 "completion_tokens": usage_meta.candidates_token_count,
                 "total_tokens": usage_meta.total_token_count,
-            } if usage_meta else None,
+            }
+            if usage_meta
+            else None,
         )
 
     async def ainvoke_with_tools_stream(
@@ -101,7 +106,10 @@ class GeminiClient:
             from google.genai import types
         except ImportError:
             yield LLMStreamChunk(
-                delta=self.invoke_with_tools(messages, tools, temperature, max_tokens).content or "",
+                delta=self.invoke_with_tools(
+                    messages, tools, temperature, max_tokens
+                ).content
+                or "",
                 finish_reason="stop",
             )
             return
@@ -138,18 +146,27 @@ class GeminiClient:
                 yield LLMStreamChunk(
                     delta=full.content or "",
                     tool_call_delta=[
-                        {"id": tc.id, "name": tc.name, "arguments": tc.arguments, "thought_signature": tc.thought_signature}
+                        {
+                            "id": tc.id,
+                            "name": tc.name,
+                            "arguments": tc.arguments,
+                            "thought_signature": tc.thought_signature,
+                        }
                         for tc in full.tool_calls
-                    ] or None,
+                    ]
+                    or None,
                     finish_reason="stop",
                 )
                 return
             except Exception as exc:
                 from google.genai.errors import ClientError
+
                 is_429 = isinstance(exc, ClientError) and getattr(exc, "code", 0) == 429
                 if is_429 and attempt < max_retries - 1:
-                    wait = 2 ** attempt * 10
-                    yield LLMStreamChunk(delta=f"\n[Rate limit dépassé, attente {wait}s...]\n")
+                    wait = 2**attempt * 10
+                    yield LLMStreamChunk(
+                        delta=f"\n[Rate limit dépassé, attente {wait}s...]\n"
+                    )
                     await asyncio.sleep(wait)
                     continue
                 raise
@@ -179,7 +196,9 @@ class GeminiClient:
                                 "index": index_counter,
                                 "id": str(uuid.uuid4()),
                                 "name": getattr(fc, "name", "") or "",
-                                "arguments": json.dumps(dict(getattr(fc, "args", None) or {})),
+                                "arguments": json.dumps(
+                                    dict(getattr(fc, "args", None) or {})
+                                ),
                                 "thought_signature": ts,
                             }
                         )

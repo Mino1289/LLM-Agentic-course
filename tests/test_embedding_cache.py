@@ -143,7 +143,9 @@ class EmbeddingCacheUnitTests(unittest.TestCase):
         raw = json.loads(self.cache_file.read_text())
         self.assertEqual(len(raw), 2)
         # No leftover .tmp file.
-        self.assertFalse(self.cache_file.with_suffix(self.cache_file.suffix + ".tmp").exists())
+        self.assertFalse(
+            self.cache_file.with_suffix(self.cache_file.suffix + ".tmp").exists()
+        )
 
 
 class EmbeddingCacheProviderIntegrationTests(unittest.TestCase):

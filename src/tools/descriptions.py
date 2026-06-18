@@ -1,4 +1,5 @@
 """Descriptions et normalisation pour les outils SEC / marchés / Alpaca."""
+
 from __future__ import annotations
 
 import re
@@ -133,13 +134,15 @@ def format_rag_excerpts(chunks: list[str], metadatas: list[dict[str, Any]]) -> s
     rows: list[dict[str, Any]] = []
     for idx, chunk in enumerate(chunks):
         meta = metadatas[idx] if idx < len(metadatas) else {}
-        rows.append({
-            "i": idx + 1,
-            "ticker": str(meta.get("ticker", "UNKNOWN")),
-            "year": str(meta.get("year", "unknown")),
-            "file_type": str(meta.get("file_type", "unknown")),
-            "section": str(meta.get("section", "unknown")),
-            "source": str(meta.get("source", "unknown")),
-            "text": chunk[:1200],
-        })
+        rows.append(
+            {
+                "i": idx + 1,
+                "ticker": str(meta.get("ticker", "UNKNOWN")),
+                "year": str(meta.get("year", "unknown")),
+                "file_type": str(meta.get("file_type", "unknown")),
+                "section": str(meta.get("section", "unknown")),
+                "source": str(meta.get("source", "unknown")),
+                "text": chunk[:1200],
+            }
+        )
     return toon_encode({"excerpts": rows})

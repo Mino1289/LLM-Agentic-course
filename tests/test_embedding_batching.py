@@ -130,7 +130,9 @@ class IndexingBatchContractTests(unittest.TestCase):
         rag, _ = self._index(num_chunks=100, embedding_batch_size=32)
         for call in rag.provider.embed.call_args_list:
             args = call.args
-            self.assertEqual(len(args), 1, "embed() must take exactly one positional arg")
+            self.assertEqual(
+                len(args), 1, "embed() must take exactly one positional arg"
+            )
             self.assertIsInstance(args[0], list, "embed() arg must be a list")
             self.assertGreater(len(args[0]), 0, "embed() batch must be non-empty")
             for text in args[0]:

@@ -1,4 +1,5 @@
 """Entrées/sorties pour le prétraitement SEC."""
+
 from __future__ import annotations
 
 import os

@@ -1,4 +1,5 @@
 """Nettoyage et normalisation de texte SEC."""
+
 from __future__ import annotations
 
 import html as html_module
@@ -32,7 +33,10 @@ def cap_section_text(section_name: str, text: str) -> str:
     cut = text[:limit]
     if "\n\n" in cut:
         cut = cut.rsplit("\n\n", 1)[0]
-    return cut.rstrip() + f"\n\n[... section tronquée à {limit:,} caractères pour le quota d'embedding ...]"
+    return (
+        cut.rstrip()
+        + f"\n\n[... section tronquée à {limit:,} caractères pour le quota d'embedding ...]"
+    )
 
 
 def compress_markdown_tables(text: str, max_rows: int = MAX_TABLE_ROWS) -> str:

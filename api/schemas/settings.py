@@ -10,7 +10,9 @@ class AgentSettings(BaseModel):
     price_max_days: int = Field(default=180, alias="priceMaxDays", ge=30, le=365)
     price_max_points: int = Field(default=40, alias="priceMaxPoints", ge=10, le=120)
     price_max_tickers: int = Field(default=3, alias="priceMaxTickers", ge=1, le=5)
-    price_default_window: int = Field(default=90, alias="priceDefaultWindow", ge=15, le=180)
+    price_default_window: int = Field(
+        default=90, alias="priceDefaultWindow", ge=15, le=180
+    )
     max_iterations: int = Field(default=6, alias="maxIterations", ge=2, le=10)
     max_spoke_iterations: int = Field(default=3, alias="maxSpokeIterations", ge=1, le=5)
 

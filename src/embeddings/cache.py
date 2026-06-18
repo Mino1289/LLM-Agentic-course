@@ -1,4 +1,5 @@
 """Persistent cache for query embeddings."""
+
 from __future__ import annotations
 
 import hashlib
@@ -121,9 +122,13 @@ def build_embedding_cache_from_env() -> EmbeddingCache:
     except (TypeError, ValueError):
         ttl = DEFAULT_TTL_SECONDS
     try:
-        max_entries = int(os.getenv("EMBEDDING_CACHE_MAX_ENTRIES", str(DEFAULT_MAX_ENTRIES)))
+        max_entries = int(
+            os.getenv("EMBEDDING_CACHE_MAX_ENTRIES", str(DEFAULT_MAX_ENTRIES))
+        )
     except (TypeError, ValueError):
         max_entries = DEFAULT_MAX_ENTRIES
     if os.getenv("EMBEDDING_CACHE_DISABLED", "0") == "1":
-        cache_file = Path(tempfile.mkdtemp(prefix="embedding_cache_disabled_")) / "cache.json"
+        cache_file = (
+            Path(tempfile.mkdtemp(prefix="embedding_cache_disabled_")) / "cache.json"
+        )
     return EmbeddingCache(cache_file, ttl_seconds=ttl, max_entries=max_entries)

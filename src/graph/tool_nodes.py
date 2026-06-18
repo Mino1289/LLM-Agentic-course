@@ -1,4 +1,5 @@
 """Noeud outils — décision LLM d'appel market_price, extraction fenêtre de prix, yfinance."""
+
 from __future__ import annotations
 
 import json
@@ -32,10 +33,14 @@ def _extract_first_json_object(raw: str) -> dict[str, Any] | None:
 
 def _allowed_tickers_from_universe(agent: Any, max_items: int = 20) -> list[str]:
     universe_hint = format_universe_hint(agent, max_items=max_items)
-    return [token.strip().upper() for token in universe_hint.split(",") if token.strip()]
+    return [
+        token.strip().upper() for token in universe_hint.split(",") if token.strip()
+    ]
 
 
-def _extract_explicit_tickers(query: str, allowed_tickers: list[str], max_items: int) -> list[str]:
+def _extract_explicit_tickers(
+    query: str, allowed_tickers: list[str], max_items: int
+) -> list[str]:
     allowed = set(allowed_tickers)
     found = []
     for token in re.findall(r"\b[A-Za-z]{2,5}\b", query):
@@ -47,7 +52,9 @@ def _extract_explicit_tickers(query: str, allowed_tickers: list[str], max_items:
     return found
 
 
-def _normalize_tickers(raw_tickers: Any, allowed_tickers: list[str], max_items: int) -> list[str]:
+def _normalize_tickers(
+    raw_tickers: Any, allowed_tickers: list[str], max_items: int
+) -> list[str]:
     if isinstance(raw_tickers, str):
         candidates = re.split(r"[,\s]+", raw_tickers.strip())
     elif isinstance(raw_tickers, list):
@@ -69,11 +76,21 @@ def has_sufficient_price_context(price_context: str) -> bool:
     return "Fenetre prix:" in price_context and "points[" in price_context
 
 
-def _minimal_tool_fallback(query: str, metadata_filter: dict[str, str], fallback_tickers: list[str]) -> tuple[bool, str, list[str]]:
+def _minimal_tool_fallback(
+    query: str, metadata_filter: dict[str, str], fallback_tickers: list[str]
+) -> tuple[bool, str, list[str]]:
     if not query.strip():
         return False, "fallback_empty_query", fallback_tickers
     lower_q = query.lower()
-    explicit_price_keywords = ["prix", "cours", "performance", "volatil", "drawdown", "return", "chart"]
+    explicit_price_keywords = [
+        "prix",
+        "cours",
+        "performance",
+        "volatil",
+        "drawdown",
+        "return",
+        "chart",
+    ]
     if any(token in lower_q for token in explicit_price_keywords):
         return True, "fallback_explicit_price_keyword", fallback_tickers
     if metadata_filter.get("ticker") and "compare" in lower_q:
@@ -81,13 +98,25 @@ def _minimal_tool_fallback(query: str, metadata_filter: dict[str, str], fallback
     return False, "fallback_not_needed", fallback_tickers
 
 
-def llm_tool_decision(agent: Any, query: str, metadata_filter: dict[str, str],
-                       messages: list[dict[str, str]], enough_price_context: bool,
-                       attempts: int, fallback_tickers: list[str]) -> tuple[bool, str, list[str], str]:
-    fallback_decision, fallback_reason, fallback_tickers = _minimal_tool_fallback(query, metadata_filter, fallback_tickers)
+def llm_tool_decision(
+    agent: Any,
+    query: str,
+    metadata_filter: dict[str, str],
+    messages: list[dict[str, str]],
+    enough_price_context: bool,
+    attempts: int,
+    fallback_tickers: list[str],
+) -> tuple[bool, str, list[str], str]:
+    fallback_decision, fallback_reason, fallback_tickers = _minimal_tool_fallback(
+        query, metadata_filter, fallback_tickers
+    )
     if enough_price_context:
         return False, "price_context_ready", fallback_tickers, "rule"
-    recent_user_turns = [m.get("content", "").strip() for m in messages[-4:] if m.get("role") == "user" and m.get("content", "").strip()]
+    recent_user_turns = [
+        m.get("content", "").strip()
+        for m in messages[-4:]
+        if m.get("role") == "user" and m.get("content", "").strip()
+    ]
     allowed_tickers = _allowed_tickers_from_universe(agent, max_items=20)
     universe_hint = ", ".join(allowed_tickers[:14])
     prompt = (
@@ -106,13 +135,25 @@ def llm_tool_decision(agent: Any, query: str, metadata_filter: dict[str, str],
         raw = agent.rag.provider.generate(prompt, temperature=0.0, max_tokens=180)
         parsed = _extract_first_json_object(raw)
         if parsed and isinstance(parsed.get("use_price_tool"), bool):
-            llm_tickers = _normalize_tickers(parsed.get("tickers"), allowed_tickers, agent.price_max_tickers)
+            llm_tickers = _normalize_tickers(
+                parsed.get("tickers"), allowed_tickers, agent.price_max_tickers
+            )
             if not llm_tickers:
                 llm_tickers = fallback_tickers
-            return parsed["use_price_tool"], str(parsed.get("reason", "llm_decision")), llm_tickers, "llm"
+            return (
+                parsed["use_price_tool"],
+                str(parsed.get("reason", "llm_decision")),
+                llm_tickers,
+                "llm",
+            )
     except Exception:
         pass
-    return fallback_decision, f"fallback_heuristic|{fallback_reason}", fallback_tickers, "heuristic"
+    return (
+        fallback_decision,
+        f"fallback_heuristic|{fallback_reason}",
+        fallback_tickers,
+        "heuristic",
+    )
 
 
 def extract_price_date_window(agent: Any, query: str) -> tuple[str, str]:
@@ -132,11 +173,24 @@ def extract_price_date_window(agent: Any, query: str) -> tuple[str, str]:
         year = int(re.search(r"\b(20\d{2})\b", query).group(1))
         start_date = datetime(year, 1, 1).date()
         end_date = datetime(year, 12, 31).date()
-    rel_match = re.search(r"\b(\d+)\s*(jour|jours|day|days|mois|month|months|an|ans|year|years)\b", query.lower())
+    rel_match = re.search(
+        r"\b(\d+)\s*(jour|jours|day|days|mois|month|months|an|ans|year|years)\b",
+        query.lower(),
+    )
     if rel_match:
         value = int(rel_match.group(1))
         unit = rel_match.group(2)
-        delta = min(value * (1 if "jour" in unit or "day" in unit else 30 if "mois" in unit or "month" in unit else 365), agent.price_max_days)
+        delta = min(
+            value
+            * (
+                1
+                if "jour" in unit or "day" in unit
+                else 30
+                if "mois" in unit or "month" in unit
+                else 365
+            ),
+            agent.price_max_days,
+        )
         start_date = today - timedelta(days=delta)
         end_date = today
     if (end_date - start_date).days > agent.price_max_days:
@@ -163,12 +217,16 @@ def format_price_index(idx: Any) -> str:
     return str(idx)
 
 
-def fetch_price_context(agent: Any, tickers: list[str], start_date: str, end_date: str) -> str:
+def fetch_price_context(
+    agent: Any, tickers: list[str], start_date: str, end_date: str
+) -> str:
     lines = []
     per_ticker_point_budget = max(5, agent.price_max_points // max(1, len(tickers)))
     for ticker in tickers:
         try:
-            df = yf.download(ticker, start=start_date, end=end_date, progress=False, auto_adjust=True)
+            df = yf.download(
+                ticker, start=start_date, end=end_date, progress=False, auto_adjust=True
+            )
         except Exception:
             continue
         if df is None or df.empty or "Close" not in df.columns:
@@ -183,10 +241,15 @@ def fetch_price_context(agent: Any, tickers: list[str], start_date: str, end_dat
         perf = ((close.iloc[-1] / close.iloc[0]) - 1) * 100 if len(close) > 1 else 0.0
         vol = returns.std() * (252**0.5) * 100 if not returns.empty else 0.0
         drawdown = ((close / close.cummax()) - 1).min() * 100 if len(close) > 1 else 0.0
-        lines.append(f"- {ticker}: perf={perf:.2f}%, vol_ann={vol:.2f}%, max_drawdown={drawdown:.2f}%, close_min={close.min():.2f}, close_max={close.max():.2f}, close_last={close.iloc[-1]:.2f}")
+        lines.append(
+            f"- {ticker}: perf={perf:.2f}%, vol_ann={vol:.2f}%, max_drawdown={drawdown:.2f}%, close_min={close.min():.2f}, close_max={close.max():.2f}, close_last={close.iloc[-1]:.2f}"
+        )
         step = max(1, len(close) // per_ticker_point_budget)
         sampled = close.iloc[::step].tail(per_ticker_point_budget)
-        points = ", ".join(f"{format_price_index(idx)}={float(val):.2f}" for idx, val in sampled.items())
+        points = ", ".join(
+            f"{format_price_index(idx)}={float(val):.2f}"
+            for idx, val in sampled.items()
+        )
         lines.append(f"  points[{ticker}]: {points}")
     if not lines:
         return ""

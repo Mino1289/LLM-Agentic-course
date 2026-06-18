@@ -1,4 +1,5 @@
 """Pydantic schemas for tool arguments."""
+
 from __future__ import annotations
 
 from typing import Any, Literal
@@ -13,10 +14,18 @@ def _split_csv(value: Any) -> Any:
 
 
 class SecFilingsRAGArgs(BaseModel):
-    query: str = Field(..., min_length=1, description="Search query for SEC filings / earnings calls.")
-    tickers: list[str] | None = Field(default=None, description="Tracked tickers filter.")
-    years: list[str] | None = Field(default=None, description="Filing years filter, e.g. ['2024'].")
-    doc_types: list[str] | None = Field(default=None, description="Allowed: 10-K, 10-Q, 8-K, 20-F, 6-K, EARNINGS_CALL.")
+    query: str = Field(
+        ..., min_length=1, description="Search query for SEC filings / earnings calls."
+    )
+    tickers: list[str] | None = Field(
+        default=None, description="Tracked tickers filter."
+    )
+    years: list[str] | None = Field(
+        default=None, description="Filing years filter, e.g. ['2024']."
+    )
+    doc_types: list[str] | None = Field(
+        default=None, description="Allowed: 10-K, 10-Q, 8-K, 20-F, 6-K, EARNINGS_CALL."
+    )
 
     @field_validator("tickers", "years", "doc_types", mode="before")
     @classmethod
@@ -48,7 +57,9 @@ class PlaceTradeArgs(BaseModel):
     ticker: str = Field(..., min_length=1, description="Ticker to trade.")
     side: Literal["buy", "sell"] = Field(..., description="Buy or sell.")
     qty: float = Field(..., gt=0, description="Number of shares.")
-    order_type: Literal["market", "limit", "stop", "stop_limit"] | None = Field(default="market")
+    order_type: Literal["market", "limit", "stop", "stop_limit"] | None = Field(
+        default="market"
+    )
     limit_price: float | None = Field(default=None, gt=0)
     stop_price: float | None = Field(default=None, gt=0)
 
@@ -95,7 +106,15 @@ class ExportReportArgs(BaseModel):
 
 
 __all__ = [
-    "SecFilingsRAGArgs", "MarketPriceArgs", "ValidateClaimsLLMArgs", "ValidateClaimsArgs",
-    "PortfolioInfoArgs", "PlaceTradeArgs", "ClosePositionArgs", "GetNewsArgs",
-    "PortfolioHistoryArgs", "AccountActivityArgs", "ExportReportArgs",
+    "SecFilingsRAGArgs",
+    "MarketPriceArgs",
+    "ValidateClaimsLLMArgs",
+    "ValidateClaimsArgs",
+    "PortfolioInfoArgs",
+    "PlaceTradeArgs",
+    "ClosePositionArgs",
+    "GetNewsArgs",
+    "PortfolioHistoryArgs",
+    "AccountActivityArgs",
+    "ExportReportArgs",
 ]

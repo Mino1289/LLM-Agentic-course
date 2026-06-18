@@ -1,4 +1,5 @@
 """Parsing des tool calls depuis les réponses des différents providers."""
+
 from __future__ import annotations
 
 import json
@@ -13,7 +14,9 @@ def _parse_openai_tool_calls(raw_calls: Any) -> list[ToolCall]:
     if not raw_calls:
         return parsed
     for item in raw_calls:
-        fn = getattr(item, "function", None) or (item.get("function") if isinstance(item, dict) else None)
+        fn = getattr(item, "function", None) or (
+            item.get("function") if isinstance(item, dict) else None
+        )
         if not fn:
             continue
         name = getattr(fn, "name", None) or fn.get("name", "")
@@ -34,7 +37,9 @@ def _parse_gemini_tool_calls(response: Any) -> list[ToolCall]:
         if not fc:
             continue
         args = getattr(fc, "args", None) or {}
-        ts = getattr(part, "thought_signature", None) or getattr(fc, "thought_signature", None)
+        ts = getattr(part, "thought_signature", None) or getattr(
+            fc, "thought_signature", None
+        )
         parsed.append(
             ToolCall(
                 id=str(uuid.uuid4()),

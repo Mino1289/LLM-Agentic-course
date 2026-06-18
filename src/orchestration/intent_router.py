@@ -8,7 +8,10 @@ from src.graph.tracing import traceable
 from src.orchestration.prompts import INTENT_ROUTER_PROMPT
 from src.orchestration.progress import emit_agent_progress
 from src.orchestration.state import HubSpokeState
-from src.orchestration.tool_domains import detect_tool_domains, resolve_route_from_domains
+from src.orchestration.tool_domains import (
+    detect_tool_domains,
+    resolve_route_from_domains,
+)
 
 
 def route_after_intent_router(state: HubSpokeState) -> str:
@@ -37,17 +40,23 @@ async def intent_router_node(agent: Any, state: HubSpokeState) -> HubSpokeState:
     stats = dict(state.get("stats") or {})
 
     if not query:
-        return {"intent_route": "simple", "answer": "Peux-tu préciser ta question ?", "stats": stats}
+        return {
+            "intent_route": "simple",
+            "answer": "Peux-tu préciser ta question ?",
+            "stats": stats,
+        }
 
     domains = detect_tool_domains(query)
     resolved = resolve_route_from_domains(domains)
     if resolved is not None:
         route, reason = resolved
-        stats.update({
-            "intent_route": route,
-            "intent_reason": reason,
-            "tool_domains": sorted(domains),
-        })
+        stats.update(
+            {
+                "intent_route": route,
+                "intent_reason": reason,
+                "tool_domains": sorted(domains),
+            }
+        )
         _emit_route_progress(route)
         return {
             "intent_route": route,
@@ -62,7 +71,10 @@ async def intent_router_node(agent: Any, state: HubSpokeState) -> HubSpokeState:
             {"role": "user", "content": f"User query: {query}"},
         ]
         response = await agent.rag.provider.ainvoke_with_tools_stream(
-            messages, tools=None, temperature=0.0, max_tokens=120,
+            messages,
+            tools=None,
+            temperature=0.0,
+            max_tokens=120,
         )
         raw = ""
         async for chunk in response:
@@ -72,11 +84,13 @@ async def intent_router_node(agent: Any, state: HubSpokeState) -> HubSpokeState:
         route = str(parsed.get("route", "")).strip().lower() if parsed else ""
         if route in ("simple", "complex"):
             reason = str(parsed.get("reason", "llm_classifier")).strip()
-            stats.update({
-                "intent_route": route,
-                "intent_reason": reason,
-                "tool_domains": sorted(domains),
-            })
+            stats.update(
+                {
+                    "intent_route": route,
+                    "intent_reason": reason,
+                    "tool_domains": sorted(domains),
+                }
+            )
             _emit_route_progress(route)
             return {
                 "intent_route": route,
@@ -86,11 +100,13 @@ async def intent_router_node(agent: Any, state: HubSpokeState) -> HubSpokeState:
     except Exception:
         pass
 
-    stats.update({
-        "intent_route": "simple",
-        "intent_reason": "fallback_to_simple",
-        "tool_domains": sorted(domains),
-    })
+    stats.update(
+        {
+            "intent_route": "simple",
+            "intent_reason": "fallback_to_simple",
+            "tool_domains": sorted(domains),
+        }
+    )
     _emit_route_progress("simple")
     return {
         "intent_route": "simple",

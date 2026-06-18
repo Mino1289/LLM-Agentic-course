@@ -1,4 +1,5 @@
 """Mémoire de conversation par conversation_id (in-memory)."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -24,7 +25,7 @@ class MemoryStore:
         return self._store[conversation_id]
 
     def get_window(self, conversation_id: str) -> list[dict[str, str]]:
-        return self.get_or_create(conversation_id).turns[-self.window_size:]
+        return self.get_or_create(conversation_id).turns[-self.window_size :]
 
     def append_turn(self, conversation_id: str, role: str, content: str) -> None:
         memory = self.get_or_create(conversation_id)
@@ -37,7 +38,7 @@ class MemoryStore:
         return self.get_or_create(conversation_id).summary
 
     def trim_turns(self, conversation_id: str, keep_last: int) -> None:
-        self.get_or_create(conversation_id).turns = memory.turns[-max(1, keep_last):]
+        self.get_or_create(conversation_id).turns = memory.turns[-max(1, keep_last) :]
 
     def is_duplicate_chunk(self, conversation_id: str, chunk: str) -> bool:
         memory = self.get_or_create(conversation_id)
@@ -47,7 +48,9 @@ class MemoryStore:
         memory = self.get_or_create(conversation_id)
         memory.last_chunk_fingerprints.add(chunk[:220].strip())
         if len(memory.last_chunk_fingerprints) > 60:
-            memory.last_chunk_fingerprints = set(list(memory.last_chunk_fingerprints)[-40:])
+            memory.last_chunk_fingerprints = set(
+                list(memory.last_chunk_fingerprints)[-40:]
+            )
 
 
 def format_memory_context(summary: str, window: list[dict[str, str]]) -> str:
@@ -60,7 +63,14 @@ def format_chat_context(messages: list[dict[str, str]], keep_last: int = 6) -> s
     if not messages:
         return "Aucun historique de chat."
     selected = messages[-keep_last:]
-    return toon_encode({"turns": [
-        {"role": str(m.get("role", "user")), "content": str(m.get("content", ""))}
-        for m in selected
-    ]})
+    return toon_encode(
+        {
+            "turns": [
+                {
+                    "role": str(m.get("role", "user")),
+                    "content": str(m.get("content", "")),
+                }
+                for m in selected
+            ]
+        }
+    )

@@ -1,4 +1,5 @@
 """Construction du corpus depuis les fichiers prétraités."""
+
 from __future__ import annotations
 
 from pathlib import Path

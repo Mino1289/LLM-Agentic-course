@@ -1,4 +1,5 @@
 """Tracing LangSmith + decorateur traceable."""
+
 from __future__ import annotations
 
 import os
@@ -39,6 +40,7 @@ ensure_langsmith_env()
 def _noop_traceable(*_args, **_kwargs):
     def _decorator(func):
         return func
+
     return _decorator
 
 

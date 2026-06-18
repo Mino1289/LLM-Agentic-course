@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Analyse des chunks et plan d'embedding pour l'univers de documents prétraités."""
+
 from __future__ import annotations
 
 import argparse
@@ -27,14 +28,18 @@ def analyze_chunk_counts() -> int:
         file_chunks = len(CHUNKER(text))
         total_chars += file_chars
         total_chunks += file_chunks
-        file_stats.append({"filename": file_path.name, "chars": file_chars, "chunks": file_chunks})
+        file_stats.append(
+            {"filename": file_path.name, "chars": file_chars, "chunks": file_chunks}
+        )
     print("--- Découpage unique: semantic ---")
     print(f"  Chunks totaux : {total_chunks:,}")
     print(f"  Caractères    : {total_chars:,}")
     print(f"  Appels embedding estimés : {total_chunks:,}")
     print("  Top 3 fichiers les plus chunkés :")
     for stat in sorted(file_stats, key=lambda x: x["chunks"], reverse=True)[:3]:
-        print(f"    - {stat['filename']}: {stat['chunks']} chunks ({stat['chars']:,} chars)")
+        print(
+            f"    - {stat['filename']}: {stat['chunks']} chunks ({stat['chars']:,} chars)"
+        )
     print()
     return total_chunks
 
@@ -42,16 +47,30 @@ def analyze_chunk_counts() -> int:
 def analyze_embedding_plans(quota_used: int, quota_limit: int):
     print(f"=== Plan d'embedding (quota {quota_used}/{quota_limit}) ===\n")
     rag = HybridRAG(chunk_strategy="semantic")
-    plan = rag.get_embedding_plan(daily_quota_used=quota_used, daily_quota_limit=quota_limit)
+    plan = rag.get_embedding_plan(
+        daily_quota_used=quota_used, daily_quota_limit=quota_limit
+    )
     print(plan.summary())
     print()
 
 
 def main():
     parser = argparse.ArgumentParser(description="Estimer chunks et quota embedding.")
-    parser.add_argument("--quota-used", type=int, default=int(os.getenv("EMBEDDING_DAILY_USED", "0")))
-    parser.add_argument("--quota-limit", type=int, default=int(os.getenv("EMBEDDING_DAILY_LIMIT", str(DEFAULT_DAILY_EMBEDDING_LIMIT))))
-    parser.add_argument("--chunks-only", action="store_true", help="Afficher seulement le décompte par stratégie (sans ChromaDB).")
+    parser.add_argument(
+        "--quota-used", type=int, default=int(os.getenv("EMBEDDING_DAILY_USED", "0"))
+    )
+    parser.add_argument(
+        "--quota-limit",
+        type=int,
+        default=int(
+            os.getenv("EMBEDDING_DAILY_LIMIT", str(DEFAULT_DAILY_EMBEDDING_LIMIT))
+        ),
+    )
+    parser.add_argument(
+        "--chunks-only",
+        action="store_true",
+        help="Afficher seulement le décompte par stratégie (sans ChromaDB).",
+    )
     args = parser.parse_args()
     analyze_chunk_counts()
     if not args.chunks_only:

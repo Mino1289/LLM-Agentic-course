@@ -99,10 +99,19 @@ class ToonRagExcerptsTests(unittest.TestCase):
         long_chunk = "A" * 5000
         result = format_rag_excerpts(
             [long_chunk],
-            [{"ticker": "NVDA", "year": "2024", "file_type": "10-K", "section": "Item_1A", "source": "x"}],
+            [
+                {
+                    "ticker": "NVDA",
+                    "year": "2024",
+                    "file_type": "10-K",
+                    "section": "Item_1A",
+                    "source": "x",
+                }
+            ],
         )
         # The TOON output must contain at most 1200 consecutive A's.
         import re
+
         match = re.search(r"A{1500,}", result)
         self.assertIsNone(
             match,
@@ -121,7 +130,10 @@ class ToonMemoryContextTests(unittest.TestCase):
         summary = "User asked about NVDA risks then MSFT risks."
         window = [
             {"role": "user", "content": "Quels sont les risques de NVDA ?"},
-            {"role": "assistant", "content": "Concentration Taiwan, contrôles exportation."},
+            {
+                "role": "assistant",
+                "content": "Concentration Taiwan, contrôles exportation.",
+            },
         ]
         result = format_memory_context(summary, window)
         # Must be decodable as TOON

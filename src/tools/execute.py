@@ -1,4 +1,5 @@
 """Tool dispatch — execute_tool() dispatcher + ToolExecutor class."""
+
 from __future__ import annotations
 
 import asyncio
@@ -29,7 +30,11 @@ from src.tools.sec_filings import run_sec_filings_rag
 from src.tools.market_price import run_market_price_tool
 from src.tools.validate_claims import run_validate_claims
 from src.tools.export_report import run_export_investment_report
-from src.tools.portfolio import run_portfolio_info, run_portfolio_history, run_account_activity
+from src.tools.portfolio import (
+    run_portfolio_info,
+    run_portfolio_history,
+    run_account_activity,
+)
 from src.tools.trading import run_place_trade, run_close_position
 from src.tools.news import run_get_news
 
@@ -64,7 +69,9 @@ def summarize_tool_args(name: str, arguments: str) -> str:
         "validate_claims_tool": f"claims_count={len(args.get('claims') or []) if isinstance(args.get('claims'), list) else 1}",
         "portfolio_info_tool": "portfolio_info",
         "place_trade_tool": f"ticker={args.get('ticker')}, side={args.get('side')}, qty={args.get('qty')}, type={args.get('order_type', 'market')}",
-        "close_position_tool": f"close_all={args.get('all', False)} ticker={args.get('ticker')}" if args.get("ticker") else f"close_all={args.get('all', False)}",
+        "close_position_tool": f"close_all={args.get('all', False)} ticker={args.get('ticker')}"
+        if args.get("ticker")
+        else f"close_all={args.get('all', False)}",
         "get_news_tool": f"symbols={args.get('symbols')}, limit={args.get('limit', 10)}",
         "portfolio_history_tool": f"period={args.get('period', '1M')}, timeframe={args.get('timeframe', 'auto')}",
         "account_activity_tool": f"types={args.get('activity_types')}, page_size={args.get('page_size', 20)}",
@@ -132,11 +139,15 @@ class ToolExecutor:
 
     def resolve_full_args(self, tool_name: str, llm_args: dict[str, Any]) -> BaseModel:
         mapping = {
-            "validate_claims_tool": (ValidateClaimsLLMArgs, ValidateClaimsArgs, lambda a, s: ValidateClaimsArgs(
-                claims=a.claims,
-                chunks=list((s or {}).get("final_chunks") or []),
-                metadatas=list((s or {}).get("final_metadatas") or []),
-            )),
+            "validate_claims_tool": (
+                ValidateClaimsLLMArgs,
+                ValidateClaimsArgs,
+                lambda a, s: ValidateClaimsArgs(
+                    claims=a.claims,
+                    chunks=list((s or {}).get("final_chunks") or []),
+                    metadatas=list((s or {}).get("final_metadatas") or []),
+                ),
+            ),
             "sec_filings_rag_tool": (SecFilingsRAGArgs, None, lambda a, s: a),
             "market_price_tool": (MarketPriceArgs, None, lambda a, s: a),
             "portfolio_info_tool": (PortfolioInfoArgs, None, lambda a, s: a),
@@ -158,7 +169,11 @@ class ToolExecutor:
         if tool_name == "sec_filings_rag_tool":
             return await run_sec_filings_rag(full_args, agent=self.agent)
         return await asyncio.to_thread(
-            execute_tool, tool_name, full_args, agent=self.agent, state=self.state,
+            execute_tool,
+            tool_name,
+            full_args,
+            agent=self.agent,
+            state=self.state,
         )
 
     async def execute(self, tool_call: ToolCall) -> ToolExecutionOutcome:
@@ -186,24 +201,41 @@ class ToolExecutor:
         event["result"] = safe_result(result)
         event["finished_at"] = now_utc()
         result_payload = result if isinstance(result, dict) else {"text": str(result)}
-        tool_text = result_payload.get("text", json.dumps(result_payload, ensure_ascii=False))
+        tool_text = result_payload.get(
+            "text", json.dumps(result_payload, ensure_ascii=False)
+        )
         return ToolExecutionOutcome(
-            tool_call=tool_call, llm_args=llm_args, event=event,
-            message=self._tool_message(tool_call, tool_text), result=result_payload,
+            tool_call=tool_call,
+            llm_args=llm_args,
+            event=event,
+            message=self._tool_message(tool_call, tool_text),
+            result=result_payload,
         )
 
     def _failed(
-        self, tool_call: ToolCall, llm_args: dict[str, Any], event: ToolEvent, error: str,
+        self,
+        tool_call: ToolCall,
+        llm_args: dict[str, Any],
+        event: ToolEvent,
+        error: str,
     ) -> ToolExecutionOutcome:
         event["status"] = "failed"
         event["error"] = error
         event["finished_at"] = now_utc()
         tool_text = json.dumps({"error": error}, ensure_ascii=False)
         return ToolExecutionOutcome(
-            tool_call=tool_call, llm_args=llm_args, event=event,
-            message=self._tool_message(tool_call, tool_text), result=None,
+            tool_call=tool_call,
+            llm_args=llm_args,
+            event=event,
+            message=self._tool_message(tool_call, tool_text),
+            result=None,
         )
 
     @staticmethod
     def _tool_message(tool_call: ToolCall, content: str) -> dict[str, Any]:
-        return {"role": "tool", "tool_call_id": tool_call.id, "name": tool_call.name, "content": content}
+        return {
+            "role": "tool",
+            "tool_call_id": tool_call.id,
+            "name": tool_call.name,
+            "content": content,
+        }

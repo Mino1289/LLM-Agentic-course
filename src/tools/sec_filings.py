@@ -1,4 +1,5 @@
 """SEC Filings RAG tool — query ChromaDB via decomposed multi-query retrieval."""
+
 from __future__ import annotations
 
 import logging
@@ -46,7 +47,11 @@ async def run_sec_filings_rag(
     else:
         decompose_t0 = time.perf_counter()
         decomposed = await decompose_query(agent, query)
-        _LOGGER.info("decompose took %.2fs (count=%d)", time.perf_counter() - decompose_t0, len(decomposed))
+        _LOGGER.info(
+            "decompose took %.2fs (count=%d)",
+            time.perf_counter() - decompose_t0,
+            len(decomposed),
+        )
 
     rag_state: dict[str, Any] = {
         "normalized_query": query,
@@ -66,7 +71,8 @@ async def run_sec_filings_rag(
     if not candidates:
         return {
             "text": format_rag_excerpts([], []),
-            "final_chunks": [], "final_metadatas": [],
+            "final_chunks": [],
+            "final_metadatas": [],
             "stats": rag_state.get("stats", {}),
         }
 
@@ -74,12 +80,16 @@ async def run_sec_filings_rag(
     final_chunks = [agent.rag.documents[idx] for idx in top_indices]
     final_metadatas = [agent.rag.doc_metadata[idx] for idx in top_indices]
     stats = rag_state.get("stats", {})
-    stats.update({
-        "rerank_final_ticker_counts": _ticker_counts(final_metadatas),
-        "rerank_final_count": len(top_indices),
-        "chunks_used": len(final_chunks),
-    })
+    stats.update(
+        {
+            "rerank_final_ticker_counts": _ticker_counts(final_metadatas),
+            "rerank_final_count": len(top_indices),
+            "chunks_used": len(final_chunks),
+        }
+    )
     return {
         "text": format_rag_excerpts(final_chunks, final_metadatas),
-        "final_chunks": final_chunks, "final_metadatas": final_metadatas, "stats": stats,
+        "final_chunks": final_chunks,
+        "final_metadatas": final_metadatas,
+        "stats": stats,
     }

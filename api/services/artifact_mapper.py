@@ -17,7 +17,9 @@ from src.orchestration.trade_intent import has_trade_proposal
 from src.paths import REPORTS_DIR
 
 
-def build_sources(chunks: list[str], metadatas: list[dict[str, Any]]) -> list[SourceItem]:
+def build_sources(
+    chunks: list[str], metadatas: list[dict[str, Any]]
+) -> list[SourceItem]:
     sources: list[SourceItem] = []
     for i, chunk in enumerate(chunks):
         meta = metadatas[i] if i < len(metadatas) else {}
@@ -79,7 +81,9 @@ def stats_to_items(stats: dict[str, Any], locale: str = "fr") -> list[StatItem]:
     if not total_tokens:
         total_tokens = stats.get("estimated_context_tokens", 0)
     if total_tokens:
-        items.append(StatItem(id="tokens", label=labels["tokens"], value=f"{total_tokens:,}"))
+        items.append(
+            StatItem(id="tokens", label=labels["tokens"], value=f"{total_tokens:,}")
+        )
 
     chunks = stats.get("chunks_used") or stats.get("rerank_final_count")
     if chunks:
@@ -87,7 +91,9 @@ def stats_to_items(stats: dict[str, Any], locale: str = "fr") -> list[StatItem]:
 
     spoke_llm = stats.get("spoke_llm_iterations") or stats.get("agent_iterations")
     if spoke_llm:
-        items.append(StatItem(id="iterations", label=labels["iterations"], value=str(spoke_llm)))
+        items.append(
+            StatItem(id="iterations", label=labels["iterations"], value=str(spoke_llm))
+        )
 
     spoke_tc = stats.get("spoke_tool_calls")
     if spoke_tc:
@@ -124,7 +130,9 @@ def _format_size(path: Path) -> str:
     return f"{size} o"
 
 
-def reports_to_artifacts(report_artifacts: list[dict[str, Any]]) -> list[ReportArtifact]:
+def reports_to_artifacts(
+    report_artifacts: list[dict[str, Any]],
+) -> list[ReportArtifact]:
     results: list[ReportArtifact] = []
     for idx, artifact in enumerate(report_artifacts, start=1):
         path = Path(str(artifact.get("path", "")))

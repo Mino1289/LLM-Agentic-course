@@ -1,4 +1,5 @@
 """Constantes et configuration du prétraitement SEC."""
+
 SUPPORTED_EXTENSIONS = (".html", ".htm", ".pdf", ".txt", ".csv", ".json")
 
 MIN_SECTION_CHARS = 500

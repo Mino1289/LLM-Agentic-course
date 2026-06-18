@@ -1,4 +1,5 @@
 """Noeud de garde — classification d'intention avant routage vers l'agent."""
+
 from __future__ import annotations
 
 import asyncio
@@ -33,7 +34,13 @@ Priority:
 4) Use reject_offtopic only when the request is clearly non-finance.
 """
 
-_VALID_ROUTES = {"continue", "clarify", "coverage_info", "reject_offtopic", "general_chat"}
+_VALID_ROUTES = {
+    "continue",
+    "clarify",
+    "coverage_info",
+    "reject_offtopic",
+    "general_chat",
+}
 
 
 def _ticker_fuzzy_suggest(word: str, known: list[str], max_dist: int = 1) -> str | None:
@@ -112,7 +119,9 @@ def _build_guard_prompt(agent: Any, state: GraphState, query: str) -> str:
     )
 
 
-async def _llm_guard_decision(agent: Any, state: GraphState, query: str) -> tuple[str, str, str, Optional[dict]]:
+async def _llm_guard_decision(
+    agent: Any, state: GraphState, query: str
+) -> tuple[str, str, str, Optional[dict]]:
     if cached := _guard_cache.get(query):
         return cached
 
@@ -120,7 +129,10 @@ async def _llm_guard_decision(agent: Any, state: GraphState, query: str) -> tupl
     raw = ""
     usage = None
     try:
-        messages = [{"role": "system", "content": GUARD_SYSTEM_PROMPT}, {"role": "user", "content": prompt}]
+        messages = [
+            {"role": "system", "content": GUARD_SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ]
         response = await asyncio.to_thread(
             agent.rag.provider.invoke_with_tools,
             messages,
@@ -198,10 +210,23 @@ async def guard_node(agent: Any, state: GraphState) -> GraphState:
         }
 
     portfolio_keywords = [
-        "portfolio", "portefeuille", "compte", "positions", "account",
-        "mon portfolio", "mon compte", "mes positions", "mon investissement",
-        "mes actions", "mon alpaca", "buying power", "equity", "pnl",
-        "profit and loss", "solde", "balance",
+        "portfolio",
+        "portefeuille",
+        "compte",
+        "positions",
+        "account",
+        "mon portfolio",
+        "mon compte",
+        "mes positions",
+        "mon investissement",
+        "mes actions",
+        "mon alpaca",
+        "buying power",
+        "equity",
+        "pnl",
+        "profit and loss",
+        "solde",
+        "balance",
     ]
     query_lower = query.lower()
     if any(kw in query_lower for kw in portfolio_keywords):
@@ -221,6 +246,7 @@ async def guard_node(agent: Any, state: GraphState) -> GraphState:
     ticker_suggestion = None
     if route == "clarify":
         from src.config import TRACKED_TICKERS
+
         for word in re.findall(r"[A-Z]{2,5}", query.upper()):
             suggestion = _ticker_fuzzy_suggest(word, list(TRACKED_TICKERS), max_dist=1)
             if suggestion:

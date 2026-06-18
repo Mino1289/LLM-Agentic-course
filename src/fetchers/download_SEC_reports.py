@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Téléchargement des rapports SEC (10-K, 10-Q, 8-K, 20-F, 6-K) via l'API EDGAR."""
+
 from __future__ import annotations
 
 import argparse
@@ -18,7 +19,9 @@ load_dotenv(ENV_FILE)
 
 USER_AGENT = os.getenv("SEC_USER_AGENT", "").strip()
 if not USER_AGENT:
-    raise ValueError("SEC_USER_AGENT is required in .env (example: MyFinanceRAG your-email@example.com)")
+    raise ValueError(
+        "SEC_USER_AGENT is required in .env (example: MyFinanceRAG your-email@example.com)"
+    )
 
 HEADERS = {"User-Agent": USER_AGENT, "Accept-Encoding": "gzip, deflate"}
 
@@ -86,8 +89,14 @@ def get_filings(ticker: str, cik: str, min_year: int, max_year: int) -> list[dic
             continue
         is_wanted = False
         if form == "8-K":
-            items_raw = (recent.get("items") or [])[i] if i < len(recent.get("items") or []) else ""
-            items = items_raw if isinstance(items_raw, list) else str(items_raw).split(",")
+            items_raw = (
+                (recent.get("items") or [])[i]
+                if i < len(recent.get("items") or [])
+                else ""
+            )
+            items = (
+                items_raw if isinstance(items_raw, list) else str(items_raw).split(",")
+            )
             items = [item.strip() for item in items]
             if "2.02" in items:
                 is_wanted = True
@@ -100,12 +109,16 @@ def get_filings(ticker: str, cik: str, min_year: int, max_year: int) -> list[dic
             accession_clean = accession_num.replace("-", "")
             primary_doc = recent["primaryDocument"][i]
             cik_int = int(cik)
-            filings_found.append({
-                "ticker": ticker, "form": form, "date": filing_date_str,
-                "accessionNumber": accession_num,
-                "indexUrl": f"https://www.sec.gov/Archives/edgar/data/{cik_int}/{accession_clean}/{accession_num}-index.htm",
-                "documentUrl": f"https://www.sec.gov/Archives/edgar/data/{cik_int}/{accession_clean}/{primary_doc}",
-            })
+            filings_found.append(
+                {
+                    "ticker": ticker,
+                    "form": form,
+                    "date": filing_date_str,
+                    "accessionNumber": accession_num,
+                    "indexUrl": f"https://www.sec.gov/Archives/edgar/data/{cik_int}/{accession_clean}/{accession_num}-index.htm",
+                    "documentUrl": f"https://www.sec.gov/Archives/edgar/data/{cik_int}/{accession_clean}/{primary_doc}",
+                }
+            )
     return filings_found
 
 
@@ -129,9 +142,19 @@ def download_filing(ticker: str, form: str, date: str, url: str) -> str | None:
 
 def parse_args() -> argparse.Namespace:
     current_year = datetime.now().year
-    parser = argparse.ArgumentParser(description="Télécharger les rapports SEC de l'univers debug.")
-    parser.add_argument("--min-year", type=int, default=int(os.getenv("BOOTSTRAP_MIN_YEAR", str(current_year - 2))))
-    parser.add_argument("--max-year", type=int, default=int(os.getenv("BOOTSTRAP_MAX_YEAR", str(current_year))))
+    parser = argparse.ArgumentParser(
+        description="Télécharger les rapports SEC de l'univers debug."
+    )
+    parser.add_argument(
+        "--min-year",
+        type=int,
+        default=int(os.getenv("BOOTSTRAP_MIN_YEAR", str(current_year - 2))),
+    )
+    parser.add_argument(
+        "--max-year",
+        type=int,
+        default=int(os.getenv("BOOTSTRAP_MAX_YEAR", str(current_year))),
+    )
     args = parser.parse_args()
     if args.min_year > args.max_year:
         parser.error("--min-year doit être inférieur ou égal à --max-year")
@@ -141,8 +164,12 @@ def parse_args() -> argparse.Namespace:
 def main():
     args = parse_args()
     if SKIPPED_TICKERS:
-        print(f"⏭  {len(SKIPPED_TICKERS)} ticker(s) sans CIK SEC (Euronext), skip auto : {', '.join(SKIPPED_TICKERS)}")
-    print(f"⏱  Pacing SEC : {_INTER_TICKER_SLEEP}s entre tickers (SEC_INTER_TICKER_SLEEP={os.getenv('SEC_INTER_TICKER_SLEEP', 'default')})")
+        print(
+            f"⏭  {len(SKIPPED_TICKERS)} ticker(s) sans CIK SEC (Euronext), skip auto : {', '.join(SKIPPED_TICKERS)}"
+        )
+    print(
+        f"⏱  Pacing SEC : {_INTER_TICKER_SLEEP}s entre tickers (SEC_INTER_TICKER_SLEEP={os.getenv('SEC_INTER_TICKER_SLEEP', 'default')})"
+    )
     print(f"📋 Univers SEC : {len(TICKERS)} tickers ({len(SKIPPED_TICKERS)} skip)\n")
     cik_map = get_cik_mapping()
     results: dict[str, list[dict]] = {}
@@ -151,14 +178,20 @@ def main():
             cik = cik_map[ticker]
             filings = get_filings(ticker, cik, args.min_year, args.max_year)
             results[ticker] = filings
-            print(f"-> {len(filings)} documents trouvés (8-K 2.02, 10-K, 10-Q) pour {ticker} entre {args.min_year} et {args.max_year}.")
+            print(
+                f"-> {len(filings)} documents trouvés (8-K 2.02, 10-K, 10-Q) pour {ticker} entre {args.min_year} et {args.max_year}."
+            )
             for f in filings:
-                local_path = download_filing(f["ticker"], f["form"], f["date"], f["documentUrl"])
+                local_path = download_filing(
+                    f["ticker"], f["form"], f["date"], f["documentUrl"]
+                )
                 if local_path:
                     f["localPath"] = local_path
         else:
             print(f"Ticker {ticker} non trouvé dans le registre de la SEC.")
-    SEC_FILINGS_METADATA.write_text(json.dumps(results, indent=4, ensure_ascii=False), encoding="utf-8")
+    SEC_FILINGS_METADATA.write_text(
+        json.dumps(results, indent=4, ensure_ascii=False), encoding="utf-8"
+    )
     print(f"\n[Terminé] Métadonnées : {SEC_FILINGS_METADATA}")
     print(f"Fichiers HTML : {DATA_DIR}/")
 

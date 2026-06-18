@@ -1,4 +1,5 @@
 """Découpage sémantique des textes — chunking par paragraphes + phrases."""
+
 from __future__ import annotations
 
 import re
@@ -94,7 +95,9 @@ def split_block_by_sentences(block: str, max_size: int) -> list[str]:
 
     sentences = split_sentences(block)
     if len(sentences) <= 1:
-        return [block[start: start + max_size] for start in range(0, len(block), max_size)]
+        return [
+            block[start : start + max_size] for start in range(0, len(block), max_size)
+        ]
 
     chunks: list[str] = []
     current = ""
@@ -109,7 +112,7 @@ def split_block_by_sentences(block: str, max_size: int) -> list[str]:
                 current = sentence
             else:
                 chunks.extend(
-                    sentence[start: start + max_size]
+                    sentence[start : start + max_size]
                     for start in range(0, len(sentence), max_size)
                 )
                 current = ""
@@ -147,7 +150,11 @@ def merge_semantic_blocks(
 
     merged: list[str] = []
     for chunk in chunks:
-        if merged and len(chunk) < min_size and len(merged[-1]) + 2 + len(chunk) <= max_size:
+        if (
+            merged
+            and len(chunk) < min_size
+            and len(merged[-1]) + 2 + len(chunk) <= max_size
+        ):
             merged[-1] = f"{merged[-1]}\n\n{chunk}".strip()
         else:
             merged.append(chunk)

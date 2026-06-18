@@ -1,4 +1,5 @@
 """NLI-based claims validation against RAG excerpts."""
+
 from __future__ import annotations
 
 import json
@@ -15,7 +16,9 @@ NLI_SYSTEM_PROMPT = (
 )
 
 
-def _build_nli_prompt(claims: list[str], chunks: list[str], metadatas: list[dict[str, Any]]) -> str:
+def _build_nli_prompt(
+    claims: list[str], chunks: list[str], metadatas: list[dict[str, Any]]
+) -> str:
     exhibit_blocks: list[str] = []
     for idx, chunk in enumerate(chunks, start=1):
         meta = metadatas[idx - 1] if idx - 1 < len(metadatas) else {}
@@ -116,7 +119,9 @@ def run_validate_claims(
     validations: list[dict[str, Any]] = []
     if results:
         for i, claim in enumerate(cleaned_claims):
-            entry = results[i] if i < len(results) and isinstance(results[i], dict) else {}
+            entry = (
+                results[i] if i < len(results) and isinstance(results[i], dict) else {}
+            )
             status = str(entry.get("status", "")).strip().lower()
             if status not in {"supported", "partial", "unsupported"}:
                 status = "unsupported"
@@ -127,27 +132,49 @@ def run_validate_claims(
                 best_idx = None
             if best_idx is not None and not (1 <= best_idx <= len(chunks)):
                 best_idx = None
-            meta = metadatas[best_idx - 1] if best_idx and 0 <= best_idx - 1 < len(metadatas) else {}
+            meta = (
+                metadatas[best_idx - 1]
+                if best_idx and 0 <= best_idx - 1 < len(metadatas)
+                else {}
+            )
             excerpt_snippet = ""
             if best_idx:
                 excerpt_snippet = chunks[best_idx - 1][:200].replace("\n", " ")
             reasoning = str(entry.get("reasoning", "")).strip() or "nli_judge"
-            validations.append({
-                "claim": claim, "status": status, "best_source_index": best_idx,
-                "ticker": meta.get("ticker"), "year": meta.get("year"),
-                "file_type": meta.get("file_type"), "excerpt_snippet": excerpt_snippet,
-                "reasoning": reasoning, "nli_used": True,
-            })
+            validations.append(
+                {
+                    "claim": claim,
+                    "status": status,
+                    "best_source_index": best_idx,
+                    "ticker": meta.get("ticker"),
+                    "year": meta.get("year"),
+                    "file_type": meta.get("file_type"),
+                    "excerpt_snippet": excerpt_snippet,
+                    "reasoning": reasoning,
+                    "nli_used": True,
+                }
+            )
     else:
         for claim in cleaned_claims:
-            validations.append({
-                "claim": claim, "status": "unsupported", "best_source_index": None,
-                "ticker": None, "year": None, "file_type": None, "excerpt_snippet": "",
-                "reasoning": fallback_reason, "nli_used": True,
-            })
+            validations.append(
+                {
+                    "claim": claim,
+                    "status": "unsupported",
+                    "best_source_index": None,
+                    "ticker": None,
+                    "year": None,
+                    "file_type": None,
+                    "excerpt_snippet": "",
+                    "reasoning": fallback_reason,
+                    "nli_used": True,
+                }
+            )
 
     return {
         "text": _render_validation_text(validations),
         "validations": validations,
-        "stats": {"validate_nli_used": True, "validate_nli_claims": len(cleaned_claims)},
+        "stats": {
+            "validate_nli_used": True,
+            "validate_nli_claims": len(cleaned_claims),
+        },
     }

@@ -1,11 +1,17 @@
 """CLI pour le prétraitement des rapports SEC."""
+
 from __future__ import annotations
 
 import argparse
 import os
 
 from src.paths import PROCESSED_DATA_DIR, ensure_dir
-from src.preprocess.io import clean_processed_output, collect_input_files, write_section_files, output_filename
+from src.preprocess.io import (
+    clean_processed_output,
+    collect_input_files,
+    write_section_files,
+    output_filename,
+)
 from src.preprocess.readers import parse_file
 from src.preprocess.classify import (
     is_8k_filename,
@@ -18,20 +24,42 @@ from src.preprocess.classify import (
     is_in_year_range,
     extract_year_from_filename,
 )
-from src.preprocess.sections import parse_sections_arg, extract_sections, extract_8k_excerpt
+from src.preprocess.sections import (
+    parse_sections_arg,
+    extract_sections,
+    extract_8k_excerpt,
+)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Prétraiter les rapports SEC pour le RAG.")
-    parser.add_argument("--exclude-8k", action="store_true", help="Exclure les 8-K (item 2.02).")
-    parser.add_argument("--sections", default="1a,7", help="Sections SEC (défaut: 1a,7). Ex: 1a,7,8")
-    parser.add_argument("--min-year", type=int, default=None, help="Ignorer les rapports antérieurs.")
-    parser.add_argument("--max-year", type=int, default=None, help="Ignorer les rapports postérieurs.")
-    parser.add_argument("--no-clean-output", action="store_true", help="Conserver les anciens .txt.")
-    parser.add_argument("--include-csv", action="store_true", help="Inclure les CSV de prix.")
+    parser = argparse.ArgumentParser(
+        description="Prétraiter les rapports SEC pour le RAG."
+    )
+    parser.add_argument(
+        "--exclude-8k", action="store_true", help="Exclure les 8-K (item 2.02)."
+    )
+    parser.add_argument(
+        "--sections", default="1a,7", help="Sections SEC (défaut: 1a,7). Ex: 1a,7,8"
+    )
+    parser.add_argument(
+        "--min-year", type=int, default=None, help="Ignorer les rapports antérieurs."
+    )
+    parser.add_argument(
+        "--max-year", type=int, default=None, help="Ignorer les rapports postérieurs."
+    )
+    parser.add_argument(
+        "--no-clean-output", action="store_true", help="Conserver les anciens .txt."
+    )
+    parser.add_argument(
+        "--include-csv", action="store_true", help="Inclure les CSV de prix."
+    )
     args = parser.parse_args()
 
-    if args.min_year is not None and args.max_year is not None and args.min_year > args.max_year:
+    if (
+        args.min_year is not None
+        and args.max_year is not None
+        and args.min_year > args.max_year
+    ):
         parser.error("--min-year doit être inférieur ou égal à --max-year")
 
     enabled_sections = parse_sections_arg(args.sections)
@@ -43,9 +71,15 @@ def main():
 
     files = collect_input_files()
     stats = {
-        "processed": 0, "sections_written": 0, "skipped": 0,
-        "skipped_8k": 0, "earnings_calls_written": 0, "no_sections_10k": 0,
-        "skipped_year": 0, "skipped_unknown_year": 0, "skipped_csv": 0,
+        "processed": 0,
+        "sections_written": 0,
+        "skipped": 0,
+        "skipped_8k": 0,
+        "earnings_calls_written": 0,
+        "no_sections_10k": 0,
+        "skipped_year": 0,
+        "skipped_unknown_year": 0,
+        "skipped_csv": 0,
     }
 
     for file_path in files:
@@ -79,7 +113,11 @@ def main():
                     print("  Skip: CSV prix (--include-csv).")
                     stats["skipped_csv"] += 1
                     continue
-                section_name = "market_data" if "prix" in filename.lower() or "price" in filename.lower() else "structured_data"
+                section_name = (
+                    "market_data"
+                    if "prix" in filename.lower() or "price" in filename.lower()
+                    else "structured_data"
+                )
                 out_path = PROCESSED_DATA_DIR / output_filename(filename, section_name)
                 out_path.write_text(text, encoding="utf-8")
                 stats["sections_written"] += 1
@@ -97,7 +135,9 @@ def main():
                     print("  Skip: transcript trop court.")
                     stats["skipped"] += 1
                     continue
-                out_path = PROCESSED_DATA_DIR / output_filename(filename, "earnings_call")
+                out_path = PROCESSED_DATA_DIR / output_filename(
+                    filename, "earnings_call"
+                )
                 out_path.write_text(text, encoding="utf-8")
                 stats["sections_written"] += 1
                 stats["earnings_calls_written"] += 1
@@ -109,15 +149,21 @@ def main():
                 elif is_10k_filename(filename):
                     stats["no_sections_10k"] += 1
                 elif is_10q_filename(filename):
-                    out_path = PROCESSED_DATA_DIR / output_filename(filename, "quarterly_report")
+                    out_path = PROCESSED_DATA_DIR / output_filename(
+                        filename, "quarterly_report"
+                    )
                     out_path.write_text(text, encoding="utf-8")
                     stats["sections_written"] += 1
                 elif is_20f_filename(filename):
-                    out_path = PROCESSED_DATA_DIR / output_filename(filename, "foreign_annual_report")
+                    out_path = PROCESSED_DATA_DIR / output_filename(
+                        filename, "foreign_annual_report"
+                    )
                     out_path.write_text(text, encoding="utf-8")
                     stats["sections_written"] += 1
                 elif is_6k_filename(filename):
-                    out_path = PROCESSED_DATA_DIR / output_filename(filename, "foreign_interim_report")
+                    out_path = PROCESSED_DATA_DIR / output_filename(
+                        filename, "foreign_interim_report"
+                    )
                     out_path.write_text(text, encoding="utf-8")
                     stats["sections_written"] += 1
                 else:
@@ -127,10 +173,12 @@ def main():
             print(f"Error reading {file_path}: {e}")
             stats["skipped"] += 1
 
-    print(f"\nDone. Processed={stats['processed']}, sections_written={stats['sections_written']}, "
-          f"skipped_8k={stats['skipped_8k']}, earnings_calls={stats['earnings_calls_written']}, "
-          f"skipped_year={stats['skipped_year']}, skipped_csv={stats['skipped_csv']}, "
-          f"no_sections_10k={stats['no_sections_10k']}, skipped={stats['skipped']}")
+    print(
+        f"\nDone. Processed={stats['processed']}, sections_written={stats['sections_written']}, "
+        f"skipped_8k={stats['skipped_8k']}, earnings_calls={stats['earnings_calls_written']}, "
+        f"skipped_year={stats['skipped_year']}, skipped_csv={stats['skipped_csv']}, "
+        f"no_sections_10k={stats['no_sections_10k']}, skipped={stats['skipped']}"
+    )
 
 
 if __name__ == "__main__":

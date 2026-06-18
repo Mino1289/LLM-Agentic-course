@@ -23,6 +23,32 @@ Open [http://localhost:3000](http://localhost:3000) (French) or [http://localhos
 
 The Next.js dev server proxies `/api/*` to `http://127.0.0.1:8000` (see `next.config.ts`).
 
+## Alternate ports
+
+If ports 8000 or 3000 are busy, use custom ports and configure `frontend/.env.local`:
+
+```env
+NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8080
+API_PROXY_TARGET=http://127.0.0.1:8080
+PORT=3030
+```
+
+```bash
+# API on 8080 (repo root)
+uvicorn api.main:app --reload --reload-dir api --reload-dir src --port 8080
+
+# UI on 3030
+npm run dev -- -p 3030
+```
+
+Add to root `.env` for CORS:
+
+```env
+CORS_ORIGINS=http://localhost:3030,http://127.0.0.1:3030
+```
+
+Restart both servers after changing env files.
+
 ## Stack
 
 - Next.js 16 (App Router), Tailwind CSS 4, next-intl (fr/en)

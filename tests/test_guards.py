@@ -11,7 +11,10 @@ async def _inline_to_thread(func, *args, **kwargs):
 class GuardNodeTests(unittest.TestCase):
     def _agent(self, response: str = '{"route":"continue","reason":"ok"}'):
         from src.llm.types import LLMToolResponse
-        provider = SimpleNamespace(invoke_with_tools=MagicMock(return_value=LLMToolResponse(content=response)))
+
+        provider = SimpleNamespace(
+            invoke_with_tools=MagicMock(return_value=LLMToolResponse(content=response))
+        )
         return SimpleNamespace(rag=SimpleNamespace(doc_metadata=[], provider=provider))
 
     def test_empty_query_clarifies(self):
@@ -27,10 +30,14 @@ class GuardNodeTests(unittest.TestCase):
     def test_llm_coverage_question_answers_universe(self):
         from src.graph.guard import guard_node
 
-        agent = self._agent('{"route":"coverage_info","reason":"user asks covered universe"}')
+        agent = self._agent(
+            '{"route":"coverage_info","reason":"user asks covered universe"}'
+        )
         with patch("src.graph.guard.asyncio.to_thread", side_effect=_inline_to_thread):
             result = asyncio.run(
-                guard_node(agent, {"normalized_query": "Quelles entreprises sont couvertes ?"})
+                guard_node(
+                    agent, {"normalized_query": "Quelles entreprises sont couvertes ?"}
+                )
             )
 
         self.assertIn("NVDA", result["answer"])
@@ -46,7 +53,10 @@ class GuardNodeTests(unittest.TestCase):
         agent = self._agent('{"route":"reject_offtopic","reason":"coding request"}')
         with patch("src.graph.guard.asyncio.to_thread", side_effect=_inline_to_thread):
             result = asyncio.run(
-                guard_node(agent, {"normalized_query": "écrire du code python pour factorielle"})
+                guard_node(
+                    agent,
+                    {"normalized_query": "écrire du code python pour factorielle"},
+                )
             )
 
         self.assertIn("analyse financière", result["answer"])
@@ -58,7 +68,10 @@ class GuardNodeTests(unittest.TestCase):
         agent = self._agent('{"route":"continue","reason":"finance comparison"}')
         with patch("src.graph.guard.asyncio.to_thread", side_effect=_inline_to_thread):
             result = asyncio.run(
-                guard_node(agent, {"normalized_query": "Compare NVDA et MSFT sur les risques 2024"})
+                guard_node(
+                    agent,
+                    {"normalized_query": "Compare NVDA et MSFT sur les risques 2024"},
+                )
             )
 
         self.assertNotIn("answer", result)
@@ -71,7 +84,9 @@ class GuardNodeTests(unittest.TestCase):
         agent = self._agent("not json")
         with patch("src.graph.guard.asyncio.to_thread", side_effect=_inline_to_thread):
             result = asyncio.run(
-                guard_node(agent, {"normalized_query": "Peux-tu analyser NVDA en 2024 ?"})
+                guard_node(
+                    agent, {"normalized_query": "Peux-tu analyser NVDA en 2024 ?"}
+                )
             )
 
         self.assertNotIn("answer", result)

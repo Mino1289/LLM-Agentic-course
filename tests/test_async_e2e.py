@@ -58,7 +58,10 @@ def _build_minimal_agent() -> FinanceLangGraphAgent:
     return FinanceLangGraphAgent(rag=rag)
 
 
-@unittest.skipUnless(os.getenv("RUN_ASYNC_E2E") == "1", "Set RUN_ASYNC_E2E=1 to run LangGraph smoke tests.")
+@unittest.skipUnless(
+    os.getenv("RUN_ASYNC_E2E") == "1",
+    "Set RUN_ASYNC_E2E=1 to run LangGraph smoke tests.",
+)
 class AsyncEndToEndTests(unittest.IsolatedAsyncioTestCase):
     async def test_arun_returns_state(self):
         agent = _build_minimal_agent()
@@ -77,7 +80,8 @@ class AsyncEndToEndTests(unittest.IsolatedAsyncioTestCase):
                 events.append(event)
         # At least one event must be yielded (prepare_query_node start/end)
         self.assertGreaterEqual(
-            len(events), 1,
+            len(events),
+            1,
             f"astream must yield at least one event; got {len(events)}",
         )
 

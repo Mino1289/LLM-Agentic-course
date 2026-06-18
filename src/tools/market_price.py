@@ -1,4 +1,5 @@
 """Market price tool — retrieve stock prices via yfinance."""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -8,7 +9,9 @@ from src.tools.schemas import MarketPriceArgs
 from src.tools.descriptions import _normalize_tickers
 
 
-def _widen_single_day(start_date: str, end_date: str, padding_days: int = 5) -> tuple[str, str]:
+def _widen_single_day(
+    start_date: str, end_date: str, padding_days: int = 5
+) -> tuple[str, str]:
     try:
         start = datetime.strptime(start_date, "%Y-%m-%d").date()
         end = datetime.strptime(end_date, "%Y-%m-%d").date()
@@ -34,7 +37,10 @@ def run_market_price_tool(
     normalized = _normalize_tickers(args.tickers)
     start_date, end_date = _widen_single_day(args.start_date, args.end_date)
     if not normalized:
-        return {"text": f"No valid tickers provided. Use {_tracked_tickers_text()}.", "price_context": ""}
+        return {
+            "text": f"No valid tickers provided. Use {_tracked_tickers_text()}.",
+            "price_context": "",
+        }
     summary = fetch_price_context(agent, normalized, start_date, end_date)
     if not summary:
         return {

@@ -1,4 +1,5 @@
 """Noeud de récupération multi-requêtes avec filtrage par portée (ticker, doc_type)."""
+
 from __future__ import annotations
 
 import asyncio
@@ -23,12 +24,16 @@ def _infer_doc_type(metadata: dict[str, Any]) -> str:
         return "20-F"
     if "6-k" in source or "6k" in source:
         return "6-K"
-    if section == "earnings_call" or re.search(r"(transcript|earnings[_\- ]?call|conference[_\- ]?call)", source):
+    if section == "earnings_call" or re.search(
+        r"(transcript|earnings[_\- ]?call|conference[_\- ]?call)", source
+    ):
         return "EARNINGS_CALL"
     return "OTHER"
 
 
-def _match_scope(metadata: dict[str, Any], scoped_tickers: set[str], scoped_doc_types: set[str]) -> bool:
+def _match_scope(
+    metadata: dict[str, Any], scoped_tickers: set[str], scoped_doc_types: set[str]
+) -> bool:
     if scoped_tickers:
         if str(metadata.get("ticker", "")).upper() not in scoped_tickers:
             return False
@@ -38,10 +43,16 @@ def _match_scope(metadata: dict[str, Any], scoped_tickers: set[str], scoped_doc_
     return True
 
 
-def _apply_scope_filter(agent: Any, indices: list[int], scoped_tickers: set[str], scoped_doc_types: set[str]) -> list[int]:
+def _apply_scope_filter(
+    agent: Any, indices: list[int], scoped_tickers: set[str], scoped_doc_types: set[str]
+) -> list[int]:
     if not scoped_tickers and not scoped_doc_types:
         return indices
-    return [idx for idx in indices if _match_scope(agent.rag.doc_metadata[idx], scoped_tickers, scoped_doc_types)]
+    return [
+        idx
+        for idx in indices
+        if _match_scope(agent.rag.doc_metadata[idx], scoped_tickers, scoped_doc_types)
+    ]
 
 
 def _ticker_counts(agent: Any, indices: list[int]) -> dict[str, int]:
@@ -55,7 +66,9 @@ def _ticker_counts(agent: Any, indices: list[int]) -> dict[str, int]:
 
 
 def _scoped_ticker_list(state: GraphState) -> list[str]:
-    tickers = [str(t).upper() for t in (state.get("target_tickers") or []) if str(t).strip()]
+    tickers = [
+        str(t).upper() for t in (state.get("target_tickers") or []) if str(t).strip()
+    ]
     for ticker in extract_query_tickers(state.get("normalized_query", "")):
         if ticker not in tickers:
             tickers.append(ticker)
@@ -73,14 +86,26 @@ def _ticker_specific_query(query: str, ticker: str, all_tickers: list[str]) -> s
     return rewritten
 
 
-async def _retrieve_with_fallbacks(agent: Any, query: str, filters_to_try: list[dict[str, str] | None],
-                                    scoped_tickers: set[str], scoped_doc_types: set[str]) -> list[int]:
+async def _retrieve_with_fallbacks(
+    agent: Any,
+    query: str,
+    filters_to_try: list[dict[str, str] | None],
+    scoped_tickers: set[str],
+    scoped_doc_types: set[str],
+) -> list[int]:
     for candidate_filter in filters_to_try:
         retrieval = await asyncio.to_thread(
-            agent.rag.retrieve, query, search_mode="vector", use_reranking=False,
-            metadata_filter=candidate_filter, top_k=24, candidate_pool=40,
+            agent.rag.retrieve,
+            query,
+            search_mode="vector",
+            use_reranking=False,
+            metadata_filter=candidate_filter,
+            top_k=24,
+            candidate_pool=40,
         )
-        scoped_indices = _apply_scope_filter(agent, retrieval.chunk_indices, scoped_tickers, scoped_doc_types)
+        scoped_indices = _apply_scope_filter(
+            agent, retrieval.chunk_indices, scoped_tickers, scoped_doc_types
+        )
         if scoped_indices:
             return scoped_indices
         if retrieval.chunk_indices and not scoped_tickers and not scoped_doc_types:
@@ -94,11 +119,17 @@ async def multi_retrieve_node(agent: Any, state: GraphState) -> GraphState:
     metadata_filter = state.get("metadata_filter") or {}
     scoped_ticker_list = _scoped_ticker_list(state)
     scoped_tickers = set(scoped_ticker_list)
-    scoped_doc_types = {str(dt).upper() for dt in (state.get("doc_type_priority") or []) if str(dt).strip()}
+    scoped_doc_types = {
+        str(dt).upper()
+        for dt in (state.get("doc_type_priority") or [])
+        if str(dt).strip()
+    }
     strict_filter: dict[str, str] = {}
     if metadata_filter.get("year"):
         strict_filter["year"] = metadata_filter["year"]
-    if metadata_filter.get("ticker") and (not scoped_tickers or len(scoped_tickers) <= 1):
+    if metadata_filter.get("ticker") and (
+        not scoped_tickers or len(scoped_tickers) <= 1
+    ):
         strict_filter["ticker"] = metadata_filter["ticker"]
     filters_to_try: list[dict[str, str] | None] = []
     if strict_filter:
@@ -125,26 +156,43 @@ async def multi_retrieve_node(agent: Any, state: GraphState) -> GraphState:
                         ticker_filters.append(scoped_filter)
                 ticker_query = _ticker_specific_query(query, ticker, scoped_ticker_list)
                 per_ticker_indices = await _retrieve_with_fallbacks(
-                    agent, ticker_query, ticker_filters,
-                    scoped_tickers={ticker}, scoped_doc_types=scoped_doc_types,
+                    agent,
+                    ticker_query,
+                    ticker_filters,
+                    scoped_tickers={ticker},
+                    scoped_doc_types=scoped_doc_types,
                 )
                 query_indices.extend(per_ticker_indices[:12])
         if not query_indices:
-            query_indices = await _retrieve_with_fallbacks(agent, query, filters_to_try, scoped_tickers, scoped_doc_types)
-        if not query_indices and not scoped_tickers and not scoped_doc_types and not metadata_filter:
+            query_indices = await _retrieve_with_fallbacks(
+                agent, query, filters_to_try, scoped_tickers, scoped_doc_types
+            )
+        if (
+            not query_indices
+            and not scoped_tickers
+            and not scoped_doc_types
+            and not metadata_filter
+        ):
             fallback = await asyncio.to_thread(
-                agent.rag.retrieve, query, search_mode="vector", use_reranking=False,
-                metadata_filter=None, top_k=18, candidate_pool=24,
+                agent.rag.retrieve,
+                query,
+                search_mode="vector",
+                use_reranking=False,
+                metadata_filter=None,
+                top_k=18,
+                candidate_pool=24,
             )
             query_indices.extend(fallback.chunk_indices)
         all_indices.extend(query_indices)
     dedup_indices = await asyncio.to_thread(agent.rag._deduplicate_indices, all_indices)
     stats = state.get("stats", {})
-    stats.update({
-        "decomposed_query_count": len(queries),
-        "retrieval_candidate_count": len(dedup_indices),
-        "retrieval_candidate_ticker_counts": _ticker_counts(agent, dedup_indices),
-        "retrieval_scoped_tickers": sorted(scoped_tickers),
-        "retrieval_scoped_doc_types": sorted(scoped_doc_types),
-    })
+    stats.update(
+        {
+            "decomposed_query_count": len(queries),
+            "retrieval_candidate_count": len(dedup_indices),
+            "retrieval_candidate_ticker_counts": _ticker_counts(agent, dedup_indices),
+            "retrieval_scoped_tickers": sorted(scoped_tickers),
+            "retrieval_scoped_doc_types": sorted(scoped_doc_types),
+        }
+    )
     return {"candidate_indices": dedup_indices, "stats": stats}

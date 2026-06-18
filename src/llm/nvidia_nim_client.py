@@ -1,4 +1,5 @@
 """Client NVIDIA NIM pour les appels LLM."""
+
 from __future__ import annotations
 
 from typing import Any, AsyncIterator, Optional
@@ -29,5 +30,7 @@ class NvidiaNIMClient(OpenAIClient):
         temperature: float = 0.1,
         max_tokens: int = 2000,
     ) -> AsyncIterator[LLMStreamChunk]:
-        async for chunk in super().ainvoke_with_tools_stream(messages, tools, temperature, max_tokens):
+        async for chunk in super().ainvoke_with_tools_stream(
+            messages, tools, temperature, max_tokens
+        ):
             yield chunk

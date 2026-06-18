@@ -26,7 +26,9 @@ class AgentFactory:
         if self._rag_ready:
             return True
         try:
-            rag = HybridRAG(chunk_strategy="semantic", search_mode="vector", use_reranking=True)
+            rag = HybridRAG(
+                chunk_strategy="semantic", search_mode="vector", use_reranking=True
+            )
             rag.load_and_index_data(max_new_embeddings=0)
             self._rag_ready = True
             return True
@@ -36,12 +38,18 @@ class AgentFactory:
     def get_hub_graph(self, settings: AgentSettings) -> HubAndSpokeGraph:
         key = settings.cache_key()
         if key not in self._agent_cache:
-            rag = HybridRAG(chunk_strategy="semantic", search_mode="vector", use_reranking=True)
+            rag = HybridRAG(
+                chunk_strategy="semantic", search_mode="vector", use_reranking=True
+            )
             rag.load_and_index_data(max_new_embeddings=0)
             self._rag_ready = True
-            self._agent_cache[key] = FinanceLangGraphAgent(rag=rag, **settings.to_agent_kwargs())
+            self._agent_cache[key] = FinanceLangGraphAgent(
+                rag=rag, **settings.to_agent_kwargs()
+            )
         agent = self._agent_cache[key]
-        return HubAndSpokeGraph(agent, max_spoke_iterations=settings.max_spoke_iterations)
+        return HubAndSpokeGraph(
+            agent, max_spoke_iterations=settings.max_spoke_iterations
+        )
 
 
 agent_factory = AgentFactory()

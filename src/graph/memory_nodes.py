@@ -1,4 +1,5 @@
 """Noeuds mémoire — extraction et enrichissement du contexte mémoire depuis GraphState."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -9,7 +10,7 @@ from src.graph.state import GraphState
 def summarize_recent_context(state: GraphState, max_turns: int = 6) -> str:
     msgs = state.get("lc_messages") or []
     parts = []
-    for msg in msgs[-max_turns * 2:]:
+    for msg in msgs[-max_turns * 2 :]:
         role = msg.get("role", "unknown")
         content = msg.get("content", "")
         if isinstance(content, str) and content.strip():
@@ -19,7 +20,9 @@ def summarize_recent_context(state: GraphState, max_turns: int = 6) -> str:
     return "Recent conversation summary:\n" + "\n".join(parts[-max_turns:])
 
 
-def format_tool_event_context(tool_events: list[dict[str, Any]], max_items: int = 5) -> str:
+def format_tool_event_context(
+    tool_events: list[dict[str, Any]], max_items: int = 5
+) -> str:
     if not tool_events:
         return ""
     lines = []

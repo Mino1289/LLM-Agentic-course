@@ -1,4 +1,5 @@
 """Client OpenAI pour les appels LLM."""
+
 from __future__ import annotations
 
 from typing import Any, AsyncIterator, Optional
@@ -58,7 +59,9 @@ class OpenAIClient:
                 "prompt_tokens": usage.prompt_tokens,
                 "completion_tokens": usage.completion_tokens,
                 "total_tokens": usage.total_tokens,
-            } if usage else None,
+            }
+            if usage
+            else None,
         )
 
     async def ainvoke_with_tools_stream(

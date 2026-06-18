@@ -1,4 +1,5 @@
 """Extraction des sections réglementaires SEC (Item 1A, 7, 8)."""
+
 from __future__ import annotations
 
 import re
@@ -69,7 +70,9 @@ def parse_sections_arg(raw: str) -> tuple[str, ...]:
     return tuple(sections) if sections else DEFAULT_SECTIONS
 
 
-def _extract_between(text: str, start_patterns: list[str], end_patterns: list[str]) -> str:
+def _extract_between(
+    text: str, start_patterns: list[str], end_patterns: list[str]
+) -> str:
     start_positions = sorted(
         {
             match.start()
@@ -87,7 +90,9 @@ def _extract_between(text: str, start_patterns: list[str], end_patterns: list[st
         search_from = start + MIN_SECTION_CHARS
         end = len(text)
         for end_pat in end_patterns:
-            end_match = re.search(end_pat, text[search_from:], re.IGNORECASE | re.DOTALL)
+            end_match = re.search(
+                end_pat, text[search_from:], re.IGNORECASE | re.DOTALL
+            )
             if end_match:
                 end = min(end, search_from + end_match.start())
 
@@ -100,7 +105,9 @@ def _extract_between(text: str, start_patterns: list[str], end_patterns: list[st
     return best
 
 
-def extract_sections(text: str, enabled: tuple[str, ...] = DEFAULT_SECTIONS) -> dict[str, str]:
+def extract_sections(
+    text: str, enabled: tuple[str, ...] = DEFAULT_SECTIONS
+) -> dict[str, str]:
     text = normalize_sec_text(text)
     sections = {}
     for section_name in enabled:

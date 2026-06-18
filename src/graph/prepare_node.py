@@ -1,4 +1,5 @@
 """Noeud de préparation de la requête — normalisation, extraction tickers/metadata."""
+
 from __future__ import annotations
 
 import re

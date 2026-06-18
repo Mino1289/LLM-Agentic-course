@@ -20,16 +20,20 @@ async def pm_plan_node(agent: Any, state: HubSpokeState) -> HubSpokeState:
     compliance_reasons = state.get("compliance_reasons") or []
     spoke_events = list(state.get("spoke_events") or [])
 
-    spoke_events.append({
-        "agent": "Portfolio Manager",
-        "status": "running",
-        "message": "Création du plan d'action...",
-        "tool_events": [],
-    })
+    spoke_events.append(
+        {
+            "agent": "Portfolio Manager",
+            "status": "running",
+            "message": "Création du plan d'action...",
+            "tool_events": [],
+        }
+    )
 
     context = f"User request: {query}\n"
     if compliance_reasons:
-        context += f"\nPrevious Compliance rejection reasons:\n" + "\n".join(f"- {r}" for r in compliance_reasons)
+        context += f"\nPrevious Compliance rejection reasons:\n" + "\n".join(
+            f"- {r}" for r in compliance_reasons
+        )
         context += "\n\nAdjust the plan accordingly."
 
     if is_trade_requested(state):
@@ -46,14 +50,20 @@ async def pm_plan_node(agent: Any, state: HubSpokeState) -> HubSpokeState:
     messages = [
         {"role": "system", "content": PM_SYSTEM_PROMPT},
         {"role": "system", "content": mode_instruction},
-        {"role": "system", "content": f"Today (UTC): {datetime.now(UTC).date().isoformat()}."},
+        {
+            "role": "system",
+            "content": f"Today (UTC): {datetime.now(UTC).date().isoformat()}.",
+        },
         {"role": "user", "content": context},
     ]
 
     try:
         full_response = ""
         async for chunk in agent.rag.provider.ainvoke_with_tools_stream(
-            messages, tools=None, temperature=0.2, max_tokens=4096,
+            messages,
+            tools=None,
+            temperature=0.2,
+            max_tokens=4096,
         ):
             if chunk.delta:
                 full_response += chunk.delta
@@ -64,12 +74,14 @@ async def pm_plan_node(agent: Any, state: HubSpokeState) -> HubSpokeState:
             for key in ("ticker", "side", "qty", "order_type", "limit_price"):
                 plan.pop(key, None)
 
-        spoke_events.append({
-            "agent": "Portfolio Manager",
-            "status": "completed",
-            "message": "Plan d'action créé avec succès.",
-            "tool_events": [],
-        })
+        spoke_events.append(
+            {
+                "agent": "Portfolio Manager",
+                "status": "completed",
+                "message": "Plan d'action créé avec succès.",
+                "tool_events": [],
+            }
+        )
 
         merged_stats = dict(state.get("stats") or {})
         merged_stats["pm_plan_done"] = True
@@ -82,12 +94,14 @@ async def pm_plan_node(agent: Any, state: HubSpokeState) -> HubSpokeState:
         }
     except Exception as e:
         _LOGGER.exception("PM plan failed")
-        spoke_events.append({
-            "agent": "Portfolio Manager",
-            "status": "failed",
-            "message": f"Erreur: {e}",
-            "tool_events": [],
-        })
+        spoke_events.append(
+            {
+                "agent": "Portfolio Manager",
+                "status": "failed",
+                "message": f"Erreur: {e}",
+                "tool_events": [],
+            }
+        )
         return {
             "answer": f"Erreur lors de la planification: {e}",
             "spoke_events": spoke_events,
@@ -96,16 +110,22 @@ async def pm_plan_node(agent: Any, state: HubSpokeState) -> HubSpokeState:
 
 @traceable(name="pm_synthesis_node")
 async def pm_synthesis_node(agent: Any, state: HubSpokeState) -> HubSpokeState:
-    fundamental_report = _truncate_report(state.get("fundamental_report", "No fundamental report available."))
-    quantitative_report = _truncate_report(state.get("quantitative_report", "No quantitative report available."))
+    fundamental_report = _truncate_report(
+        state.get("fundamental_report", "No fundamental report available.")
+    )
+    quantitative_report = _truncate_report(
+        state.get("quantitative_report", "No quantitative report available.")
+    )
     spoke_events = list(state.get("spoke_events") or [])
 
-    spoke_events.append({
-        "agent": "Portfolio Manager",
-        "status": "running",
-        "message": "Synthèse des rapports des analystes...",
-        "tool_events": [],
-    })
+    spoke_events.append(
+        {
+            "agent": "Portfolio Manager",
+            "status": "running",
+            "message": "Synthèse des rapports des analystes...",
+            "tool_events": [],
+        }
+    )
 
     today = datetime.now(UTC).date().isoformat()
     trade_requested = is_trade_requested(state)
@@ -149,13 +169,21 @@ QUANTITATIVE REPORT:
 
     messages = [
         {"role": "system", "content": synthesis_prompt},
-        {"role": "user", "content": "Synthesize the analyst reports for the user." if not trade_requested else "Synthesize and make the final decision."},
+        {
+            "role": "user",
+            "content": "Synthesize the analyst reports for the user."
+            if not trade_requested
+            else "Synthesize and make the final decision.",
+        },
     ]
 
     try:
         full_response = ""
         async for chunk in agent.rag.provider.ainvoke_with_tools_stream(
-            messages, tools=None, temperature=0.2, max_tokens=4096,
+            messages,
+            tools=None,
+            temperature=0.2,
+            max_tokens=4096,
         ):
             if chunk.delta:
                 full_response += chunk.delta
@@ -166,12 +194,16 @@ QUANTITATIVE REPORT:
             for key in ("ticker", "side", "qty", "order_type", "limit_price"):
                 decision.pop(key, None)
 
-        spoke_events.append({
-            "agent": "Portfolio Manager",
-            "status": "completed",
-            "message": "Décision d'investissement prise." if trade_requested else "Synthèse analytique terminée.",
-            "tool_events": [],
-        })
+        spoke_events.append(
+            {
+                "agent": "Portfolio Manager",
+                "status": "completed",
+                "message": "Décision d'investissement prise."
+                if trade_requested
+                else "Synthèse analytique terminée.",
+                "tool_events": [],
+            }
+        )
 
         merged_stats = dict(state.get("stats") or {})
         merged_stats["pm_synthesis_done"] = True
@@ -183,13 +215,18 @@ QUANTITATIVE REPORT:
         }
     except Exception as e:
         _LOGGER.exception("PM synthesis failed")
-        spoke_events.append({
-            "agent": "Portfolio Manager",
-            "status": "failed",
-            "message": f"Erreur: {e}",
-            "tool_events": [],
-        })
-        return {"answer": f"Erreur lors de la synthèse: {e}", "spoke_events": spoke_events}
+        spoke_events.append(
+            {
+                "agent": "Portfolio Manager",
+                "status": "failed",
+                "message": f"Erreur: {e}",
+                "tool_events": [],
+            }
+        )
+        return {
+            "answer": f"Erreur lors de la synthèse: {e}",
+            "spoke_events": spoke_events,
+        }
 
 
 def _truncate_report(text: str, max_chars: int = 6000) -> str:

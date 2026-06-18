@@ -1,4 +1,5 @@
 """Types fondamentaux pour les providers LLM."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

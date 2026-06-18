@@ -16,11 +16,13 @@ from src.rag.core import HybridRAG
 from src.rag.metadata.build import build_chunk_id
 from src.rag.chunk.semantic import chunk_text_semantic
 from src.graph.decompose_node import parse_query_list
+
 # V1 synthesis_node no longer exists
 from src.graph.prepare_node import extract_metadata_filter, prepare_query_node
 from src.graph.prompt_context import get_known_tickers
 from src.graph.rerank_node import rerank_node
 from src.graph.retrieval_node import multi_retrieve_node
+
 # V1 query_scope_node no longer exists
 from src.llm.types import LLMConfig, ToolCall
 from src.llm.provider import (
@@ -41,7 +43,11 @@ from src.tools.schemas import (
 )
 from src.tools.descriptions import _normalize_doc_types
 from src.tools.trading import run_place_trade, run_close_position
-from src.tools.portfolio import run_portfolio_info, run_portfolio_history, run_account_activity
+from src.tools.portfolio import (
+    run_portfolio_info,
+    run_portfolio_history,
+    run_account_activity,
+)
 from src.tools.export_report import run_export_investment_report
 from src.tools.validate_claims import run_validate_claims
 from src.tools.news import run_get_news
@@ -100,7 +106,9 @@ class RetrievalTests(unittest.TestCase):
         ]
         rag.chunk_ids = ["amd", "nvda"]
         rag.provider = SimpleNamespace(embed=lambda _texts: [[1.0, 0.0]])
-        rag.collection = chromadb.EphemeralClient().get_or_create_collection("metadata-filter-test")
+        rag.collection = chromadb.EphemeralClient().get_or_create_collection(
+            "metadata-filter-test"
+        )
         rag.collection.add(
             ids=rag.chunk_ids,
             documents=rag.documents,
@@ -122,7 +130,9 @@ class RetrievalTests(unittest.TestCase):
                 self.chunk_indices = indices
 
         class FakeRag:
-            doc_metadata = [{"ticker": "NVDA", "source": "nvda-10-k_2024.htm", "section": "Item_7"}]
+            doc_metadata = [
+                {"ticker": "NVDA", "source": "nvda-10-k_2024.htm", "section": "Item_7"}
+            ]
 
             def retrieve(self, _query, **kwargs):
                 return Retrieval([] if kwargs.get("metadata_filter") else [0])
@@ -139,8 +149,12 @@ class RetrievalTests(unittest.TestCase):
             "stats": {},
         }
 
-        with patch("src.graph.retrieval_node.asyncio.to_thread", side_effect=_inline_to_thread):
-            result = asyncio.run(multi_retrieve_node(SimpleNamespace(rag=FakeRag()), state))
+        with patch(
+            "src.graph.retrieval_node.asyncio.to_thread", side_effect=_inline_to_thread
+        ):
+            result = asyncio.run(
+                multi_retrieve_node(SimpleNamespace(rag=FakeRag()), state)
+            )
 
         self.assertEqual(result["candidate_indices"], [])
 
@@ -173,14 +187,18 @@ class RetrievalTests(unittest.TestCase):
         rag = FakeRag()
         state = {
             "normalized_query": "Compare MSFT et NVDA sur la croissance recente du chiffre d'affaires.",
-            "decomposed_queries": ["Compare MSFT et NVDA sur la croissance recente du chiffre d'affaires."],
+            "decomposed_queries": [
+                "Compare MSFT et NVDA sur la croissance recente du chiffre d'affaires."
+            ],
             "metadata_filter": {},
             "target_tickers": ["MSFT"],
             "doc_type_priority": ["10-Q"],
             "stats": {},
         }
 
-        with patch("src.graph.retrieval_node.asyncio.to_thread", side_effect=_inline_to_thread):
+        with patch(
+            "src.graph.retrieval_node.asyncio.to_thread", side_effect=_inline_to_thread
+        ):
             result = asyncio.run(multi_retrieve_node(SimpleNamespace(rag=rag), state))
 
         self.assertEqual(result["candidate_indices"], [0, 1])
@@ -225,7 +243,9 @@ class ScopeTests(unittest.TestCase):
 
 class PrepareTests(unittest.TestCase):
     def test_metadata_filter_ignores_uppercase_non_ticker_tokens(self):
-        result = extract_metadata_filter("Que dit la SEC sur les risques AI et GPU en 2024 ?")
+        result = extract_metadata_filter(
+            "Que dit la SEC sur les risques AI et GPU en 2024 ?"
+        )
 
         self.assertEqual(result, {"year": "2024"})
 
@@ -235,10 +255,14 @@ class PrepareTests(unittest.TestCase):
         self.assertEqual(result, {"ticker": "AMD", "year": "2024"})
 
     def test_comparison_query_keeps_all_tickers_without_single_ticker_filter(self):
-        state = asyncio.run(prepare_query_node(
-            SimpleNamespace(),
-            {"query": "Compare MSFT et NVDA sur la croissance recente du chiffre d'affaires."},
-        ))
+        state = asyncio.run(
+            prepare_query_node(
+                SimpleNamespace(),
+                {
+                    "query": "Compare MSFT et NVDA sur la croissance recente du chiffre d'affaires."
+                },
+            )
+        )
 
         self.assertEqual(state["target_tickers"], ["MSFT", "NVDA"])
         self.assertNotIn("ticker", state["metadata_filter"])
@@ -270,24 +294,39 @@ class RerankTests(unittest.TestCase):
             "candidate_indices": [0, 1, 2, 3, 4, 5],
         }
 
-        with patch("src.graph.rerank_node.asyncio.to_thread", side_effect=_inline_to_thread):
+        with patch(
+            "src.graph.rerank_node.asyncio.to_thread", side_effect=_inline_to_thread
+        ):
             result = asyncio.run(rerank_node(agent, state))
 
         self.assertEqual(
             [meta["ticker"] for meta in result["final_metadatas"]],
             ["MSFT", "MSFT", "NVDA", "NVDA"],
         )
-        self.assertEqual(result["stats"]["rerank_final_ticker_counts"], {"MSFT": 2, "NVDA": 2})
+        self.assertEqual(
+            result["stats"]["rerank_final_ticker_counts"], {"MSFT": 2, "NVDA": 2}
+        )
 
 
 class GenerationTests(unittest.TestCase):
     def test_retrieved_excerpts_include_metadata_labels(self):
         from src.graph.prompt_context import format_retrieved_excerpts
+
         result = format_retrieved_excerpts(
             ["microsoft excerpt", "nvidia excerpt"],
             [
-                {"ticker": "MSFT", "source": "msft-10-q_2026.htm", "section": "Item_7", "year": "2026"},
-                {"ticker": "NVDA", "source": "nvda-10-q_2026.htm", "section": "Item_7", "year": "2026"},
+                {
+                    "ticker": "MSFT",
+                    "source": "msft-10-q_2026.htm",
+                    "section": "Item_7",
+                    "year": "2026",
+                },
+                {
+                    "ticker": "NVDA",
+                    "source": "nvda-10-q_2026.htm",
+                    "section": "Item_7",
+                    "year": "2026",
+                },
             ],
         )
 
@@ -340,7 +379,9 @@ class ContextPruneTests(unittest.TestCase):
             def count_context_tokens(self, chunks):
                 return len(chunks) * 1000
 
-        agent = SimpleNamespace(memory_store=MemoryStore(), rag=Rag(), max_context_tokens=1200)
+        agent = SimpleNamespace(
+            memory_store=MemoryStore(), rag=Rag(), max_context_tokens=1200
+        )
         state = {
             "conversation_id": "conversation",
             "final_chunks": ["keep", "drop", "tail"],
@@ -354,6 +395,7 @@ class ContextPruneTests(unittest.TestCase):
 
         with patch("src.graph.memory_store", side_effect=_inline_to_thread):
             from src.graph.memory_nodes import context_prune_node
+
             result = asyncio.run(context_prune_node(agent, state))
 
         self.assertEqual(result["final_chunks"], ["keep"])
@@ -364,7 +406,9 @@ class ConfigurationTests(unittest.TestCase):
     def test_universe_is_limited_to_debug_tickers(self):
         from src.config import TRACKED_TICKERS
 
-        rag = SimpleNamespace(doc_metadata=[{"ticker": "AMD"}, {"ticker": "ASML"}, {"ticker": "FAKE"}])
+        rag = SimpleNamespace(
+            doc_metadata=[{"ticker": "AMD"}, {"ticker": "ASML"}, {"ticker": "FAKE"}]
+        )
 
         result = get_known_tickers(SimpleNamespace(rag=rag), max_items=20)
         # Unknown tickers must be filtered, the rest comes from TRACKED_TICKERS order.
@@ -391,28 +435,44 @@ class ConfigurationTests(unittest.TestCase):
         from src.rag.metadata.extract import extract_file_type_from_source
 
         self.assertEqual(
-            extract_file_type_from_source("asml-20-f_2025-03-05.htm__foreign_annual_report.txt"),
+            extract_file_type_from_source(
+                "asml-20-f_2025-03-05.htm__foreign_annual_report.txt"
+            ),
             "20-F",
         )
         self.assertEqual(
-            extract_file_type_from_source("arm-6-k_2025-01-01.htm__foreign_interim_report.txt"),
+            extract_file_type_from_source(
+                "arm-6-k_2025-01-01.htm__foreign_interim_report.txt"
+            ),
             "6-K",
         )
 
     def test_export_report_writes_markdown_file(self):
-        with patch("src.tools.export_report.REPORTS_DIR", Path(os.getenv("TMPDIR", "/tmp")) / "finance_rag_test_reports"):
+        with patch(
+            "src.tools.export_report.REPORTS_DIR",
+            Path(os.getenv("TMPDIR", "/tmp")) / "finance_rag_test_reports",
+        ):
             from src.tools.export_report import REPORTS_DIR
 
             REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-            result = run_export_investment_report(ExportReportArgs(title="Test Report", content="## Section\nContent", format="md"))
+            result = run_export_investment_report(
+                ExportReportArgs(
+                    title="Test Report", content="## Section\nContent", format="md"
+                )
+            )
             path = Path(result["path"])
             self.assertTrue(path.is_file())
             self.assertIn("# Test Report", path.read_text(encoding="utf-8"))
             path.unlink(missing_ok=True)
 
-    @unittest.skipIf(importlib.util.find_spec("reportlab") is None, "reportlab not installed")
+    @unittest.skipIf(
+        importlib.util.find_spec("reportlab") is None, "reportlab not installed"
+    )
     def test_export_report_writes_pdf_file(self):
-        with patch("src.tools.export_report.REPORTS_DIR", Path(os.getenv("TMPDIR", "/tmp")) / "finance_rag_test_reports"):
+        with patch(
+            "src.tools.export_report.REPORTS_DIR",
+            Path(os.getenv("TMPDIR", "/tmp")) / "finance_rag_test_reports",
+        ):
             from src.tools.export_report import REPORTS_DIR
 
             REPORTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -431,7 +491,9 @@ class ConfigurationTests(unittest.TestCase):
             path.unlink(missing_ok=True)
 
     def test_normalize_github_model_id_strips_openai_prefix(self):
-        self.assertEqual(_normalize_github_model_id("openai/gpt-4o-mini"), "gpt-4o-mini")
+        self.assertEqual(
+            _normalize_github_model_id("openai/gpt-4o-mini"), "gpt-4o-mini"
+        )
         self.assertEqual(_normalize_github_model_id("gpt-4.1-mini"), "gpt-4.1-mini")
 
     def test_gemini_config_uses_separate_embedding_provider(self):
@@ -463,7 +525,10 @@ class ConfigurationTests(unittest.TestCase):
         raw = [
             {
                 "id": "call_1",
-                "function": {"name": "market_price_tool", "arguments": '{"tickers":["MSFT"]}'},
+                "function": {
+                    "name": "market_price_tool",
+                    "arguments": '{"tickers":["MSFT"]}',
+                },
             }
         ]
         parsed = _parse_openai_tool_calls(raw)
@@ -512,7 +577,7 @@ class AgentToolsTests(unittest.TestCase):
             ' "best_source_index": 1, "reasoning": "Item 1A confirms supply chain risk."},'
             '{"claim": "Mars reactor", "status": "unsupported",'
             ' "best_source_index": null, "reasoning": "No relevant excerpt."}'
-            ']}'
+            "]}"
         )
         agent = SimpleNamespace(rag=SimpleNamespace(provider=MagicMock()))
         agent.rag.provider.generate.return_value = canned
@@ -550,9 +615,7 @@ class AgentToolsTests(unittest.TestCase):
         from unittest.mock import patch
 
         with patch("src.alpaca.client.get_alpaca_client", return_value=None):
-            result = run_place_trade(
-                PlaceTradeArgs(ticker="ZZZZ", side="buy", qty=10)
-            )
+            result = run_place_trade(PlaceTradeArgs(ticker="ZZZZ", side="buy", qty=10))
         # Ticker validation happens before API call
         self.assertEqual(result.get("error"), "invalid_ticker")
 
@@ -598,7 +661,9 @@ class AgentToolsTests(unittest.TestCase):
         self.assertEqual(result.get("error"), "alpaca_not_configured")
 
     def test_agent_tool_loop_mocked(self):
-        agent = SimpleNamespace(max_tool_iterations=6, rag=SimpleNamespace(provider=MagicMock()))
+        agent = SimpleNamespace(
+            max_tool_iterations=6, rag=SimpleNamespace(provider=MagicMock())
+        )
 
         first_response = LLMToolResponse(
             content=None,
@@ -610,9 +675,14 @@ class AgentToolsTests(unittest.TestCase):
                 )
             ],
         )
-        second_response = LLMToolResponse(content="Synthèse mock basée sur les outils.", tool_calls=[])
+        second_response = LLMToolResponse(
+            content="Synthèse mock basée sur les outils.", tool_calls=[]
+        )
 
-        agent.rag.provider.invoke_with_tools.side_effect = [first_response, second_response]
+        agent.rag.provider.invoke_with_tools.side_effect = [
+            first_response,
+            second_response,
+        ]
 
         state = {
             "normalized_query": "Risques MSFT 2024",
@@ -624,13 +694,17 @@ class AgentToolsTests(unittest.TestCase):
         }
 
         with patch("src.tools.sec_filings.run_sec_filings_rag") as mock_rag:
+
             async def fake_rag(args, *, agent):
                 return {
                     "text": "[1] ticker=MSFT excerpt",
                     "final_chunks": ["risk factors supply chain"],
-                    "final_metadatas": [{"ticker": "MSFT", "year": "2024", "file_type": "10-K"}],
+                    "final_metadatas": [
+                        {"ticker": "MSFT", "year": "2024", "file_type": "10-K"}
+                    ],
                     "stats": {"chunks_used": 1},
                 }
+
             mock_rag.side_effect = fake_rag
             from src.llm.provider import LLMStreamChunk
 
@@ -640,11 +714,13 @@ class AgentToolsTests(unittest.TestCase):
                 responses = [
                     [
                         LLMStreamChunk(
-                            tool_call_delta=[{
-                                "id": "tc_1",
-                                "name": "sec_filings_rag_tool",
-                                "arguments": '{"query": "risk"}',
-                            }],
+                            tool_call_delta=[
+                                {
+                                    "id": "tc_1",
+                                    "name": "sec_filings_rag_tool",
+                                    "arguments": '{"query": "risk"}',
+                                }
+                            ],
                             finish_reason="tool_calls",
                         ),
                     ],
@@ -654,11 +730,15 @@ class AgentToolsTests(unittest.TestCase):
                     ],
                 ]
                 idx = {"i": 0}
-                async def stream(messages, tools=None, temperature=0.1, max_tokens=2000):
+
+                async def stream(
+                    messages, tools=None, temperature=0.1, max_tokens=2000
+                ):
                     out = responses[idx["i"]]
                     idx["i"] += 1
                     for c in out:
                         yield c
+
                 return stream
 
             stream_fn = asyncio.run(fake_astream_factory())
@@ -675,7 +755,9 @@ class AgentToolsTests(unittest.TestCase):
             final = asyncio.run(agent_node(agent, {**merged, **after_tools}))
             self.assertEqual(final.get("answer"), "Synthèse mock basée sur les outils.")
             self.assertGreaterEqual(len(final.get("tool_events", [])), 1)
-            self.assertGreaterEqual(final.get("stats", {}).get("agent_iterations", 0), 2)
+            self.assertGreaterEqual(
+                final.get("stats", {}).get("agent_iterations", 0), 2
+            )
 
     def test_agent_streaming_tool_call_continuation_chunks_have_id_none(self):
         """Real OpenAI streaming protocol: only the FIRST chunk of a tool_call
@@ -688,7 +770,9 @@ class AgentToolsTests(unittest.TestCase):
         """
         from src.llm.provider import LLMStreamChunk
 
-        agent = SimpleNamespace(max_tool_iterations=6, rag=SimpleNamespace(provider=MagicMock()))
+        agent = SimpleNamespace(
+            max_tool_iterations=6, rag=SimpleNamespace(provider=MagicMock())
+        )
         REAL_ID = "call_r3YATjEm9WWID8AGbBzQddld"
 
         # Chunks 1 has id+name+empty args; chunks 2-3 have id=None, name=None,
@@ -697,27 +781,33 @@ class AgentToolsTests(unittest.TestCase):
         responses = [
             [
                 LLMStreamChunk(
-                    tool_call_delta=[{
-                        "id": REAL_ID,
-                        "name": "sec_filings_rag_tool",
-                        "arguments": '{"query":',
-                    }],
+                    tool_call_delta=[
+                        {
+                            "id": REAL_ID,
+                            "name": "sec_filings_rag_tool",
+                            "arguments": '{"query":',
+                        }
+                    ],
                     finish_reason=None,
                 ),
                 LLMStreamChunk(
-                    tool_call_delta=[{
-                        "id": None,
-                        "name": None,
-                        "arguments": '"risks NVDA 2024"',
-                    }],
+                    tool_call_delta=[
+                        {
+                            "id": None,
+                            "name": None,
+                            "arguments": '"risks NVDA 2024"',
+                        }
+                    ],
                     finish_reason=None,
                 ),
                 LLMStreamChunk(
-                    tool_call_delta=[{
-                        "id": None,
-                        "name": None,
-                        "arguments": ',"tickers":["NVDA"]}',
-                    }],
+                    tool_call_delta=[
+                        {
+                            "id": None,
+                            "name": None,
+                            "arguments": ',"tickers":["NVDA"]}',
+                        }
+                    ],
                     finish_reason="tool_calls",
                 ),
             ],
@@ -746,11 +836,14 @@ class AgentToolsTests(unittest.TestCase):
         }
 
         with patch("src.tools.sec_filings.run_sec_filings_rag") as mock_rag:
+
             async def fake_rag(args, *, agent):
                 return {
                     "text": "[1] NVDA risk excerpt",
                     "final_chunks": ["risk"],
-                    "final_metadatas": [{"ticker": "NVDA", "year": "2024", "file_type": "10-K"}],
+                    "final_metadatas": [
+                        {"ticker": "NVDA", "year": "2024", "file_type": "10-K"}
+                    ],
                     "stats": {"chunks_used": 1},
                 }
 
@@ -760,7 +853,8 @@ class AgentToolsTests(unittest.TestCase):
             # Only ONE tool_call must be produced from 3 chunks.
             pending = after_agent.get("pending_tool_calls") or []
             self.assertEqual(
-                len(pending), 1,
+                len(pending),
+                1,
                 f"Expected 1 tool_call (3 continuation chunks of same call), got {len(pending)}: "
                 f"{[(t.id, t.name, t.arguments) for t in pending]}",
             )
@@ -768,7 +862,9 @@ class AgentToolsTests(unittest.TestCase):
             self.assertEqual(pending[0].id, REAL_ID)
             self.assertEqual(pending[0].name, "sec_filings_rag_tool")
             # Arguments must be the full JSON, not just the first chunk.
-            self.assertEqual(pending[0].arguments, '{"query":"risks NVDA 2024","tickers":["NVDA"]}')
+            self.assertEqual(
+                pending[0].arguments, '{"query":"risks NVDA 2024","tickers":["NVDA"]}'
+            )
 
             merged = {**state, **after_agent}
             after_tools = asyncio.run(tools_node(agent, merged))
@@ -779,7 +875,8 @@ class AgentToolsTests(unittest.TestCase):
             tool_msgs = [m for m in lc_msgs if m.get("role") == "tool"]
             self.assertEqual(len(tool_msgs), 1)
             self.assertEqual(
-                tool_msgs[0].get("tool_call_id"), REAL_ID,
+                tool_msgs[0].get("tool_call_id"),
+                REAL_ID,
                 "tool_call_id in tool message must match the assistant tool_call id",
             )
 
@@ -799,7 +896,9 @@ class AgentToolsTests(unittest.TestCase):
         """
         from src.llm.provider import LLMStreamChunk
 
-        agent = SimpleNamespace(max_tool_iterations=6, rag=SimpleNamespace(provider=MagicMock()))
+        agent = SimpleNamespace(
+            max_tool_iterations=6, rag=SimpleNamespace(provider=MagicMock())
+        )
         ID_OK = "call_ok_real"
         ID_BAD = "call_bad_real"
 
@@ -807,17 +906,25 @@ class AgentToolsTests(unittest.TestCase):
             [
                 # Two parallel tool_calls with different index
                 LLMStreamChunk(
-                    tool_call_delta=[{
-                        "index": 0, "id": ID_OK, "name": "sec_filings_rag_tool",
-                        "arguments": '{"query":"risks NVDA 2024","tickers":["NVDA"]}',
-                    }],
+                    tool_call_delta=[
+                        {
+                            "index": 0,
+                            "id": ID_OK,
+                            "name": "sec_filings_rag_tool",
+                            "arguments": '{"query":"risks NVDA 2024","tickers":["NVDA"]}',
+                        }
+                    ],
                     finish_reason=None,
                 ),
                 LLMStreamChunk(
-                    tool_call_delta=[{
-                        "index": 1, "id": ID_BAD, "name": "sec_filings_rag_tool",
-                        "arguments": '{"query":"risks AMD 2024","tickers":["AMD"]}',
-                    }],
+                    tool_call_delta=[
+                        {
+                            "index": 1,
+                            "id": ID_BAD,
+                            "name": "sec_filings_rag_tool",
+                            "arguments": '{"query":"risks AMD 2024","tickers":["AMD"]}',
+                        }
+                    ],
                     finish_reason="tool_calls",
                 ),
             ],
@@ -846,6 +953,7 @@ class AgentToolsTests(unittest.TestCase):
         }
 
         with patch("src.tools.sec_filings.run_sec_filings_rag") as mock_rag:
+
             async def rag_side_effect(args, *, agent):
                 # First call (NVDA) succeeds; second call (AMD) raises
                 # to simulate retrieval error.
@@ -853,7 +961,9 @@ class AgentToolsTests(unittest.TestCase):
                     return {
                         "text": "[1] NVDA excerpt",
                         "final_chunks": ["risk"],
-                        "final_metadatas": [{"ticker": "NVDA", "year": "2024", "file_type": "10-K"}],
+                        "final_metadatas": [
+                            {"ticker": "NVDA", "year": "2024", "file_type": "10-K"}
+                        ],
                         "stats": {"chunks_used": 1},
                     }
                 raise RuntimeError("simulated retrieval failure for AMD")
@@ -863,7 +973,9 @@ class AgentToolsTests(unittest.TestCase):
             after_agent = asyncio.run(agent_node(agent, state))
             pending = after_agent.get("pending_tool_calls") or []
             # Both parallel calls must be present.
-            self.assertEqual(len(pending), 2, f"Expected 2 parallel tool_calls, got {len(pending)}")
+            self.assertEqual(
+                len(pending), 2, f"Expected 2 parallel tool_calls, got {len(pending)}"
+            )
             ids = {t.id for t in pending}
             self.assertEqual(ids, {ID_OK, ID_BAD})
 
@@ -877,7 +989,8 @@ class AgentToolsTests(unittest.TestCase):
             tool_msgs = [m for m in lc_msgs if m.get("role") == "tool"]
             tool_msg_ids = {m.get("tool_call_id") for m in tool_msgs}
             self.assertEqual(
-                tool_msg_ids, {ID_OK, ID_BAD},
+                tool_msg_ids,
+                {ID_OK, ID_BAD},
                 f"tools_node must append a tool message for EVERY tool_call, "
                 f"even on failure. Got tool_msg_ids={tool_msg_ids}, "
                 f"expected={ {ID_OK, ID_BAD} }",
@@ -896,7 +1009,9 @@ class AgentToolsTests(unittest.TestCase):
             # Full ToolEvents (with status) come from tools_node; agent_node
             # also appends a lighter "args summary" record. Filter to full ones.
             full_events = [e for e in events if "status" in e]
-            rag_full = [e for e in full_events if e.get("tool") == "sec_filings_rag_tool"]
+            rag_full = [
+                e for e in full_events if e.get("tool") == "sec_filings_rag_tool"
+            ]
             self.assertEqual(len(rag_full), 2)
             statuses = [e.get("status") for e in rag_full]
             self.assertIn("completed", statuses)
@@ -922,8 +1037,18 @@ class AgentToolsTests(unittest.TestCase):
         class FakeRag:
             documents = {0: "nvda risk chunk A", 1: "nvda risk chunk B"}
             doc_metadata = [
-                {"ticker": "NVDA", "year": "2024", "source": "nvda-10-k_2024.htm", "section": "Item_1A"},
-                {"ticker": "NVDA", "year": "2024", "source": "nvda-10-k_2024.htm", "section": "Item_1A"},
+                {
+                    "ticker": "NVDA",
+                    "year": "2024",
+                    "source": "nvda-10-k_2024.htm",
+                    "section": "Item_1A",
+                },
+                {
+                    "ticker": "NVDA",
+                    "year": "2024",
+                    "source": "nvda-10-k_2024.htm",
+                    "section": "Item_1A",
+                },
             ]
 
             def __init__(self):
@@ -941,9 +1066,16 @@ class AgentToolsTests(unittest.TestCase):
 
         # Avoid the rerank path complexity by stubbing _balanced_rerank_indices
         # to just return the candidates as-is.
-        with patch("src.graph.rerank_node._balanced_rerank_indices", return_value=[0, 1]), \
-             patch("src.graph.rerank_node._ticker_counts", return_value={"NVDA": 2}), \
-             patch("src.graph.retrieval_node.asyncio.to_thread", side_effect=_inline_to_thread):
+        with (
+            patch(
+                "src.graph.rerank_node._balanced_rerank_indices", return_value=[0, 1]
+            ),
+            patch("src.graph.rerank_node._ticker_counts", return_value={"NVDA": 2}),
+            patch(
+                "src.graph.retrieval_node.asyncio.to_thread",
+                side_effect=_inline_to_thread,
+            ),
+        ):
             agent = SimpleNamespace(
                 rag=FakeRag(),
                 max_tool_iterations=6,
@@ -959,12 +1091,14 @@ class AgentToolsTests(unittest.TestCase):
         # Must return chunks (the bug returned 0 because the coroutine
         # was never awaited, causing rag_state.update to fail).
         self.assertEqual(
-            len(result.get("final_chunks", [])), 2,
+            len(result.get("final_chunks", [])),
+            2,
             f"run_sec_filings_rag must drive multi_retrieve_node to "
             f"completion via await. Got: {result}",
         )
         self.assertEqual(
-            result.get("stats", {}).get("chunks_used"), 2,
+            result.get("stats", {}).get("chunks_used"),
+            2,
             f"chunks_used stat must reflect retrieved chunks. Got: {result.get('stats')}",
         )
         self.assertGreater(agent.rag.retrieve_calls, 0, "rag.retrieve must be called")
@@ -1000,7 +1134,7 @@ class ValidateClaimsNLITests(unittest.TestCase):
             ' "best_source_index": 1, "reasoning": "Item 1A mentions supply chain risk."},'
             '{"claim": "Mars reactor", "status": "unsupported",'
             ' "best_source_index": null, "reasoning": "No relevant excerpt."}'
-            ']}'
+            "]}"
         )
 
         result = run_validate_claims(

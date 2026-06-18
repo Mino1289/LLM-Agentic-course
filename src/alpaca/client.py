@@ -1,4 +1,5 @@
 """Client Alpaca — TradingClient + NewsClient + account activities via HTTP."""
+
 from __future__ import annotations
 
 import logging
@@ -30,11 +31,19 @@ def _secret_key() -> str | None:
 
 
 def _is_paper() -> bool:
-    return os.getenv("ALPACA_PAPER_TRADE", "true").strip().lower() in ("true", "1", "yes")
+    return os.getenv("ALPACA_PAPER_TRADE", "true").strip().lower() in (
+        "true",
+        "1",
+        "yes",
+    )
 
 
 def _trading_base_url() -> str:
-    return "https://paper-api.alpaca.markets" if _is_paper() else "https://api.alpaca.markets"
+    return (
+        "https://paper-api.alpaca.markets"
+        if _is_paper()
+        else "https://api.alpaca.markets"
+    )
 
 
 def _data_base_url() -> str:
@@ -44,7 +53,9 @@ def _data_base_url() -> str:
 def _check_keys() -> bool:
     k1, k2 = _api_key(), _secret_key()
     if not k1 or not k2:
-        _LOGGER.warning("ALPACA_API_KEY / ALPACA_SECRET_KEY not set — Alpaca tools unavailable.")
+        _LOGGER.warning(
+            "ALPACA_API_KEY / ALPACA_SECRET_KEY not set — Alpaca tools unavailable."
+        )
         return False
     return True
 
