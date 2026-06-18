@@ -11,6 +11,7 @@ from typing import Any
 from src.llm.types import ToolCall
 from src.graph.state import GraphState
 from src.graph.tracing import traceable
+from src.orchestration.progress import emit_token
 
 _LOGGER = logging.getLogger("src.graph.agent_node")
 
@@ -56,6 +57,8 @@ async def agent_node(agent: Any, state: GraphState) -> GraphState:
             )
         if stream_chunk.delta:
             text_parts.append(stream_chunk.delta)
+            # Stream en temps réel vers l'UI (no-op hors contexte hub/stream).
+            emit_token(stream_chunk.delta)
         if stream_chunk.tool_call_delta:
             for tc_delta in stream_chunk.tool_call_delta:
                 tc_index = tc_delta.get("index")

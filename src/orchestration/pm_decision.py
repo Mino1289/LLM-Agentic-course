@@ -49,6 +49,31 @@ def parse_dollar_amount(query: str) -> float | None:
     return None
 
 
+# Marqueur de la section destinée à l'utilisateur (FR/EN), suivi d'un éventuel
+# parenthétique puis ":". On capture tout ce qui suit (dernière occurrence).
+_RESPONSE_RE = re.compile(
+    r"\b(?:R[ÉE]PONSE|RESPONSE)\b[^\n:]*:\s*",
+    flags=re.IGNORECASE,
+)
+
+
+def extract_user_response(text: str) -> str:
+    """Extraire la portion lisible (après le marqueur RESPONSE/RÉPONSE).
+
+    Le PM produit un format structuré (PLAN/DECISION/SYNTHESIS + RESPONSE) dont
+    seule la section RESPONSE doit être montrée à l'utilisateur. Si aucun
+    marqueur n'est trouvé, on retourne le texte complet (compat. ascendante).
+    """
+    if not text:
+        return text
+    last = None
+    for match in _RESPONSE_RE.finditer(text):
+        last = match
+    if last is None:
+        return text.strip()
+    return text[last.end() :].strip()
+
+
 def parse_pm_response(text: str) -> dict[str, Any]:
     decision: dict[str, Any] = {"response": text}
     lines = text.split("\n")

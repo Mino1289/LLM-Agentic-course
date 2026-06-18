@@ -6,7 +6,12 @@ from datetime import UTC, datetime
 from typing import Any
 
 from src.graph.tracing import traceable
-from src.orchestration.pm_decision import parse_dollar_amount, parse_pm_response
+from src.orchestration.pm_decision import (
+    extract_user_response,
+    parse_dollar_amount,
+    parse_pm_response,
+)
+from src.orchestration.progress import emit_token
 from src.orchestration.prompts import PM_SYSTEM_PROMPT
 from src.orchestration.state import HubSpokeState
 from src.orchestration.trade_intent import is_trade_requested
@@ -95,7 +100,7 @@ async def pm_plan_node(agent: Any, state: HubSpokeState) -> HubSpokeState:
             "analysis_plan": full_response,
             "pm_decision": plan,
             "spoke_events": spoke_events,
-            "answer": plan.get("response", ""),
+            "answer": extract_user_response(full_response),
             "stats": merged_stats,
         }
     except Exception as e:
@@ -149,7 +154,10 @@ DECISION:
 - Order type: market/limit/stop
 - Justification: ... (cite specific sources for each claim)
 
-RESPONSE (French, human-readable): ..."""
+RESPONSE: ...
+The RESPONSE section is the ONLY part shown to the user. Write it last, in the
+user's language, self-contained (understandable without the DECISION block):
+state the recommendation clearly, then the key reasons grounded in the reports."""
     else:
         synthesis_instructions = """You are now in the SYNTHESIS phase for an ANALYSIS-ONLY request.
 The user did NOT ask to place a trade. Do NOT propose any buy/sell order or DECISION block.
@@ -160,7 +168,11 @@ SYNTHESIS:
 - Quantitative highlights: ...
 - Comparative conclusion: ...
 
-RESPONSE (French, human-readable): ..."""
+RESPONSE: ...
+The RESPONSE section is the ONLY part shown to the user. Write it last, in the
+user's language, and make it self-contained (understandable without the
+SYNTHESIS section): lead with the direct answer, then the key supporting facts
+grounded in the analyst data. Use short paragraphs or bullet points."""
 
     synthesis_prompt = f"""{PM_SYSTEM_PROMPT}
 
@@ -192,6 +204,15 @@ QUANTITATIVE REPORT:
 
     try:
         full_response = ""
+        # Pour une requête d'analyse (pas de trade), la synthèse EST la réponse
+        # finale : on stream la portion RESPONSE en temps réel vers l'UI.
+        # Pour un trade, la réponse finale vient de l'approbation/exécution, donc
+        # on n'émet pas de tokens ici (on évite d'afficher puis remplacer).
+        from src.orchestration.pm_decision import _RESPONSE_RE
+
+        stream_to_user = not trade_requested
+        emitted = 0
+        response_started = False
         async for chunk in agent.rag.provider.ainvoke_with_tools_stream(
             messages,
             tools=None,
@@ -200,6 +221,15 @@ QUANTITATIVE REPORT:
         ):
             if chunk.delta:
                 full_response += chunk.delta
+            if stream_to_user:
+                if not response_started:
+                    marker = _RESPONSE_RE.search(full_response)
+                    if marker:
+                        response_started = True
+                        emitted = marker.end()
+                if response_started and len(full_response) > emitted:
+                    emit_token(full_response[emitted:])
+                    emitted = len(full_response)
 
         decision = parse_pm_response(full_response)
         if not trade_requested:
@@ -222,7 +252,7 @@ QUANTITATIVE REPORT:
         merged_stats["pm_synthesis_done"] = True
         return {
             "pm_decision": decision,
-            "answer": decision.get("response", full_response),
+            "answer": extract_user_response(full_response),
             "spoke_events": spoke_events,
             "stats": merged_stats,
         }

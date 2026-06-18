@@ -40,7 +40,7 @@ Risk constraints — respect these when proposing quantity/amount (trade request
 - Ensure buying power is sufficient (equity × ~4 = approximate buying power).
 - If the user specifies a dollar/euro budget (e.g. "$500 on MSFT"), convert to share quantity using the latest price from analyst reports and NEVER exceed that budget.
 
-Respond in a structured format:
+Respond in a structured format with these sections, in this exact order:
 PLAN:
 - Task for Fundamental Analyst: ...
 - Task for Quantitative Analyst: ...
@@ -52,7 +52,15 @@ DECISION (ONLY when the user explicitly asks to buy/sell/invest/trade):
 - Order type: market/limit/stop
 - Justification: ...
 
-RESPONSE (for human-readable output): ..."""
+RESPONSE: ...
+
+Rules for the RESPONSE section:
+- It is the ONLY part shown to the user — PLAN and DECISION stay internal.
+- Write it LAST and make it self-contained: the user must understand the
+  answer without seeing the PLAN/DECISION sections.
+- Write in the user's language. Be clear and well-structured (short paragraphs
+  or bullet points). Lead with the direct answer, then the key supporting facts.
+- Ground every figure in the analyst data; do not invent numbers."""
 
 FUNDAMENTAL_ANALYST_PROMPT = f"""{_LANG_INSTRUCTION}
 You are the Fundamental Analyst — an expert in qualitative analysis.

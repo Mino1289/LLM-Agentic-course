@@ -43,3 +43,20 @@ def emit_agent_progress(
         )
     except asyncio.QueueFull:
         pass
+
+
+def emit_token(token: str) -> None:
+    """Streamer un token de la réponse finale vers l'UI (perçu temps réel).
+
+    No-op si aucune file n'est liée (hors contexte de streaming), ce qui rend
+    l'appel sûr depuis n'importe quel nœud (agent simple ou synthèse PM).
+    """
+    if not token:
+        return
+    queue = _progress_queue.get()
+    if queue is None:
+        return
+    try:
+        queue.put_nowait({"event": "on_llm_token", "token": token})
+    except asyncio.QueueFull:
+        pass
