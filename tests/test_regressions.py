@@ -310,9 +310,13 @@ class RerankTests(unittest.TestCase):
 
 class GenerationTests(unittest.TestCase):
     def test_retrieved_excerpts_include_metadata_labels(self):
-        from src.graph.prompt_context import format_retrieved_excerpts
+        # Excerpt formatting moved to src.tools.descriptions.format_rag_excerpts
+        # and is now TOON-encoded (column header + value rows) instead of
+        # "Label: value" lines. The contract is unchanged: each excerpt must
+        # still carry its ticker and source metadata.
+        from src.tools.descriptions import format_rag_excerpts
 
-        result = format_retrieved_excerpts(
+        result = format_rag_excerpts(
             ["microsoft excerpt", "nvidia excerpt"],
             [
                 {
@@ -330,9 +334,13 @@ class GenerationTests(unittest.TestCase):
             ],
         )
 
-        self.assertIn("Ticker: MSFT", result)
-        self.assertIn("Ticker: NVDA", result)
-        self.assertIn("Source: nvda-10-q_2026.htm", result)
+        # Metadata columns are labelled in the TOON header...
+        self.assertIn("ticker", result)
+        self.assertIn("source", result)
+        # ...and the per-excerpt values are present.
+        self.assertIn("MSFT", result)
+        self.assertIn("NVDA", result)
+        self.assertIn("nvda-10-q_2026.htm", result)
 
     def test_single_chunk_synthesis_preserves_grounded_draft(self):
         state = {
@@ -371,6 +379,11 @@ class GenerationTests(unittest.TestCase):
 
 class ContextPruneTests(unittest.TestCase):
     def test_context_pruning_keeps_metadata_aligned(self):
+        raise unittest.SkipTest(
+            "context_prune_node was removed in the graph refactor; no "
+            "dedup/token-budget pruning node exists in the current pipeline."
+        )
+
         class MemoryStore:
             def is_duplicate_chunk(self, _conversation_id, chunk):
                 return chunk == "drop"
@@ -550,13 +563,15 @@ class IndexSynchronizationTests(unittest.TestCase):
             def delete(self, ids):
                 self.deleted.extend(ids)
 
-        rag = object.__new__(HybridRAG)
-        rag.collection = Collection()
+        # remove_stale_index_entries moved from a HybridRAG method to a
+        # module-level function in src.rag.indexing(collection, valid_ids).
+        from src.rag.indexing import remove_stale_index_entries
 
-        removed = rag.remove_stale_index_entries(["keep"])
+        collection = Collection()
+        removed = remove_stale_index_entries(collection, ["keep"])
 
         self.assertEqual(removed, 1)
-        self.assertEqual(rag.collection.deleted, ["stale"])
+        self.assertEqual(collection.deleted, ["stale"])
 
 
 class AgentToolsTests(unittest.TestCase):
@@ -639,8 +654,12 @@ class AgentToolsTests(unittest.TestCase):
     def test_close_position_graceful_when_not_configured(self):
         from unittest.mock import patch
 
+        # close_position is approval-gated (safety first): approve so we reach
+        # the Alpaca-config check, which is what this test targets.
         with patch("src.alpaca.client.get_alpaca_client", return_value=None):
-            result = run_close_position(ClosePositionArgs(ticker="NVDA"))
+            result = run_close_position(
+                ClosePositionArgs(ticker="NVDA"), state={"human_approved": True}
+            )
         self.assertEqual(result.get("error"), "alpaca_not_configured")
 
     def test_get_news_graceful_when_not_configured(self):
@@ -697,7 +716,7 @@ class AgentToolsTests(unittest.TestCase):
             "stats": {},
         }
 
-        with patch("src.tools.sec_filings.run_sec_filings_rag") as mock_rag:
+        with patch("src.tools.execute.run_sec_filings_rag") as mock_rag:
 
             async def fake_rag(args, *, agent):
                 return {
@@ -839,7 +858,7 @@ class AgentToolsTests(unittest.TestCase):
             "stats": {},
         }
 
-        with patch("src.tools.sec_filings.run_sec_filings_rag") as mock_rag:
+        with patch("src.tools.execute.run_sec_filings_rag") as mock_rag:
 
             async def fake_rag(args, *, agent):
                 return {
@@ -956,7 +975,7 @@ class AgentToolsTests(unittest.TestCase):
             "stats": {},
         }
 
-        with patch("src.tools.sec_filings.run_sec_filings_rag") as mock_rag:
+        with patch("src.tools.execute.run_sec_filings_rag") as mock_rag:
 
             async def rag_side_effect(args, *, agent):
                 # First call (NVDA) succeeds; second call (AMD) raises

@@ -16,7 +16,7 @@ import math
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from src.rag.core import HybridRAG
 from src.rag.indexing import iter_batches
@@ -25,8 +25,10 @@ from src.rag.indexing import iter_batches
 def _build_fake_rag(num_chunks: int, embedding_batch_size: int = 32):
     """Build a HybridRAG pre-loaded with ``num_chunks`` fake documents.
 
-    The provider, collection, and ``_build_corpus`` are all mocked so no
-    network, no filesystem, and no real ChromaDB is touched.
+    The provider, collection, and corpus are all mocked so no network, no
+    filesystem, and no real ChromaDB is touched. (The corpus is injected by
+    patching ``src.rag.indexing.build_corpus`` in ``_index`` — the indexing
+    pipeline is a module-level function, not a ``HybridRAG`` method.)
 
     ``rag.provider.embed`` is wired with ``side_effect=fake_embed`` so
     MagicMock's built-in ``call_args_list`` / ``call_count`` accurately
@@ -62,14 +64,6 @@ def _build_fake_rag(num_chunks: int, embedding_batch_size: int = 32):
     rag.collection.get.return_value = {"ids": []}
     rag.collection.upsert.return_value = None
     rag.collection.count.return_value = num_chunks
-
-    # _build_corpus returns what we set on rag.documents / metadata / ids.
-    rag._build_corpus = lambda max_files=None: (
-        rag.documents,
-        rag.doc_metadata,
-        rag.chunk_ids,
-        len(rag.documents),
-    )
     return rag
 
 
@@ -108,14 +102,24 @@ class IndexingBatchContractTests(unittest.TestCase):
         with open(state_path, "w") as f:
             json.dump({"date": "2026-06-06", "quota_used": 0}, f)
 
-        plan = rag.load_and_index_data(
-            daily_quota_used=0,
-            daily_quota_limit=0,  # unlimited
-            max_new_embeddings=num_chunks,
-            embedding_batch_size=embedding_batch_size,
-            rpm_limit=10_000,  # disable inter-batch sleep in tests
-            quota_state_path=state_path,
+        # The indexing pipeline reads the corpus via the module-level
+        # ``build_corpus`` (called both directly and inside the embedding-plan
+        # corpus_fn), so we patch it there to inject our fake corpus.
+        fake_corpus = (
+            rag.documents,
+            rag.doc_metadata,
+            rag.chunk_ids,
+            len(rag.documents),
         )
+        with patch("src.rag.indexing.build_corpus", return_value=fake_corpus):
+            plan = rag.load_and_index_data(
+                daily_quota_used=0,
+                daily_quota_limit=0,  # unlimited
+                max_new_embeddings=num_chunks,
+                embedding_batch_size=embedding_batch_size,
+                rpm_limit=10_000,  # disable inter-batch sleep in tests
+                quota_state_path=state_path,
+            )
         return rag, plan
 
     def test_100_chunks_at_batch_size_32_makes_4_api_calls(self):

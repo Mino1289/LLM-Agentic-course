@@ -80,14 +80,15 @@ class _FakeAsyncClient:
 
 class LLMProviderAsyncInitTests(unittest.TestCase):
     def test_async_client_created_for_openai(self):
+        from src.llm.types import LLMConfig
         from src.llm.provider import LLMProvider
+        from src.llm.openai_client import OpenAIClient
 
-        with unittest.mock.patch("src.llm.provider.AsyncOpenAI") as mock_async:
+        # AsyncOpenAI is now constructed inside the per-provider client, so we
+        # patch it there (not on src.llm.provider).
+        with unittest.mock.patch("src.llm.openai_client.AsyncOpenAI") as mock_async:
             mock_async.return_value = _FakeAsyncClient()
             provider = LLMProvider.__new__(LLMProvider)
-            # Bypass normal __init__ to control AsyncOpenAI creation
-            from src.llm.types import LLMConfig
-
             provider.config = LLMConfig(
                 provider="openai",
                 chat_model="gpt-4o-mini",
@@ -95,12 +96,15 @@ class LLMProviderAsyncInitTests(unittest.TestCase):
                 api_key="x",
                 embedding_api_key="x",
             )
+            provider._client = OpenAIClient(provider.config)
             provider._init_async_client()
             mock_async.assert_called_once()
+            self.assertIsNotNone(provider._client.async_client)
+            # The provider proxies the active client's async_client.
             self.assertIsNotNone(provider.async_client)
 
     def test_no_async_client_for_gemini(self):
-        # Gemini uses genai.aio (different path); async_client stays None
+        # Gemini uses genai.aio (different path); no OpenAI-style async client.
         from src.llm.types import LLMConfig
         from src.llm.provider import LLMProvider
 
@@ -112,6 +116,7 @@ class LLMProviderAsyncInitTests(unittest.TestCase):
             api_key="x",
             embedding_api_key="x",
         )
+        provider._client = None
         provider._init_async_client()
         self.assertIsNone(provider.async_client)
 
@@ -120,6 +125,7 @@ class LLMProviderAsyncStreamTests(unittest.IsolatedAsyncioTestCase):
     def _make_provider(self, chunks: list[_FakeChatCompletionChunk]):
         from src.llm.types import LLMConfig
         from src.llm.provider import LLMProvider
+        from src.llm.openai_client import OpenAIClient
 
         provider = LLMProvider.__new__(LLMProvider)
         provider.config = LLMConfig(
@@ -129,7 +135,12 @@ class LLMProviderAsyncStreamTests(unittest.IsolatedAsyncioTestCase):
             api_key="x",
             embedding_api_key="x",
         )
-        provider.async_client = _FakeAsyncClient(chunks)
+        provider._gemini_client = None
+        # Streaming now lives in the per-provider client; inject a fake
+        # AsyncOpenAI-shaped client there (the provider delegates to it).
+        client = OpenAIClient(provider.config)
+        client.async_client = _FakeAsyncClient(chunks)
+        provider._client = client
         return provider
 
     async def test_agenerate_stream_yields_text_deltas(self):
@@ -240,6 +251,7 @@ class TokenSinkTests(unittest.IsolatedAsyncioTestCase):
     def _make_provider(self, chunks: list[_FakeChatCompletionChunk]):
         from src.llm.types import LLMConfig
         from src.llm.provider import LLMProvider
+        from src.llm.openai_client import OpenAIClient
 
         provider = LLMProvider.__new__(LLMProvider)
         provider.config = LLMConfig(
@@ -249,7 +261,12 @@ class TokenSinkTests(unittest.IsolatedAsyncioTestCase):
             api_key="x",
             embedding_api_key="x",
         )
-        provider.async_client = _FakeAsyncClient(chunks)
+        provider._gemini_client = None
+        # Streaming now lives in the per-provider client; inject a fake
+        # AsyncOpenAI-shaped client there (the provider delegates to it).
+        client = OpenAIClient(provider.config)
+        client.async_client = _FakeAsyncClient(chunks)
+        provider._client = client
         return provider
 
     async def test_sink_invoked_for_each_text_delta(self):
