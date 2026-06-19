@@ -85,9 +85,12 @@ TOOL_DOMAIN_KEYWORDS: dict[ToolDomain, tuple[str, ...]] = {
         "achete",
         "action achet",
         "buy",
-        "investi",
-        "investis",
+        # Forme impérative uniquement ("investis 5000$", "investir dans X").
+        # PAS le nom "investissement"/"investisseur" (sujet d'analyse, pas un
+        # ordre) — d'où "investis " avec espace et non "investi"/"investis".
+        "investis ",
         "investir",
+        "investissez",
         "placement",
         "vends",
         "vendre",
@@ -146,6 +149,41 @@ TOOL_DOMAIN_KEYWORDS: dict[ToolDomain, tuple[str, ...]] = {
 }
 
 
+# Tournures qui signalent une demande de CONSEIL / recommandation / comparaison
+# plutôt qu'un ordre à exécuter. Quand l'une est présente, on retire le domaine
+# "trade" : l'utilisateur veut une recommandation argumentée, pas une proposition
+# d'ordre en attente d'approbation. Ex. "Recommande-moi entre NVDA et AMD pour un
+# investissement long terme" ou "Devrais-je acheter NVDA ?" => analyse, pas trade.
+ADVISORY_MARKERS: tuple[str, ...] = (
+    "recommand",  # recommande, recommandation, recommend
+    "conseil",  # conseille, conseil, conseiller
+    "que penses",
+    "qu'en penses",
+    "qu en penses",
+    "ton avis",
+    "ton opinion",
+    "devrais-je",
+    "devrais je",
+    "dois-je",
+    "dois je",
+    "faut-il",
+    "faut il",
+    "vaut-il mieux",
+    "vaut il mieux",
+    "vaut mieux",
+    "bonne idée",
+    "bonne idee",
+    "should i",
+    "is it worth",
+    "good idea",
+    "which is better",
+)
+
+
+def _is_advisory(query_lower: str) -> bool:
+    return any(marker in query_lower for marker in ADVISORY_MARKERS)
+
+
 def detect_tool_domains(query: str) -> frozenset[ToolDomain]:
     query_lower = (query or "").strip().lower()
     if not query_lower:
@@ -155,6 +193,9 @@ def detect_tool_domains(query: str) -> frozenset[ToolDomain]:
     for domain, keywords in TOOL_DOMAIN_KEYWORDS.items():
         if any(kw in query_lower for kw in keywords):
             matched.add(domain)
+    # Demande de conseil/recommandation/comparaison : on n'exécute pas d'ordre.
+    if "trade" in matched and _is_advisory(query_lower):
+        matched.discard("trade")
     return frozenset(matched)
 
 

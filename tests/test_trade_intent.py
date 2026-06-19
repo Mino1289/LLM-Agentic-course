@@ -115,5 +115,54 @@ class TradeIntentTests(unittest.TestCase):
         self.assertEqual(result.get("error"), "alpaca_not_configured")
 
 
+class AdvisoryNotTradeTests(unittest.TestCase):
+    """Une demande de conseil/recommandation ne doit JAMAIS proposer un ordre.
+
+    Régression : "Recommande-moi ... pour un investissement long terme"
+    déclenchait le domaine trade car le nom "investissement" contenait la
+    sous-chaîne "investi" — l'app proposait alors un achat avec approbation.
+    """
+
+    def test_recommendation_query_is_not_trade(self):
+        query = (
+            "Recommande-moi entre NVDA et AMD pour un investissement long "
+            "terme, avec justification chiffrée"
+        )
+        self.assertNotIn("trade", detect_tool_domains(query))
+
+    def test_investment_noun_alone_is_not_trade(self):
+        # Le nom "investissement"/"investisseur" est un sujet d'analyse.
+        self.assertNotIn(
+            "trade",
+            detect_tool_domains("Quelle est la stratégie d'investissement de NVDA ?"),
+        )
+        self.assertNotIn(
+            "trade",
+            detect_tool_domains("Ce titre convient-il à un investisseur prudent ?"),
+        )
+
+    def test_advisory_phrasing_demotes_trade(self):
+        # Verbe d'action présent ("acheter") mais tournure de conseil -> analyse.
+        self.assertNotIn("trade", detect_tool_domains("Devrais-je acheter NVDA ?"))
+        self.assertNotIn(
+            "trade", detect_tool_domains("Me conseilles-tu d'investir dans AMD ?")
+        )
+
+    def test_imperative_order_is_still_trade(self):
+        self.assertIn("trade", detect_tool_domains("Achète 5 actions NVDA au marché"))
+        self.assertIn("trade", detect_tool_domains("Investis 5000$ dans MSFT"))
+        self.assertIn("trade", detect_tool_domains("Vends toute ma position AMD"))
+
+    def test_recommendation_state_does_not_request_trade(self):
+        query = "Recommande-moi entre NVDA et AMD pour un investissement long terme"
+        domains = sorted(detect_tool_domains(query))
+        state = {
+            "query": query,
+            "trade_requested": "trade" in domains,
+            "stats": {"tool_domains": domains},
+        }
+        self.assertFalse(is_trade_requested(state))
+
+
 if __name__ == "__main__":
     unittest.main()
