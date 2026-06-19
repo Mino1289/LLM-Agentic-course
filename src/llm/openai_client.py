@@ -10,6 +10,7 @@ from src.llm.types import LLMToolResponse, LLMStreamChunk
 from src.llm.messages import _openai_messages_to_api
 from src.llm.sinks import _call_token_sink
 from src.llm.parser import _parse_openai_tool_calls
+from src.llm.config_builder import parse_request_timeout, parse_max_retries
 
 
 class OpenAIClient:
@@ -17,17 +18,29 @@ class OpenAIClient:
         self.config = config
         self.client = None
         self.async_client = None
+        # Request deadline + retries: prevents the multi-minute hang seen when
+        # a call stalls with no timeout (regression guard, see Fix #1).
+        self.request_timeout = parse_request_timeout()
+        self.max_retries = parse_max_retries()
 
     def _init_sync(self):
         if self.client is None:
-            client_kwargs = {"api_key": self.config.api_key}
+            client_kwargs = {
+                "api_key": self.config.api_key,
+                "timeout": self.request_timeout,
+                "max_retries": self.max_retries,
+            }
             if self.config.base_url:
                 client_kwargs["base_url"] = self.config.base_url
             self.client = OpenAI(**client_kwargs)
 
     def _init_async(self):
         if self.async_client is None:
-            client_kwargs = {"api_key": self.config.api_key}
+            client_kwargs = {
+                "api_key": self.config.api_key,
+                "timeout": self.request_timeout,
+                "max_retries": self.max_retries,
+            }
             if self.config.base_url:
                 client_kwargs["base_url"] = self.config.base_url
             self.async_client = AsyncOpenAI(**client_kwargs)

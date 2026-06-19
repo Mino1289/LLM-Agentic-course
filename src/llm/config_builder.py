@@ -37,6 +37,30 @@ NVIDIA_NIM_DEFAULT_EMBEDDING_MODEL = "nvidia/llama-nemotron-embed-1b-v2"
 SUPPORTED_PROVIDERS = SUPPORTED_CHAT_PROVIDERS
 
 
+def parse_request_timeout() -> float:
+    """Request timeout (seconds) for OpenAI-compatible clients.
+
+    Defaults to 30s to prevent the multi-minute hang observed when an LLM
+    call stalls with no deadline. Honors OPENAI_REQUEST_TIMEOUT.
+    """
+    raw = os.getenv("OPENAI_REQUEST_TIMEOUT", "30.0")
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return 30.0
+    return value if value > 0 else 30.0
+
+
+def parse_max_retries() -> int:
+    """Max retries for OpenAI-compatible clients (honors OPENAI_MAX_RETRIES)."""
+    raw = os.getenv("OPENAI_MAX_RETRIES", "2")
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return 2
+    return value if value >= 0 else 2
+
+
 def _normalize_github_model_id(model: str) -> str:
     """GitHub Models inference uses IDs like gpt-4.1-mini, not openai/gpt-4.1-mini."""
     model = model.strip()

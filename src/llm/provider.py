@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any, AsyncIterator, Optional, Generator
 
 from src.llm.types import LLMConfig, LLMToolResponse, LLMStreamChunk
-from src.llm.config_builder import build_llm_config_from_env
+from src.llm.config_builder import (
+    build_llm_config_from_env,
+    parse_request_timeout,
+    parse_max_retries,
+)
 from src.llm.openai_client import OpenAIClient
 from src.llm.github_client import GitHubModelsClient
 from src.llm.azure_client import AzureOpenAIClient
@@ -24,7 +27,6 @@ class LLMProvider:
         self.config = config or build_llm_config_from_env()
         self._client = None
         self._gemini_client = None
-        self.async_client = None
 
         # Request timeout + max retries for all OpenAI-compatible clients.
         self.request_timeout = self._parse_request_timeout()
@@ -64,27 +66,25 @@ class LLMProvider:
 
         self._init_async_client()
 
-    @staticmethod
-    def _parse_request_timeout() -> float:
-        raw = os.getenv("OPENAI_REQUEST_TIMEOUT", "30.0")
-        try:
-            value = float(raw)
-        except (TypeError, ValueError):
-            return 30.0
-        if value <= 0:
-            return 30.0
-        return value
+    # Kept as methods for backward compatibility; delegate to the shared parsers.
+    _parse_request_timeout = staticmethod(parse_request_timeout)
+    _parse_max_retries = staticmethod(parse_max_retries)
 
-    @staticmethod
-    def _parse_max_retries() -> int:
-        raw = os.getenv("OPENAI_MAX_RETRIES", "2")
-        try:
-            value = int(raw)
-        except (TypeError, ValueError):
-            return 2
-        if value < 0:
-            return 2
-        return value
+    @property
+    def client(self):
+        """Sync OpenAI-compatible client of the active chat provider (lazy)."""
+        if self._client is None:
+            return None
+        self._client._init_sync()
+        return self._client.client
+
+    @property
+    def async_client(self):
+        """Async OpenAI-compatible client of the active chat provider (lazy)."""
+        if self._client is None:
+            return None
+        self._client._init_async()
+        return self._client.async_client
 
     def _init_async_client(self) -> None:
         """Initialize async client if needed."""

@@ -22,6 +22,8 @@ class AzureOpenAIClient(OpenAIClient):
                 api_key=self.config.api_key,
                 azure_endpoint=self.config.base_url,
                 api_version=self.config.api_version or "2024-02-01",
+                timeout=self.request_timeout,
+                max_retries=self.max_retries,
             )
 
     def _init_async(self):
@@ -30,4 +32,6 @@ class AzureOpenAIClient(OpenAIClient):
                 api_key=self.config.api_key,
                 azure_endpoint=self.config.base_url,
                 api_version=self.config.api_version or "2024-02-01",
+                timeout=self.request_timeout,
+                max_retries=self.max_retries,
             )
