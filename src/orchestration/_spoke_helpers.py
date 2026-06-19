@@ -3,9 +3,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Any, AsyncIterator
+from typing import Any
 
-from src.llm.types import ToolCall, LLMStreamChunk
+from src.llm.types import ToolCall
 from src.orchestration.progress import emit_agent_progress
 from src.tools.execute import ToolExecutor
 
@@ -130,92 +130,6 @@ async def run_spoke_agent(
             return full_text.strip(), _stats_payload(spoke_llm_iterations=iteration + 1)
 
     return "Max iterations atteint.", _stats_payload(spoke_llm_iterations=max_iterations)
-
-
-async def run_spoke_agent_stream(
-    agent: Any,
-    system_prompt: str,
-    task: str,
-    tool_names: list[str],
-    state: dict[str, Any],
-    max_iterations: int = 2,
-) -> AsyncIterator[str]:
-    from src.tools.definitions import get_tool_definitions
-
-    all_tools = get_tool_definitions()
-    allowed_tools = [
-        t for t in all_tools if t.get("function", {}).get("name") in tool_names
-    ]
-
-    messages: list[dict[str, Any]] = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": task},
-    ]
-
-    accumulated_chunks: list[str] = []
-    accumulated_metadatas: list[dict[str, Any]] = []
-
-    for iteration in range(max_iterations):
-        try:
-            full_text, final_tool_calls = await asyncio.wait_for(
-                _collect_llm_response(agent, messages, allowed_tools),
-                timeout=LLM_TIMEOUT,
-            )
-        except asyncio.TimeoutError:
-            yield f"\n[Spoke LLM timeout after {LLM_TIMEOUT}s]"
-            return
-        except Exception as e:
-            yield f"\n[Spoke LLM error: {e}]"
-            return
-
-        if final_tool_calls:
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": full_text,
-                    "tool_calls": final_tool_calls,
-                }
-            )
-            executor = ToolExecutor(agent, state)
-            for tc in final_tool_calls:
-                try:
-                    outcome = await asyncio.wait_for(
-                        executor.execute(tc), timeout=TOOL_TIMEOUT
-                    )
-                    messages.append(outcome.message)
-                    if outcome.result and "final_chunks" in outcome.result:
-                        accumulated_chunks.extend(outcome.result["final_chunks"] or [])
-                        accumulated_metadatas.extend(
-                            outcome.result["final_metadatas"] or []
-                        )
-                    yield f"\n[Tool {tc.name} completed]\n"
-                except asyncio.TimeoutError:
-                    yield f"\n[Tool {tc.name} timed out]"
-                    messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tc.id,
-                            "name": tc.name,
-                            "content": json.dumps(
-                                {"error": f"Timed out after {TOOL_TIMEOUT}s"}
-                            ),
-                        }
-                    )
-                except Exception as e:
-                    yield f"\n[Tool {tc.name} failed: {e}]"
-                    messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tc.id,
-                            "name": tc.name,
-                            "content": json.dumps({"error": str(e)}),
-                        }
-                    )
-        else:
-            yield full_text.strip()
-            return
-
-    yield "Max iterations atteint."
 
 
 async def _collect_llm_response(
