@@ -29,59 +29,55 @@ async def _inline_to_thread(func, *args, **kwargs):
 
 class ToolEventLifecycleTests(unittest.TestCase):
     def test_duplicate_tool_calls_are_skipped_after_first_success(self) -> None:
-        from rag.llm_provider import ToolCall
-        from rag.nodes.tool_execution_node import tools_node
+        from src.llm.types import ToolCall
+        from src.graph.tool_execution_node import tools_node
 
         agent = MagicMock()
         state = _build_state(
             pending_tool_calls=[
                 ToolCall(
                     id="call_1",
-                    name="simulate_portfolio_tool",
-                    arguments=json.dumps(
-                        {
-                            "allocations": {"NVDA": 40, "AMD": 30, "MSFT": 30},
-                            "notional_usd": 100000,
-                        }
-                    ),
+                    name="portfolio_info_tool",
+                    arguments=json.dumps({}),
                 ),
                 ToolCall(
                     id="call_2",
-                    name="simulate_portfolio_tool",
-                    arguments=json.dumps(
-                        {
-                            "notional_usd": 100000,
-                            "allocations": {"NVDA": 40, "AMD": 30, "MSFT": 30},
-                        }
-                    ),
+                    name="portfolio_info_tool",
+                    arguments=json.dumps({}),
                 ),
             ]
         )
 
-        with patch("rag.tool_executor.execute_tool") as mock_execute, \
-             patch("rag.tool_executor.asyncio.to_thread", side_effect=_inline_to_thread):
+        with (
+            patch("src.tools.execute.execute_tool") as mock_execute,
+            patch("src.tools.execute.asyncio.to_thread", side_effect=_inline_to_thread),
+        ):
             mock_execute.return_value = {
-                "text": "simulated",
-                "positions": [{"ticker": "NVDA"}],
+                "text": "Portfolio info",
+                "account": {"cash": 100000},
+                "positions": [],
             }
             result = asyncio.run(tools_node(agent, state))
 
         mock_execute.assert_called_once()
-        self.assertEqual([msg["tool_call_id"] for msg in result["lc_messages"]], ["call_1", "call_2"])
+        self.assertEqual(
+            [msg["tool_call_id"] for msg in result["lc_messages"]], ["call_1", "call_2"]
+        )
         self.assertEqual(result["tool_events"][-1]["status"], "skipped")
         self.assertEqual(result["tool_events"][-1]["reason"], "duplicate_tool_call")
         self.assertEqual(result["stats"]["duplicate_tool_calls_skipped"], 1)
 
     def test_rag_tool_results_are_accumulated_and_deduplicated(self) -> None:
-        from rag.nodes.tool_execution_node import _merge_tool_side_effects
+        from src.graph.tool_execution_node import _merge_tool_side_effects
 
         stats: dict[str, Any] = {}
         chunks: list[str] = []
         metadatas: list[dict[str, Any]] = []
         price_context = ""
+        price_series: list[dict[str, Any]] = []
         artifacts: list[dict[str, Any]] = []
 
-        chunks, metadatas, price_context, artifacts, stats = _merge_tool_side_effects(
+        chunks, metadatas, price_context, price_series, artifacts, stats = _merge_tool_side_effects(
             "sec_filings_rag_tool",
             {
                 "final_chunks": ["nvda risk"],
@@ -102,11 +98,12 @@ class ToolEventLifecycleTests(unittest.TestCase):
             final_chunks=chunks,
             final_metadatas=metadatas,
             price_context=price_context,
+            price_series=price_series,
             report_artifacts=artifacts,
             stats=stats,
         )
 
-        chunks, metadatas, price_context, artifacts, stats = _merge_tool_side_effects(
+        chunks, metadatas, price_context, price_series, artifacts, stats = _merge_tool_side_effects(
             "sec_filings_rag_tool",
             {
                 "final_chunks": ["amd risk"],
@@ -127,11 +124,12 @@ class ToolEventLifecycleTests(unittest.TestCase):
             final_chunks=chunks,
             final_metadatas=metadatas,
             price_context=price_context,
+            price_series=price_series,
             report_artifacts=artifacts,
             stats=stats,
         )
 
-        chunks, metadatas, price_context, artifacts, stats = _merge_tool_side_effects(
+        chunks, metadatas, price_context, price_series, artifacts, stats = _merge_tool_side_effects(
             "sec_filings_rag_tool",
             {
                 "final_chunks": ["nvda risk"],
@@ -152,6 +150,7 @@ class ToolEventLifecycleTests(unittest.TestCase):
             final_chunks=chunks,
             final_metadatas=metadatas,
             price_context=price_context,
+            price_series=price_series,
             report_artifacts=artifacts,
             stats=stats,
         )
@@ -162,20 +161,28 @@ class ToolEventLifecycleTests(unittest.TestCase):
         self.assertEqual(stats["chunks_used"], 2)
 
     def test_running_then_completed(self) -> None:
-        from rag.llm_provider import ToolCall
-        from rag.nodes.tool_execution_node import tools_node
+        from src.llm.types import ToolCall
+        from src.graph.tool_execution_node import tools_node
 
         agent = MagicMock()
-        tc = ToolCall(id="call_1", name="market_price_tool", arguments=json.dumps({
-            "tickers": ["NVDA"],
-            "start_date": "2024-01-01",
-            "end_date": "2024-12-31",
-        }))
+        tc = ToolCall(
+            id="call_1",
+            name="market_price_tool",
+            arguments=json.dumps(
+                {
+                    "tickers": ["NVDA"],
+                    "start_date": "2024-01-01",
+                    "end_date": "2024-12-31",
+                }
+            ),
+        )
 
         state = _build_state(pending_tool_calls=[tc])
 
-        with patch("rag.tool_executor.execute_tool") as mock_execute, \
-             patch("rag.tool_executor.asyncio.to_thread", side_effect=_inline_to_thread):
+        with (
+            patch("src.tools.execute.execute_tool") as mock_execute,
+            patch("src.tools.execute.asyncio.to_thread", side_effect=_inline_to_thread),
+        ):
             mock_execute.return_value = {"text": "ok", "price_context": "ctx"}
             result = asyncio.run(tools_node(agent, state))
 
@@ -193,20 +200,28 @@ class ToolEventLifecycleTests(unittest.TestCase):
         )
 
     def test_running_then_failed_on_execution_exception(self) -> None:
-        from rag.llm_provider import ToolCall
-        from rag.nodes.tool_execution_node import tools_node
+        from src.llm.types import ToolCall
+        from src.graph.tool_execution_node import tools_node
 
         agent = MagicMock()
-        tc = ToolCall(id="call_1", name="market_price_tool", arguments=json.dumps({
-            "tickers": ["NVDA"],
-            "start_date": "2024-01-01",
-            "end_date": "2024-12-31",
-        }))
+        tc = ToolCall(
+            id="call_1",
+            name="market_price_tool",
+            arguments=json.dumps(
+                {
+                    "tickers": ["NVDA"],
+                    "start_date": "2024-01-01",
+                    "end_date": "2024-12-31",
+                }
+            ),
+        )
 
         state = _build_state(pending_tool_calls=[tc])
 
-        with patch("rag.tool_executor.execute_tool") as mock_execute, \
-             patch("rag.tool_executor.asyncio.to_thread", side_effect=_inline_to_thread):
+        with (
+            patch("src.tools.execute.execute_tool") as mock_execute,
+            patch("src.tools.execute.asyncio.to_thread", side_effect=_inline_to_thread),
+        ):
             mock_execute.side_effect = RuntimeError("provider down")
             result = asyncio.run(tools_node(agent, state))
 
@@ -217,17 +232,21 @@ class ToolEventLifecycleTests(unittest.TestCase):
         self.assertIn("finished_at", last)
 
     def test_running_then_failed_on_validation_error(self) -> None:
-        from rag.llm_provider import ToolCall
-        from rag.nodes.tool_execution_node import tools_node
+        from src.llm.types import ToolCall
+        from src.graph.tool_execution_node import tools_node
 
         agent = MagicMock()
         # Missing required 'query' field → Pydantic validation should fail
-        tc = ToolCall(id="call_1", name="sec_filings_rag_tool", arguments=json.dumps({}))
+        tc = ToolCall(
+            id="call_1", name="sec_filings_rag_tool", arguments=json.dumps({})
+        )
 
         state = _build_state(pending_tool_calls=[tc])
 
-        with patch("rag.tool_executor.execute_tool") as mock_execute, \
-             patch("rag.tool_executor.asyncio.to_thread", side_effect=_inline_to_thread):
+        with (
+            patch("src.tools.execute.execute_tool") as mock_execute,
+            patch("src.tools.execute.asyncio.to_thread", side_effect=_inline_to_thread),
+        ):
             result = asyncio.run(tools_node(agent, state))
 
         events = result["tool_events"]
@@ -238,8 +257,8 @@ class ToolEventLifecycleTests(unittest.TestCase):
         mock_execute.assert_not_called()
 
     def test_injected_chunks_and_metadatas_passed_to_execute_tool(self) -> None:
-        from rag.llm_provider import ToolCall
-        from rag.nodes.tool_execution_node import tools_node
+        from src.llm.types import ToolCall
+        from src.graph.tool_execution_node import tools_node
 
         agent = MagicMock()
         tc = ToolCall(
@@ -254,8 +273,10 @@ class ToolEventLifecycleTests(unittest.TestCase):
             final_metadatas=[{"ticker": "MSFT", "year": "2024"}],
         )
 
-        with patch("rag.tool_executor.execute_tool") as mock_execute, \
-             patch("rag.tool_executor.asyncio.to_thread", side_effect=_inline_to_thread):
+        with (
+            patch("src.tools.execute.execute_tool") as mock_execute,
+            patch("src.tools.execute.asyncio.to_thread", side_effect=_inline_to_thread),
+        ):
             mock_execute.return_value = {"text": "ok", "validations": []}
             asyncio.run(tools_node(agent, state))
             args = mock_execute.call_args[0][1]  # second positional arg

@@ -38,7 +38,7 @@ class EmbeddingCacheUnitTests(unittest.TestCase):
         self.cache_file = Path(self.tmpdir) / "cache.json"
 
     def _make(self, ttl: int = 86400, max_entries: int = 100):
-        from rag.embedding_cache import EmbeddingCache
+        from src.embeddings.cache import EmbeddingCache
 
         return EmbeddingCache(self.cache_file, ttl_seconds=ttl, max_entries=max_entries)
 
@@ -61,7 +61,7 @@ class EmbeddingCacheUnitTests(unittest.TestCase):
         self.assertEqual(cache.get("Azure FY2024 vs FY2023"), [0.2])
 
     def test_key_is_sha256_of_utf8(self):
-        from rag.embedding_cache import EmbeddingCache
+        from src.embeddings.cache import EmbeddingCache
 
         expected = hashlib.sha256("café".encode("utf-8")).hexdigest()
         self.assertEqual(EmbeddingCache._key("café"), expected)
@@ -143,14 +143,17 @@ class EmbeddingCacheUnitTests(unittest.TestCase):
         raw = json.loads(self.cache_file.read_text())
         self.assertEqual(len(raw), 2)
         # No leftover .tmp file.
-        self.assertFalse(self.cache_file.with_suffix(self.cache_file.suffix + ".tmp").exists())
+        self.assertFalse(
+            self.cache_file.with_suffix(self.cache_file.suffix + ".tmp").exists()
+        )
 
 
 class EmbeddingCacheProviderIntegrationTests(unittest.TestCase):
     """Wire the cache into ``LLMProvider.embed()`` and verify call savings."""
 
     def _make_provider(self, cache_file: Path) -> Any:
-        from rag.llm_provider import LLMConfig, LLMProvider
+        from src.llm.types import LLMConfig
+        from src.llm.provider import LLMProvider
 
         cfg = LLMConfig(
             provider="github_models",
@@ -165,7 +168,7 @@ class EmbeddingCacheProviderIntegrationTests(unittest.TestCase):
         return provider
 
     def _make_cache(self, cache_file: Path):
-        from rag.embedding_cache import EmbeddingCache
+        from src.embeddings.cache import EmbeddingCache
 
         return EmbeddingCache(cache_file)
 

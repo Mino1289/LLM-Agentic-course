@@ -1,279 +1,314 @@
-# Finance RAG LangGraph
+# Finance RAG · Hub-and-Spoke
 
-Projet RAG financier cohérent de bout en bout pour analyser des rapports SEC / foreign issuer (10-K/10-Q/8-K/20-F/6-K) avec:
+Assistant financier conversationnel pour le cours **8INF829** — du RAG sur rapports SEC à l'orchestration multi-agents (architecture Hub-and-Spoke), avec interface web Next.js et API FastAPI.
 
-- stratégie unique: **semantic chunking + vector retrieval + reranking**
-- agent **LangGraph v2** (boucle Agent ↔ Outils, style MCP)
-- mémoire conversationnelle avec **garbage collector** de contexte
-- backends LLM: **OpenAI**, **GitHub Models**, **Gemini** (chat ; embeddings séparés)
-- export de rapports dans `reports/` + UI Streamlit
+Capacités principales :
 
-## Mode conversationnel
+- RAG sur filings SEC (10-K, 10-Q, 8-K, 20-F, 6-K) et transcripts
+- Prix de marché, news, portefeuille paper trading (Alpaca)
+- Validation d'affirmations et export de rapports (Markdown/PDF)
+- Routage automatique **agent simple** vs **multi-agents** selon la requête
+- Approbation humaine avant exécution d'un ordre de trade
 
-L'interface se comporte comme un chatbot:
+---
 
-- historique multi-tours visible dans la session (style ChatGPT/Gemini)
-- mémoire courte + résumé interne du contexte
-- trace des outils utilisés (« Réflexion de l'agent »)
-- affichage des sources et métriques par réponse
-- bouton de téléchargement si un rapport est exporté
-- l'agent choisit dynamiquement RAG SEC, prix yfinance et export de rapport
+## Démarrage rapide (nouveaux utilisateurs)
 
-## Structure
+### 1. Prérequis
 
-- `rag/download_SEC_reports.py`: téléchargement SEC dans `data/`
-- `rag/preprocess.py`: extraction sections (Item 1A/7/8) + fallback foreign issuer vers `rag/processed_data/`
-- `rag/hybrid_rag.py`: indexation vectorielle Chroma + retrieval/reranking
-- `rag/langgraph_flow.py`: graphe agent v2 (prepare → memory → guard → agent ⇄ tools → gc)
-- `rag/tool_executor.py`: validation, dispatch async/sync et normalisation des résultats d'outils
-- `rag/mcp_server.py`: serveur MCP stdio exposant les outils du projet
-- `rag/tools.py`: 5 outils agent (`sec_filings_rag_tool`, `market_price_tool`, `validate_claims_tool`, `simulate_portfolio_tool`, `export_investment_report_tool`)
-- `PHASE2.md`: démo, bilan phase 2, approche type MCP
-- `rag/llm_provider.py`: providers OpenAI / GitHub Models / Gemini (tool calling)
-- `ui/app_rag.py`: chatbot Streamlit branché sur LangGraph
-- `ARCHITECTURE_REVIEW.md`: revue académique V1 vs V2
+- **Python** ≥ 3.11
+- **Node.js** ≥ 20 (pour le frontend)
+- Une clé API LLM : [OpenAI](https://platform.openai.com/api-keys), [GitHub Models](https://github.com/settings/tokens) (gratuit), Gemini, Azure OpenAI ou NVIDIA NIM
+- (optionnel) Clés [Alpaca Paper Trading](https://alpaca.markets/) pour le portefeuille et les ordres simulés
 
-## Univers suivi et documents utilises
-
-### Entreprises suivies (tickers)
-
-Univers temporairement limité au mode test/debug: `NVDA`, `ASML`, `AMD`, `ARM`, `MSFT`.
-
-### Documents ingeres actuellement
-
-- `10-K` (rapport annuel)
-- `10-Q` (rapport trimestriel)
-- `8-K` limites a l'item `2.02` (publication de resultats)
-- `20-F` (rapport annuel foreign private issuer, ex: ASML/ARM)
-- `6-K` (interim foreign private issuer, ex: ASML/ARM)
-- transcripts d'earnings calls en `.txt` (si le nom contient `earnings_call`, `conference_call` ou `transcript`)
-- sections extraites au preprocess (par defaut): `Item 1A` et `Item 7`
-- section optionnelle: `Item 8` (si activee via `--sections 1a,7,8`)
-
-### Documents non ingeres dans cette version
-
-- investor presentations / communiques hors SEC
-
-### Consequence sur la pertinence
-
-Le chatbot est coherent sur l'analyse fondamentale long-terme et intermediaire (10-K/10-Q/8-K/20-F/6-K), mais reste limite au perimetre des documents SEC/foreign issuer + transcripts disponibles.
-
-## Configuration
-
-1. Copier le template:
+### 2. Installation
 
 ```bash
-cp .env.example .env
-```
+git clone <url-du-repo>
+cd LLM-Agentic-course
 
-2. Renseigner les variables nécessaires dans `.env`:
-
-- `LLM_PROVIDER=openai`, `github_models`, ou `gemini`
-- OpenAI:
-  - `OPENAI_API_KEY`
-  - `OPENAI_CHAT_MODEL` (défaut: `gpt-4o-mini`)
-  - `OPENAI_EMBEDDING_MODEL` (défaut: `text-embedding-3-small`)
-- GitHub Models:
-  - `GITHUB_MODELS_API_KEY`
-  - `GITHUB_CHAT_MODEL` (défaut: `gpt-4.1-mini` — sans préfixe `openai/`)
-  - `GITHUB_EMBEDDING_MODEL` (défaut: `text-embedding-3-small`)
-- Gemini (chat uniquement ; embeddings via `EMBEDDING_PROVIDER`, défaut `openai`):
-  - `GEMINI_API_KEY`
-  - `GEMINI_CHAT_MODEL` (défaut: `gemini-2.0-flash`)
-  - `EMBEDDING_PROVIDER=openai` + `OPENAI_API_KEY` pour Chroma
-- LangSmith (visualisation):
-  - `LANGSMITH_TRACING=true`
-  - `LANGSMITH_API_KEY`
-  - `LANGSMITH_PROJECT`
-  - `LANGSMITH_REGION=eu` et `LANGSMITH_ENDPOINT=https://eu.api.smith.langchain.com` si compte sur [eu.smith.langchain.com](https://eu.smith.langchain.com)
-- SEC:
-  - `SEC_USER_AGENT` (obligatoire pour crawler SEC)
-
-## Lancement local
-
-### 1) Installer les dépendances
-
-```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+
+cp .env.example .env
+# Éditer .env : LLM_PROVIDER + clé API correspondante
+# Exemple minimal : LLM_PROVIDER=openai et OPENAI_API_KEY=sk-...
 ```
 
-### 2) Ingestion SEC (optionnel si vous avez déjà des fichiers dans `data/`)
+### 3. Indexer les données SEC (première fois)
 
 ```bash
-python3 rag/download_SEC_reports.py
-# Transcripts earnings (optionnel)
-python3 fetch/download_earnings_calls.py
+python run_pipeline.py
 ```
 
-### 3) Pré-traitement
+Cette commande télécharge les rapports SEC, les prétraite et indexe les embeddings dans ChromaDB (`data/chroma_db/`). Comptez plusieurs minutes selon votre quota d'embeddings.
+
+Options utiles :
 
 ```bash
-python3 rag/preprocess.py --sections 1a,7 --min-year 2024 --max-year 2026
+python run_pipeline.py --dry-run          # voir le plan sans indexer
+python run_pipeline.py --min-year 2023    # ajuster la période
+python run_pipeline.py --download         # forcer le re-téléchargement
 ```
 
-Le preprocess reconstruit `rag/processed_data/` à chaque exécution afin de ne conserver
-que les sections et années demandées. Utilisez `--no-clean-output` uniquement pour un
-debug incrémental volontaire.
+### 4. Lancer l'interface
 
-Par defaut, les `8-K` (item `2.02`) sont inclus.  
-Les documents `20-F` et `6-K` sont conserves via fallback texte integral quand les
-sections SEC standard `Item 1A/7/8` ne sont pas detectees.
-Pour les exclure explicitement:
+**Deux terminaux** :
 
 ```bash
-python3 rag/preprocess.py --sections 1a,7 --min-year 2024 --max-year 2026 --exclude-8k
+# Terminal 1 — API FastAPI
+source .venv/bin/activate
+uvicorn api.main:app --reload --reload-dir api --reload-dir src --port 8000
+
+# Terminal 2 — UI Next.js
+cd frontend && npm install && npm run dev
 ```
 
-### 4) Planifier l'indexation
+
+| Service          | URL                                                                  |
+| ---------------- | -------------------------------------------------------------------- |
+| **Interface**    | [http://localhost:3000](http://localhost:3000)                       |
+| **API**          | [http://localhost:8000](http://localhost:8000)                       |
+| **Health check** | [http://localhost:8000/api/health](http://localhost:8000/api/health) |
+
+
+Le frontend proxifie les appels `/api/`* vers le backend (voir `frontend/next.config.ts`).
+
+> L'ancienne interface Streamlit (`ui/app_rag.py`) est **dépréciée**. Utiliser Next.js + FastAPI.
+
+### Ports alternatifs
+
+Si les ports 8000 (API) ou 3000 (UI) sont déjà utilisés :
 
 ```bash
-python3 rag/hybrid_rag.py --plan --strategy semantic
+# Terminal 1 — API sur 8080
+uvicorn api.main:app --reload --reload-dir api --reload-dir src --port 8080
+
+# Terminal 2 — UI sur 3030
+cd frontend && npm run dev -- -p 3030
 ```
 
-### 5) Indexer les embeddings
+Configurer `[frontend/.env.local](frontend/.env.local)` :
+
+```env
+NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8080
+API_PROXY_TARGET=http://127.0.0.1:8080
+PORT=3030
+```
+
+Et dans `.env` (racine), autoriser l'origine du frontend :
+
+```env
+CORS_ORIGINS=http://localhost:3030,http://127.0.0.1:3030
+```
+
+Redémarrer les deux serveurs après modification des variables d'environnement.
+
+---
+
+## Interface web
+
+L'UI Next.js (`frontend/`) propose :
+
+
+| Zone                      | Description                                                                                |
+| ------------------------- | ------------------------------------------------------------------------------------------ |
+| **Barre latérale**        | Historique des conversations, nouvelle conversation, bascule FR/EN                         |
+| **Zone de chat**          | Questions en langage naturel, réponses streamées en temps réel                             |
+| **Pipeline multi-agents** | LEDs de statut par agent (Intent Router, PM, Analystes, Compliance…) pendant le traitement |
+| **Raisonnements**         | Panneau déroulant des étapes intermédiaires (mode streaming)                               |
+| **Artefacts**             | Sources RAG, étapes outils, stats debug, rapports exportés                                 |
+| **Approbation trade**     | Carte d'approbation humaine si un ordre buy/sell est proposé (pas pour une simple analyse) |
+| **Paramètres**            | Panneau de config (chunks max, sous-requêtes, fenêtre prix, itérations agent…)             |
+
+
+### Exemples de questions
+
+```
+Compare les risques SEC et la perf 6 mois de NVDA et AMD
+Quels risques NVDA mentionne-t-il dans son 10-K 2024 ?
+Quel est le prix de MSFT sur les 3 derniers mois ?
+Quelles sont les dernières news sur NVIDIA ?
+Montre mon portefeuille paper
+Achète 5 actions NVDA          → déclenche le flux trade + approbation humaine
+```
+
+### Routage automatique
+
+L'**Intent Router** choisit le mode d'exécution :
+
+
+| Mode              | Quand                                                             | Comportement                                                                         |
+| ----------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| **Agent simple**  | Une seule famille d'outils (news seule, prix seul, SEC seul…)     | Agent LangGraph direct avec outils                                                   |
+| **Hub-and-Spoke** | Plusieurs familles d'outils (ex. SEC + perf) ou action de trading | PM → analystes en parallèle → synthèse → compliance (si trade) → approbation humaine |
+
+
+Familles d'outils détectées : filings SEC, news, prix/perf, portefeuille, trading, export rapport.
+
+---
+
+## Architecture
+
+### Pipeline offline (données)
+
+```
+SEC EDGAR → download_SEC_reports.py → preprocess/cli.py → chunk + embed → ChromaDB
+```
+
+### Pipeline online (requête utilisateur)
+
+```
+Requête → Intent Router
+              ├─ simple  → Agent LangGraph (prepare → guard → retrieve → agent ⇄ tools → finalize)
+              └─ complex → Hub-and-Spoke :
+                              PM (plan) → Analystes parallèles → PM (synthèse)
+                              → Compliance (si ordre proposé) → Approbation humaine → Executor
+```
+
+### Agents Hub-and-Spoke
+
+
+| Agent                    | Outils                                                                 | Rôle                                               |
+| ------------------------ | ---------------------------------------------------------------------- | -------------------------------------------------- |
+| **Portfolio Manager**    | —                                                                      | Planifie, délègue, synthétise                      |
+| **Analyste fondamental** | `sec_filings_rag_tool`, `get_news_tool`                                | Risques SEC, news, sentiment                       |
+| **Analyste quantitatif** | `market_price_tool`, `portfolio_history_tool`                          | Prix, perf, volatilité                             |
+| **Compliance Validator** | `validate_claims_tool`, `portfolio_info_tool`, `account_activity_tool` | Garde-fous avant trade                             |
+| **Executor Trader**      | `place_trade_tool`, `close_position_tool`                              | Exécution paper trading (après PASS + approbation) |
+
+
+Fichiers clés :
+
+- Graphe simple : `[src/graph/flow.py](src/graph/flow.py)`
+- Graphe Hub-and-Spoke : `[src/orchestration/hub_graph.py](src/orchestration/hub_graph.py)`
+- API streaming SSE : `[api/services/hub_runner.py](api/services/hub_runner.py)`
+
+---
+
+## Configuration (`.env`)
+
+Copier `.env.example` vers `.env`. Le fichier `.env` du projet est chargé avec priorité sur les variables déjà exportées dans le shell (`override=True` via `src/paths.py`). Évitez d'exporter `GEMINI_API_KEY` / `OPENAI_API_KEY` dans `~/.zshrc` si vous voulez des clés différentes par projet.
+
+Variables essentielles :
+
+
+| Variable                               | Description                                                              |
+| -------------------------------------- | ------------------------------------------------------------------------ |
+| `LLM_PROVIDER`                         | `openai`, `github_models`, `gemini`, `azure_openai`, `nvidia_nim`        |
+| `OPENAI_API_KEY`                       | Clé OpenAI (chat + embeddings par défaut)                                |
+| `GITHUB_MODELS_API_KEY`                | Alternative gratuite (chat + embeddings)                                 |
+| `EMBEDDING_PROVIDER`                   | Provider embeddings si différent du chat (ex. `openai` avec chat Gemini) |
+| `SEC_USER_AGENT`                       | Identité requise par la SEC (`NomApp email@domaine.com`)                 |
+| `ALPACA_API_KEY` / `ALPACA_SECRET_KEY` | Paper trading (optionnel)                                                |
+| `LANGSMITH_`*                          | Traçabilité LangSmith (optionnel)                                        |
+
+
+Voir `.env.example` pour la liste complète (quota embeddings, fenêtres prix, mémoire conversationnelle…).
+
+---
+
+## Docker
 
 ```bash
-python3 rag/hybrid_rag.py --embed --strategy semantic --quota-used 0
+docker compose run --rm bootstrap              # pipeline complète (indexation)
+docker compose up finance-rag-api finance-rag-web
 ```
 
-### Serveur MCP
+- UI : [http://localhost:3000](http://localhost:3000)
+- API : [http://localhost:8000](http://localhost:8000)
 
-Installer les dépendances puis lancer le serveur stdio:
+Variables utiles : `SKIP_DOWNLOAD_IF_EXISTS`, `BOOTSTRAP_MIN_YEAR`, `BOOTSTRAP_SECTIONS`, `EMBEDDING_BATCH_SIZE`, `EMBEDDING_RPM`.
+
+---
+
+## Outils agent
+
+
+| Outil                                      | Description                                 |
+| ------------------------------------------ | ------------------------------------------- |
+| `sec_filings_rag_tool`                     | Recherche RAG dans les rapports SEC indexés |
+| `market_price_tool`                        | Prix et performance (yfinance)              |
+| `get_news_tool`                            | Actualités récentes par ticker              |
+| `validate_claims_tool`                     | Validation d'affirmations vs sources RAG    |
+| `portfolio_info_tool`                      | État du compte paper Alpaca                 |
+| `portfolio_history_tool`                   | Historique de performance du portefeuille   |
+| `account_activity_tool`                    | Activité récente du compte                  |
+| `place_trade_tool` / `close_position_tool` | Ordres paper trading                        |
+| `export_investment_report_tool`            | Export Markdown/PDF dans `reports/`         |
+
+
+---
+
+## Backends LLM supportés
+
+
+| Provider      | Chat | Embeddings               |
+| ------------- | ---- | ------------------------ |
+| OpenAI        | ✓    | ✓                        |
+| GitHub Models | ✓    | ✓                        |
+| Azure OpenAI  | ✓    | ✓                        |
+| NVIDIA NIM    | ✓    | ✓                        |
+| Gemini        | ✓    | via `EMBEDDING_PROVIDER` |
+
+
+---
+
+## Univers suivi
+
+Tickers par défaut : `NVDA`, `ASML`, `AMD`, `ARM`, `MSFT` — configurables dans `[src/config/__init__.py](src/config/__init__.py)`.
+
+Documents indexés : 10-K, 10-Q, 8-K (item 2.02), 20-F, 6-K, transcripts earnings.
+
+---
+
+## Structure du projet
+
+```
+api/                 # Backend FastAPI (chat SSE, config, rapports, trade approval)
+frontend/            # Interface Next.js (i18n FR/EN, chat, artefacts, paramètres)
+src/
+├── config/          # Tickers, constantes
+├── rag/             # Corpus, chunking, indexation, retrieval, reranking
+├── preprocess/      # Extraction sections SEC (Item 1A, MD&A…)
+├── graph/           # Agent LangGraph simple (nœuds, état, mémoire)
+├── orchestration/   # Hub-and-Spoke (intent router, PM, analystes, compliance)
+├── tools/           # Outils agent (SEC, prix, news, portfolio, trading…)
+├── llm/             # Providers LLM
+├── alpaca/          # Client Alpaca paper trading
+└── embeddings/      # Cache, quota, backoff
+ui/                  # Streamlit legacy (déprécié)
+data/                # Rapports SEC bruts + ChromaDB
+reports/             # Rapports exportés
+tests/               # Tests pytest + unittest
+```
+
+---
+
+## Tests
 
 ```bash
-.venv/bin/pip install -r requirements.txt
-.venv/bin/python -m rag.mcp_server
+# Tests pytest
+pytest tests/
+
+# Tests routage / trade intent (unittest, sans dépendance langgraph lourde)
+python3 -m unittest tests.test_intent_router tests.test_trade_intent -v
 ```
 
-Ne collez pas la configuration JSON ci-dessous dans le terminal du serveur.
-En mode `stdio`, le serveur attend des messages JSON-RPC MCP envoyés par un
-client compatible, pas un fichier de configuration.
+---
 
-Exemple de configuration à mettre dans le client MCP:
+## Dépannage
 
-```json
-{
-  "mcpServers": {
-    "finance-rag": {
-      "command": "/home/julien/Documents/UQAC(nogit)/LLM-Agentic-course/.venv/bin/python",
-      "args": ["-m", "rag.mcp_server"],
-      "cwd": "/home/julien/Documents/UQAC(nogit)/LLM-Agentic-course"
-    }
-  }
-}
-```
 
-Le serveur expose les 5 outils du projet via MCP:
+| Problème                  | Piste                                                                                              |
+| ------------------------- | -------------------------------------------------------------------------------------------------- |
+| UI sans réponse           | Vérifier que l'API tourne ; si ports custom, vérifier `NEXT_PUBLIC_API_BASE_URL` et `CORS_ORIGINS` |
+| Erreur embeddings / quota | Ajuster `EMBEDDING_RPM`, `EMBEDDING_BATCH_SIZE` ou attendre reset quota                            |
+| ChromaDB vide             | Relancer `python run_pipeline.py`                                                                  |
+| Trade non exécuté         | Normal si la requête est analytique ; l'approbation n'apparaît que pour un ordre explicite         |
+| Conversations perdues     | L'état (`run_store`) est en mémoire : il disparaît au redémarrage de l'API. Lancer uvicorn en mono-worker. |
+| SEC 403                   | Renseigner `SEC_USER_AGENT` avec un email valide                                                   |
 
-- `sec_filings_rag_tool`
-- `market_price_tool`
-- `validate_claims_tool`
-- `simulate_portfolio_tool`
-- `export_investment_report_tool`
 
-Le serveur charge Chroma avec `max_new_embeddings=0`: il n'embedde pas de
-nouveaux chunks au démarrage. Lancez l'indexation séparément si le plan indique
-des chunks manquants.
-
-Pour un temps d'indexation raisonnable, utilisez les embeddings en batch:
-
-```bash
-python3 rag/hybrid_rag.py --embed --strategy semantic --quota-used 0 --batch-size 32 --rpm 120
-```
-
-### 6) Lancer l'UI
-
-```bash
-streamlit run ui/app_rag.py
-```
-
-## Lancement Docker (recommandé)
-
-```bash
-docker compose run --rm bootstrap
-docker compose up finance-rag-ui
-```
-
-L'UI est disponible sur `http://localhost:8501`.
-
-Le service `bootstrap` exécute:
-
-1. téléchargement SEC (optionnel selon flags)
-2. preprocess
-3. embedding
-
-Flags `.env` utiles:
-
-- `SKIP_DOWNLOAD_IF_EXISTS=false` (le crawler ignore déjà les fichiers téléchargés)
-- `SKIP_PREPROCESS_IF_EXISTS=false`
-- `BOOTSTRAP_MIN_YEAR=2024`
-- `BOOTSTRAP_MAX_YEAR=2026`
-- `BOOTSTRAP_SECTIONS=1a,7`
-- `BOOTSTRAP_EXCLUDE_8K=false` (par defaut les 8-K sont inclus)
-- `BOOTSTRAP_EARNINGS=false` (télécharge les transcripts si `true`)
-- `MAX_TOOL_ITERATIONS=6`
-- `EMBEDDING_DAILY_LIMIT=0` (`0` = quota illimite)
-- `EMBEDDING_BATCH_SIZE=32`
-- `EMBEDDING_MAX_RETRIES=3`
-- `EMBEDDING_RPM=120`
-- `QUERY_DECOMPOSE_COUNT=4` (nombre de sous-requêtes générées par LangGraph)
-- `PRICE_TOOL_ENABLED=true`
-- `PRICE_MAX_DAYS=180`
-- `PRICE_MAX_POINTS=40`
-- `PRICE_MAX_TICKERS=3`
-- `PRICE_DEFAULT_DAYS=90`
-- `PRICE_MAX_ATTEMPTS=2`
-
-## Architecture LangGraph v2 (Agent ↔ Tools)
-
-Le graphe exécute:
-
-1. `prepare_query_node` — normalisation requête / tickers / années
-2. `memory_read_node` — résumé conversationnel
-3. `guard_node` — décision LLM légère avec accès mémoire : hors sujet, coverage info, clarification évidente
-4. `agent_node` — LLM avec tool calling (boucle)
-5. `tools_node` — orchestration minimale, déléguée à `ToolExecutor`
-6. `finalize_node` → `memory_write_node` → `gc_node`
-
-Exemple de requête complexe (démo phase 2) :
-
-> Compare MSFT et NVDA (risques SEC 2024 + performance 6 mois), valide les affirmations clés, propose une allocation fictive 50/50, puis sauvegarde le rapport.
-
-```bash
-streamlit run ui/app_rag.py
-```
-
-Le `gc_node` compresse l'historique pour limiter le coût token/API.
-
-Documentation phase 2 : [`PHASE2.md`](PHASE2.md). Revue architecture : [`ARCHITECTURE_REVIEW.md`](ARCHITECTURE_REVIEW.md).
-
-Tests agent (sans API) :
-
-```bash
-python -m unittest tests.test_regressions.AgentToolsTests -v
-```
-
-## Visualisation LangSmith
-
-Les noeuds du graphe sont instrumentés via `@traceable`.  
-Une fois `LANGSMITH_TRACING=true` et `LANGSMITH_API_KEY` définis, chaque run est visible dans le projet `LANGSMITH_PROJECT`.
-
-### Lancer et visualiser
-
-1. Activer les variables dans `.env`:
-   - `LANGSMITH_TRACING=true`
-   - `LANGSMITH_API_KEY=...`
-   - `LANGSMITH_PROJECT=finance-rag-langgraph`
-2. Lancer l'app Streamlit et poser des questions.
-3. Ouvrir [https://eu.smith.langchain.com](https://eu.smith.langchain.com) (EU) ou [smith.langchain.com](https://smith.langchain.com) (US), puis le projet `LANGSMITH_PROJECT`.
-
-### LangGraph Studio (optionnel)
-
-Pour visualiser localement le graphe en mode dev:
-
-```bash
-pip install langgraph-cli
-langgraph dev --config langgraph.json
-```
+Pour le contexte pédagogique du cours (phases RAG → agent → orchestration), voir `[scope.md](scope.md)`.

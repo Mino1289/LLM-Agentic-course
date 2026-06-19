@@ -10,31 +10,15 @@ class TrackedTickersUniverseTests(unittest.TestCase):
     """Etape 2 debug mode — keep a compact tracked universe."""
 
     def test_tracked_tickers_has_debug_entries(self):
-        from rag.config import TRACKED_TICKERS
+        from src.config import TRACKED_TICKERS
 
         self.assertEqual(TRACKED_TICKERS, ("NVDA", "ASML", "AMD", "ARM", "MSFT"))
 
     def test_tracked_tickers_contains_all_requested_symbols(self):
-        from rag.config import TRACKED_TICKERS
+        from src.config import TRACKED_TICKERS
 
         expected = {"NVDA", "ASML", "AMD", "ARM", "MSFT"}
         self.assertEqual(set(TRACKED_TICKERS), expected)
-
-    def test_price_download_scope_covers_tracked_tickers(self):
-        from rag.download_share_prices import entreprises
-        from rag.config import TRACKED_TICKERS
-
-        mapping_values = set(entreprises.values())
-        self.assertEqual(mapping_values, set(TRACKED_TICKERS))
-
-    def test_supported_companies_slugs_are_filesystem_safe(self):
-        """Slugs are used to name CSV files; no special chars allowed."""
-        from rag.download_share_prices import supported_companies
-
-        for slug in supported_companies:
-            self.assertNotIn(".", slug, f"slug '{slug}' contains a dot")
-            self.assertNotIn("/", slug, f"slug '{slug}' contains a slash")
-            self.assertNotIn("\\", slug, f"slug '{slug}' contains a backslash")
 
 
 class SecPacingTests(unittest.TestCase):
@@ -43,7 +27,8 @@ class SecPacingTests(unittest.TestCase):
     def _reload_module(self):
         """Reload download_SEC_reports to re-read env-derived constants."""
         import importlib
-        import rag.download_SEC_reports as mod
+        import src.fetchers.download_SEC_reports as mod
+
         importlib.reload(mod)
         return mod
 
@@ -71,7 +56,7 @@ class SecPacingTests(unittest.TestCase):
     def test_rate_limit_sleep_uses_configured_value(self):
         with patch.dict(os.environ, {"SEC_INTER_TICKER_SLEEP": "0.2"}):
             mod = self._reload_module()
-            with patch("rag.download_SEC_reports.time.sleep") as mocked_sleep:
+            with patch("src.fetchers.download_SEC_reports.time.sleep") as mocked_sleep:
                 mod.rate_limit_sleep()
                 mocked_sleep.assert_called_once_with(0.2)
 
@@ -80,13 +65,17 @@ class SecTickerFilterTests(unittest.TestCase):
     """.PA tickers (Euronext) must be excluded from SEC downloads."""
 
     def test_pa_tickers_excluded_from_sec_tickers(self):
-        from rag.download_SEC_reports import SEC_TICKERS, SKIPPED_TICKERS
+        from src.fetchers.download_SEC_reports import SEC_TICKERS, SKIPPED_TICKERS
 
         pa_tickers = {t for t in SEC_TICKERS if t.endswith(".PA")}
         self.assertEqual(pa_tickers, set(), "no .PA ticker should be in SEC_TICKERS")
 
     def test_pa_tickers_listed_in_skipped(self):
-        from rag.download_SEC_reports import SEC_TICKERS, SKIPPED_TICKERS, TRACKED_TICKERS
+        from src.fetchers.download_SEC_reports import (
+            SEC_TICKERS,
+            SKIPPED_TICKERS,
+            TRACKED_TICKERS,
+        )
 
         all_pa = {t for t in TRACKED_TICKERS if t.endswith(".PA")}
         self.assertEqual(set(SKIPPED_TICKERS), all_pa)
@@ -94,12 +83,12 @@ class SecTickerFilterTests(unittest.TestCase):
         self.assertEqual(set(SKIPPED_TICKERS) & set(SEC_TICKERS), set())
 
     def test_sec_tickers_count_is_5(self):
-        from rag.download_SEC_reports import SEC_TICKERS
+        from src.fetchers.download_SEC_reports import SEC_TICKERS
 
         self.assertEqual(len(SEC_TICKERS), 5)
 
     def test_pa_ticker_count_is_0(self):
-        from rag.download_SEC_reports import SKIPPED_TICKERS
+        from src.fetchers.download_SEC_reports import SKIPPED_TICKERS
 
         self.assertEqual(len(SKIPPED_TICKERS), 0)
 
@@ -108,7 +97,7 @@ class SecFormCoverageTests(unittest.TestCase):
     """Foreign private issuers file 20-F (annual) and 6-K (interim) instead of 10-K/10-Q."""
 
     def test_get_filings_accepts_us_forms(self):
-        from rag.download_SEC_reports import get_filings
+        from src.fetchers.download_SEC_reports import get_filings
 
         response = _FakeResponse(
             {
@@ -123,8 +112,12 @@ class SecFormCoverageTests(unittest.TestCase):
                 }
             }
         )
-        with patch("rag.download_SEC_reports.requests.get", return_value=response), \
-             patch("rag.download_SEC_reports.rate_limit_sleep"):
+        with (
+            patch(
+                "src.fetchers.download_SEC_reports.requests.get", return_value=response
+            ),
+            patch("src.fetchers.download_SEC_reports.rate_limit_sleep"),
+        ):
             filings = get_filings("NVDA", "0001045810", 2024, 2026)
         self.assertGreater(len(filings), 0)
         forms = {f["form"] for f in filings}
@@ -132,7 +125,7 @@ class SecFormCoverageTests(unittest.TestCase):
         self.assertTrue(forms.issubset({"10-K", "10-Q", "8-K"}))
 
     def test_get_filings_includes_foreign_issuer_forms(self):
-        from rag.download_SEC_reports import get_filings
+        from src.fetchers.download_SEC_reports import get_filings
 
         # ASML is a Dutch foreign private issuer (CIK 0000937966)
         response = _FakeResponse(
@@ -148,10 +141,16 @@ class SecFormCoverageTests(unittest.TestCase):
                 }
             }
         )
-        with patch("rag.download_SEC_reports.requests.get", return_value=response), \
-             patch("rag.download_SEC_reports.rate_limit_sleep"):
+        with (
+            patch(
+                "src.fetchers.download_SEC_reports.requests.get", return_value=response
+            ),
+            patch("src.fetchers.download_SEC_reports.rate_limit_sleep"),
+        ):
             filings = get_filings("ASML", "0000937966", 2024, 2026)
-        self.assertGreater(len(filings), 0, "ASML should have foreign-issuer filings (20-F/6-K)")
+        self.assertGreater(
+            len(filings), 0, "ASML should have foreign-issuer filings (20-F/6-K)"
+        )
         forms = {f["form"] for f in filings}
         # Must include at least one 20-F (annual) and 6-K (interim)
         self.assertIn("20-F", forms)

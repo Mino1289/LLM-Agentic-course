@@ -1,0 +1,33 @@
+Un seul point de contact : L'utilisateur ne parle qu'au Portfolio Manager. Il ne donne jamais d'ordres directs au Compliance ou au Quant. Il dit simplement : "Je veux investir 50 000$ dans l'IA avec un profil de risque prudent."
+
+La transparence (Observabilité) : C'est la grosse différence visuelle. Dans la Phase 2, l'utilisateur voit un "spinner" qui tourne en attendant la réponse. Dans un système multi-agents, la requête peut prendre 1 à 3 minutes à s'exécuter. L'interface doit donc montrer les coulisses en temps réel (le streaming des événements) pour que l'utilisateur patiente. Visuellement, cela ressemble à une console qui défile :
+
+⏳ Le Portfolio Manager crée le plan d'action...
+
+📚 L'Analyste Fondamental lit le dernier rapport 10-K de MSFT...
+
+📈 L'Analyste Quantitatif extrait l'historique de votre portefeuille...
+
+🛡️ Compliance : AVERTISSEMENT - Fonds insuffisants pour cet ordre.
+
+🔄 Le PM ajuste la quantité d'actions...
+
+✅ Trade validé et exécuté.
+
+L'approbation finale (Human-in-the-loop) : Très souvent, même si le Compliance Validator donne son "PASS", l'interface affiche un résumé généré par le PM avec deux gros boutons : "Approuver le Trade" ou "Annuler". L'utilisateur reste le maître absolu.
+
+
+POUR eviter qu'une question simple comme "quel est le prix d'une action AAPL ?" prennent plus de temps en phase 3 qu'en phase 2 :
+
+Le scénario Élégant : Le "Routeur d'Intention" (La bonne pratique) 🚦
+Pour éviter ce gaspillage de ressources, les architectures agentiques matures intègrent souvent un Routeur (ou Classifier) tout au début du graphe, juste avant le Portfolio Manager.
+
+(D'ailleurs, je vois dans votre dossier de code un fichier src/preprocess/classify.py, ce qui montre que vous avez déjà cette logique en tête !)
+
+Voici comment cela fonctionne de manière optimisée :
+
+Évaluation (Fast Track) : L'utilisateur pose sa question. Un petit LLM (très rapide et peu coûteux) ou une fonction de classification lit la requête et détermine l'intention.
+
+Si c'est une requête simple (Information) : Le routeur court-circuite le PM et envoie directement la question à un Agent Simple (comme votre agent de la Phase 2) ou directement à l'Analyste Quant. Vous obtenez la réponse en 2 secondes.
+
+Si c'est une requête complexe (Action / Planification) : (Ex: "Achète des actions Apple si le prix est sous 180$"), le routeur envoie la requête dans la grande machine "Hub-and-Spoke" avec le PM, le Compliance et l'Exécuteur.

@@ -13,8 +13,8 @@ from unittest.mock import patch
 
 os.environ.setdefault("LANGSMITH_TRACING", "false")
 
-from rag.langgraph_flow import FinanceLangGraphAgent
-from rag.llm_provider import LLMToolResponse
+from src.graph.flow import FinanceLangGraphAgent
+from src.llm.provider import LLMToolResponse
 
 
 async def _inline_to_thread(func, *args, **kwargs):
@@ -23,7 +23,7 @@ async def _inline_to_thread(func, *args, **kwargs):
 
 def _make_fake_provider(content: str = "Réponse stub async.") -> object:
     """Build a fake LLMProvider that returns canned responses for testing."""
-    from rag.llm_provider import LLMStreamChunk
+    from src.llm.provider import LLMStreamChunk
 
     provider = SimpleNamespace()
     provider.generate = lambda *a, **kw: content
@@ -58,11 +58,14 @@ def _build_minimal_agent() -> FinanceLangGraphAgent:
     return FinanceLangGraphAgent(rag=rag)
 
 
-@unittest.skipUnless(os.getenv("RUN_ASYNC_E2E") == "1", "Set RUN_ASYNC_E2E=1 to run LangGraph smoke tests.")
+@unittest.skipUnless(
+    os.getenv("RUN_ASYNC_E2E") == "1",
+    "Set RUN_ASYNC_E2E=1 to run LangGraph smoke tests.",
+)
 class AsyncEndToEndTests(unittest.IsolatedAsyncioTestCase):
     async def test_arun_returns_state(self):
         agent = _build_minimal_agent()
-        with patch("rag.nodes.memory_nodes.asyncio.to_thread", side_effect=_inline_to_thread):
+        with patch("src.graph.memory_store", side_effect=_inline_to_thread):
             result = await agent.arun("Question test async")
         # The result must be a state dict with at least conversation_id
         self.assertIsInstance(result, dict)
@@ -72,18 +75,19 @@ class AsyncEndToEndTests(unittest.IsolatedAsyncioTestCase):
     async def test_astream_yields_events(self):
         agent = _build_minimal_agent()
         events = []
-        with patch("rag.nodes.memory_nodes.asyncio.to_thread", side_effect=_inline_to_thread):
+        with patch("src.graph.memory_store", side_effect=_inline_to_thread):
             async for event in agent.astream("Question streaming"):
                 events.append(event)
         # At least one event must be yielded (prepare_query_node start/end)
         self.assertGreaterEqual(
-            len(events), 1,
+            len(events),
+            1,
             f"astream must yield at least one event; got {len(events)}",
         )
 
     async def test_arun_preserves_conversation_id(self):
         agent = _build_minimal_agent()
-        with patch("rag.nodes.memory_nodes.asyncio.to_thread", side_effect=_inline_to_thread):
+        with patch("src.graph.memory_store", side_effect=_inline_to_thread):
             result = await agent.arun("Test", conversation_id="my-convo-123")
         self.assertEqual(result["conversation_id"], "my-convo-123")
 

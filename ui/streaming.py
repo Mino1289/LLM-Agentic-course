@@ -1,32 +1,32 @@
-"""UI streaming helper for the Finance RAG LangGraph agent.
-
-Consumes `agent.astream()` via `asyncio.run` and dispatches events to
-the provided text/status containers. Returns the final GraphState
-captured from the `on_graph_end` event (no double `arun()` call).
-
-Token streaming: uses a contextvar-based token sink (rag.llm_provider.token_sink)
-registered before the agent runs, so each text delta from the LLM triggers
-a callback that updates the text container with a per-word buffer
-(avoids Streamlit flicker on per-char re-renders).
-
-This module is intentionally decoupled from Streamlit at the call site:
-the caller passes anything that implements `.markdown(str)` (for the
-text container) and `.update(label=...)` (for the status container).
-In production these are `st.empty()` and `st.status(...)`; in tests
-they are mocks.
-"""
-
 from __future__ import annotations
 
 import asyncio
 from typing import Any, Optional
 
-from rag.llm_provider import token_sink
+from src.llm.sinks import token_sink
 
 WORD_SEPARATORS = (" ", "\n", ".", ",", ";", ":", "!", "?")
 
+AGENT_ICONS = {
+    "Intent Router": "🚦",
+    "Portfolio Manager": "👔",
+    "Fundamental Analyst": "📚",
+    "Quantitative Analyst": "📈",
+    "Simple Agent": "🤖",
+    "Compliance Validator": "🛡️",
+    "Executor Trader": "⚡",
+    "Human Review": "👤",
+}
 
-def run_stream(
+
+def _get_icon(agent_name: str) -> str:
+    for prefix, icon in AGENT_ICONS.items():
+        if agent_name.startswith(prefix):
+            return icon
+    return "🔧"
+
+
+def run_phase2_stream(
     agent: Any,
     query: str,
     conversation_id: str,
@@ -36,29 +36,6 @@ def run_stream(
     *,
     on_text_chunk: Optional[callable] = None,
 ) -> dict[str, Any]:
-    """Synchronously drive `agent.astream()` and dispatch events to the
-    containers. Returns the final GraphState.
-
-    Uses `asyncio.run` internally. Raises RuntimeError if called from
-    inside a running event loop (use `await agent.astream(...)` directly).
-
-    Args:
-        agent: A FinanceLangGraphAgent (anything with `astream(query, ...)`).
-        query: The user question.
-        conversation_id: Conversation ID for the run.
-        messages: Prior messages for the conversation.
-        text_container: Anything with `.markdown(str)` method. Receives
-            progressive updates as tokens arrive.
-        status_container: Anything with `.update(label=str)` method.
-            Receives node/tool lifecycle updates.
-        on_text_chunk: Optional callback invoked with the final streamed
-            text when the stream ends (used by tests for assertions).
-
-    Returns:
-        The final GraphState (dict) — same as `agent.arun()` would
-        return. Comes from the custom `on_graph_end` event emitted by
-        `agent.astream()`.
-    """
     final_state: dict[str, Any] = {}
     streamed_text: list[str] = []
     word_buffer: list[str] = []
@@ -91,8 +68,6 @@ def run_stream(
                 elif kind == "on_tool_end":
                     status_container.update(label="✅ Outil terminé")
                 elif kind == "on_llm_token":
-                    # Path used by tests that mock on_chat_model_stream.
-                    # In production, the provider's token_sink fires first.
                     token = event.get("token", "")
                     if token:
                         word_buffer.append(token)
@@ -108,3 +83,77 @@ def run_stream(
     if on_text_chunk is not None:
         on_text_chunk("".join(streamed_text))
     return final_state
+
+
+def run_phase3_stream(
+    agent: Any,
+    query: str,
+    conversation_id: str,
+    messages: list[dict[str, str]],
+    console_container: Any,
+    text_container: Any,
+    status_container: Any,
+    *,
+    on_text_chunk: Optional[callable] = None,
+    on_human_review: Optional[callable] = None,
+) -> dict[str, Any]:
+    final_state: dict[str, Any] = {}
+    console_lines: list[str] = []
+
+    async def consume() -> None:
+        nonlocal final_state
+        async for event in agent.astream(query, conversation_id, messages):
+            kind = event.get("event")
+
+            if kind == "on_spoke_event":
+                agent_name = event.get("agent", "?")
+                status = event.get("status", "running")
+                message = event.get("message", "")
+                detail = event.get("detail", "")
+                icon = _get_icon(agent_name)
+
+                if status == "running":
+                    line = f"{icon} **{agent_name}** : {message}"
+                    console_lines.append(line)
+                    status_container.update(label=f"{icon} {agent_name} en cours...")
+                elif status == "completed":
+                    line = f"{icon} {agent_name} : ✅ {message}"
+                    if detail:
+                        line += f"\n\n> {detail}"
+                    if console_lines:
+                        console_lines[-1] = line
+                    status_container.update(label=f"✅ {agent_name} terminé")
+                elif status == "failed":
+                    if console_lines:
+                        console_lines[-1] = f"{icon} {agent_name} : ❌ {message}"
+                    status_container.update(label=f"❌ {agent_name} échoué")
+
+                console_container.markdown("\n\n".join(console_lines))
+
+            elif kind == "on_tool_start":
+                tool = event.get("name", "?")
+                status_container.update(label=f"⏳ Outil `{tool}`...")
+
+            elif kind == "on_tool_end":
+                status_container.update(label="✅ Outil complété")
+
+            elif kind == "on_graph_end":
+                final_state = event.get("state", {}) or {}
+                status_container.update(label="✅ Analyse terminée")
+
+                if final_state.get("human_review_pending"):
+                    if on_human_review:
+                        on_human_review(final_state)
+
+                answer = final_state.get("answer", "")
+                if answer and text_container:
+                    text_container.markdown(answer)
+
+    asyncio.run(consume())
+    if on_text_chunk is not None:
+        on_text_chunk("".join(streamed_text))
+    return final_state
+
+
+# Backward-compatible alias for Phase 2 tests
+run_stream = run_phase2_stream

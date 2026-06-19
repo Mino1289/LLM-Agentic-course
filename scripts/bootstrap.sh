@@ -1,61 +1,60 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "== Finance RAG bootstrap =="
+# Bootstrap RAG — pipeline complète depuis l'image Docker
+# Usage: docker compose run --rm bootstrap
 
-SKIP_DOWNLOAD_IF_EXISTS="${SKIP_DOWNLOAD_IF_EXISTS:-false}"
-SKIP_PREPROCESS_IF_EXISTS="${SKIP_PREPROCESS_IF_EXISTS:-false}"
-BOOTSTRAP_MIN_YEAR="${BOOTSTRAP_MIN_YEAR:-2024}"
-BOOTSTRAP_MAX_YEAR="${BOOTSTRAP_MAX_YEAR:-$(date +%Y)}"
-BOOTSTRAP_SECTIONS="${BOOTSTRAP_SECTIONS:-1a,7}"
-BOOTSTRAP_EXCLUDE_8K="${BOOTSTRAP_EXCLUDE_8K:-false}"
-BOOTSTRAP_EARNINGS="${BOOTSTRAP_EARNINGS:-false}"
-EMBEDDING_DAILY_USED="${EMBEDDING_DAILY_USED:-0}"
-EMBEDDING_DAILY_LIMIT="${EMBEDDING_DAILY_LIMIT:-0}"
-EMBEDDING_RPM="${EMBEDDING_RPM:-100}"
-EMBEDDING_BATCH_SIZE="${EMBEDDING_BATCH_SIZE:-32}"
-EMBEDDING_MAX_RETRIES="${EMBEDDING_MAX_RETRIES:-3}"
+PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$PROJECT_ROOT"
 
-mkdir -p data rag/processed_data rag/chroma_db
+# shellcheck disable=SC1091
+[ -f .env ] && set -a && source .env && set +a
 
-raw_count="$(ls -1 data/* 2>/dev/null | wc -l || true)"
-if [[ "${raw_count}" -gt 0 && "${SKIP_DOWNLOAD_IF_EXISTS}" == "true" ]]; then
-  echo "Skip download: data/ already contains files (${raw_count})."
+: "${SKIP_DOWNLOAD_IF_EXISTS:=false}"
+: "${SKIP_PREPROCESS_IF_EXISTS:=false}"
+: "${BOOTSTRAP_MIN_YEAR:=2024}"
+: "${BOOTSTRAP_MAX_YEAR:=2026}"
+: "${BOOTSTRAP_SECTIONS:=1a,7}"
+: "${BOOTSTRAP_EXCLUDE_8K:=false}"
+: "${EMBEDDING_DAILY_LIMIT:=0}"
+: "${EMBEDDING_BATCH_SIZE:=32}"
+: "${EMBEDDING_RPM:=120}"
+
+# Assurer que les répertoires de données existent
+mkdir -p data data/processed_data data/chroma_db
+
+# Étape 1 — Téléchargement SEC
+if [ "$SKIP_DOWNLOAD_IF_EXISTS" = "true" ] && [ -n "$(ls data/*.htm 2>/dev/null)" ]; then
+    echo "SEC: déjà téléchargé, skip."
 else
-  echo "Downloading SEC filings..."
-  python3 rag/download_SEC_reports.py \
-    --min-year "${BOOTSTRAP_MIN_YEAR}" \
-    --max-year "${BOOTSTRAP_MAX_YEAR}"
-  if [[ "${BOOTSTRAP_EARNINGS}" == "true" && -f fetch/download_earnings_calls.py ]]; then
-    echo "Downloading earnings call transcripts..."
-    python3 fetch/download_earnings_calls.py || echo "Earnings download skipped (non-fatal)."
-  fi
+    echo "SEC: téléchargement…"
+    python3 -m src.fetchers.download_SEC_reports \
+        --min-year "$BOOTSTRAP_MIN_YEAR" \
+        --max-year "$BOOTSTRAP_MAX_YEAR"
 fi
 
-processed_count="$(ls -1 rag/processed_data/*.txt 2>/dev/null | wc -l || true)"
-if [[ "${processed_count}" -gt 0 && "${SKIP_PREPROCESS_IF_EXISTS}" == "true" ]]; then
-  echo "Skip preprocess: rag/processed_data already contains files (${processed_count})."
+# Étape 2 — Prétraitement
+EXCLUDE_ARG=""
+[ "$BOOTSTRAP_EXCLUDE_8K" = "true" ] && EXCLUDE_ARG="--exclude-8k"
+
+if [ "$SKIP_PREPROCESS_IF_EXISTS" = "true" ] && [ -n "$(ls data/processed_data/*.txt 2>/dev/null)" ]; then
+    echo "Preprocess: déjà fait, skip."
 else
-  echo "Preprocessing source files..."
-  PREPROCESS_ARGS=(
-    --sections "${BOOTSTRAP_SECTIONS}"
-    --min-year "${BOOTSTRAP_MIN_YEAR}"
-    --max-year "${BOOTSTRAP_MAX_YEAR}"
-  )
-  if [[ "${BOOTSTRAP_EXCLUDE_8K}" == "true" ]]; then
-    PREPROCESS_ARGS+=(--exclude-8k)
-  fi
-  python3 rag/preprocess.py "${PREPROCESS_ARGS[@]}"
+    echo "Preprocess: extraction sections $BOOTSTRAP_SECTIONS…"
+    python3 -m src.preprocess.cli \
+        --sections "$BOOTSTRAP_SECTIONS" \
+        --min-year "$BOOTSTRAP_MIN_YEAR" \
+        --max-year "$BOOTSTRAP_MAX_YEAR" \
+        $EXCLUDE_ARG
 fi
 
-echo "Embedding missing chunks (semantic strategy)..."
-python3 rag/hybrid_rag.py \
-  --embed \
-  --strategy semantic \
-  --quota-used "${EMBEDDING_DAILY_USED}" \
-  --quota-limit "${EMBEDDING_DAILY_LIMIT}" \
-  --rpm "${EMBEDDING_RPM}" \
-  --batch-size "${EMBEDDING_BATCH_SIZE}" \
-  --retries "${EMBEDDING_MAX_RETRIES}"
+# Étape 3 — Indexation vectorielle
+echo "Indexation: embedding + ChromaDB…"
+python3 -m src.rag.cli \
+    --embed \
+    --strategy semantic \
+    --quota-used 0 \
+    --batch-size "$EMBEDDING_BATCH_SIZE" \
+    --rpm "$EMBEDDING_RPM"
 
-echo "Bootstrap complete."
+echo "Bootstrap terminé."

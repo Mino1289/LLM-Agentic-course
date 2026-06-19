@@ -45,7 +45,7 @@ class ToonRagExcerptsTests(unittest.TestCase):
         ]
 
     def test_empty_chunks_returns_fallback_message(self):
-        from rag.tools import format_rag_excerpts
+        from src.tools.descriptions import format_rag_excerpts
 
         result = format_rag_excerpts([], [])
         # Empty case must NOT produce a TOON "[0]:" — keep the human-readable
@@ -56,7 +56,7 @@ class ToonRagExcerptsTests(unittest.TestCase):
         self.assertNotIn("]{", result)
 
     def test_single_chunk_returns_toon_tabular_array(self):
-        from rag.tools import format_rag_excerpts
+        from src.tools.descriptions import format_rag_excerpts
 
         result = format_rag_excerpts(self._make_chunks(), self._make_metadatas())
         # Must use TOON tabular form: "[2,]{i,ticker,year,file_type,section,source,text}:"
@@ -70,7 +70,7 @@ class ToonRagExcerptsTests(unittest.TestCase):
         rows match the original chunks and metadata."""
         from toon_format import decode
 
-        from rag.tools import format_rag_excerpts
+        from src.tools.descriptions import format_rag_excerpts
 
         chunks = self._make_chunks()
         metas = self._make_metadatas()
@@ -94,15 +94,24 @@ class ToonRagExcerptsTests(unittest.TestCase):
         """Backward compat: chunks were historically truncated to 1200 chars
         in the text format. TOON-formatted output must preserve this
         truncation to avoid blowing up the LLM context."""
-        from rag.tools import format_rag_excerpts
+        from src.tools.descriptions import format_rag_excerpts
 
         long_chunk = "A" * 5000
         result = format_rag_excerpts(
             [long_chunk],
-            [{"ticker": "NVDA", "year": "2024", "file_type": "10-K", "section": "Item_1A", "source": "x"}],
+            [
+                {
+                    "ticker": "NVDA",
+                    "year": "2024",
+                    "file_type": "10-K",
+                    "section": "Item_1A",
+                    "source": "x",
+                }
+            ],
         )
         # The TOON output must contain at most 1200 consecutive A's.
         import re
+
         match = re.search(r"A{1500,}", result)
         self.assertIsNone(
             match,
@@ -116,12 +125,15 @@ class ToonMemoryContextTests(unittest.TestCase):
     def test_format_memory_context_with_summary_and_window(self):
         from toon_format import decode
 
-        from rag.nodes.memory_store import format_memory_context
+        from src.graph.memory_store import format_memory_context
 
         summary = "User asked about NVDA risks then MSFT risks."
         window = [
             {"role": "user", "content": "Quels sont les risques de NVDA ?"},
-            {"role": "assistant", "content": "Concentration Taiwan, contrôles exportation."},
+            {
+                "role": "assistant",
+                "content": "Concentration Taiwan, contrôles exportation.",
+            },
         ]
         result = format_memory_context(summary, window)
         # Must be decodable as TOON
@@ -139,7 +151,7 @@ class ToonMemoryContextTests(unittest.TestCase):
         """When both summary and window are empty, the legacy function
         returned a French fallback. We keep that fallback verbatim (it's
         not LLM-bound data, it's a prompt-engineering signal)."""
-        from rag.nodes.memory_store import format_memory_context
+        from src.graph.memory_store import format_memory_context
 
         result = format_memory_context("", [])
         self.assertEqual(result, "Aucun contexte memorise.")
@@ -147,7 +159,7 @@ class ToonMemoryContextTests(unittest.TestCase):
     def test_format_memory_context_summary_only(self):
         from toon_format import decode
 
-        from rag.nodes.memory_store import format_memory_context
+        from src.graph.memory_store import format_memory_context
 
         result = format_memory_context("Just a summary.", [])
         decoded = decode(result)
@@ -157,7 +169,7 @@ class ToonMemoryContextTests(unittest.TestCase):
     def test_format_memory_context_window_only(self):
         from toon_format import decode
 
-        from rag.nodes.memory_store import format_memory_context
+        from src.graph.memory_store import format_memory_context
 
         result = format_memory_context("", [{"role": "user", "content": "hi"}])
         decoded = decode(result)
@@ -166,7 +178,7 @@ class ToonMemoryContextTests(unittest.TestCase):
     def test_format_chat_context_returns_toon(self):
         from toon_format import decode
 
-        from rag.nodes.memory_store import format_chat_context
+        from src.graph.memory_store import format_chat_context
 
         messages = [
             {"role": "user", "content": "Premier message"},
@@ -180,7 +192,7 @@ class ToonMemoryContextTests(unittest.TestCase):
 
     def test_format_chat_context_empty_returns_fallback(self):
         """Empty chat history: keep the French fallback (prompt signal)."""
-        from rag.nodes.memory_store import format_chat_context
+        from src.graph.memory_store import format_chat_context
 
         result = format_chat_context([], keep_last=6)
         self.assertEqual(result, "Aucun historique de chat.")

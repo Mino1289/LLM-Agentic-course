@@ -15,6 +15,6 @@ RUN pip install --upgrade pip && pip install -r requirements.txt
 
 COPY . .
 
-EXPOSE 8501
+EXPOSE 8000
 
-CMD ["streamlit", "run", "ui/app_rag.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.fileWatcherType=none"]
+CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]

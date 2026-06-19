@@ -92,7 +92,9 @@ class ToonFormatEncodeDecodeTests(unittest.TestCase):
         # Hand-crafted TOON tabular array
         toon = "[2,]{id,name}:\n  1,Alice\n  2,Bob"
         decoded = decode(toon)
-        self.assertEqual(decoded, [{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}])
+        self.assertEqual(
+            decoded, [{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}]
+        )
 
 
 class ToonFormatSavingsTests(unittest.TestCase):
@@ -107,13 +109,36 @@ class ToonFormatSavingsTests(unittest.TestCase):
         # RAG-like tabular structure: 4 chunks with 4 uniform metadata fields.
         data = {
             "excerpts": [
-                {"ticker": "NVDA", "year": "2024", "file_type": "10-K", "section": "Item_1A"},
-                {"ticker": "MSFT", "year": "2024", "file_type": "10-K", "section": "Item_1A"},
-                {"ticker": "AMD", "year": "2024", "file_type": "10-K", "section": "Item_1A"},
-                {"ticker": "NVDA", "year": "2024", "file_type": "10-K", "section": "Item_7"},
+                {
+                    "ticker": "NVDA",
+                    "year": "2024",
+                    "file_type": "10-K",
+                    "section": "Item_1A",
+                },
+                {
+                    "ticker": "MSFT",
+                    "year": "2024",
+                    "file_type": "10-K",
+                    "section": "Item_1A",
+                },
+                {
+                    "ticker": "AMD",
+                    "year": "2024",
+                    "file_type": "10-K",
+                    "section": "Item_1A",
+                },
+                {
+                    "ticker": "NVDA",
+                    "year": "2024",
+                    "file_type": "10-K",
+                    "section": "Item_7",
+                },
             ]
         }
-        with patch("toon_format.utils.count_tokens", side_effect=lambda text, *_args, **_kwargs: len(text.split())):
+        with patch(
+            "toon_format.utils.count_tokens",
+            side_effect=lambda text, *_args, **_kwargs: len(text.split()),
+        ):
             result = estimate_savings(data)
         # Savings must be non-negative (TOON is never worse than JSON
         # for our usage patterns).

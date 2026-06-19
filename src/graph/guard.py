@@ -1,0 +1,289 @@
+"""Noeud de garde — classification d'intention avant routage vers l'agent."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import re
+from typing import Any
+
+from src.graph.prompt_context import format_universe_hint
+from src.graph.state import GraphState
+from src.graph.tracing import traceable
+
+_guard_cache: dict[str, tuple[str, str, str, Optional[dict]]] = {}
+_MAX_CACHE_SIZE = 128
+
+GUARD_SYSTEM_PROMPT = """You are an intent guard for a finance RAG assistant.
+Return STRICT JSON only, with no surrounding text.
+
+Schema:
+{"route":"continue|clarify|coverage_info|reject_offtopic|general_chat","reason":"short reason"}
+
+Routes:
+- continue: the finance agent should handle the request using RAG/tools if useful.
+- clarify: the request is finance-related but too vague to answer safely.
+- coverage_info: the user asks what companies/tickers are covered.
+- reject_offtopic: the request is clearly outside finance/RAG/market analysis.
+- general_chat: harmless greeting or small talk that does not require tools.
+
+Priority:
+1) Prefer continue for finance, market, company, portfolio, report, SEC, risk, or price questions.
+2) Use clarify only when a finance request lacks enough scope and no reasonable assumption is possible.
+3) Use coverage_info only for explicit coverage/universe questions.
+4) Use reject_offtopic only when the request is clearly non-finance.
+"""
+
+_VALID_ROUTES = {
+    "continue",
+    "clarify",
+    "coverage_info",
+    "reject_offtopic",
+    "general_chat",
+}
+
+
+def _ticker_fuzzy_suggest(word: str, known: list[str], max_dist: int = 1) -> str | None:
+    """Cherche le plus proche ticker connu par distance de Levenshtein."""
+    w = word.strip().upper()
+    if not w or len(w) < 2 or w in known:
+        return None
+    best, best_dist = None, 99
+    for k in known:
+        d = _levenshtein(w, k)
+        if d < best_dist:
+            best_dist = d
+            best = k
+    return best if best_dist <= max_dist else None
+
+
+def _levenshtein(a: str, b: str) -> int:
+    na, nb = len(a), len(b)
+    if na > nb:
+        a, b = b, a
+        na, nb = nb, na
+    prev = list(range(nb + 1))
+    for i, ca in enumerate(a):
+        curr = [i + 1]
+        for j, cb in enumerate(b):
+            cost = 0 if ca == cb else 1
+            curr.append(min(curr[j] + 1, prev[j + 1] + 1, prev[j] + cost))
+        prev = curr
+    return prev[nb]
+
+
+def _extract_first_json_object(raw: str) -> dict[str, Any] | None:
+    text = (raw or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = json.loads(text)
+        return parsed if isinstance(parsed, dict) else None
+    except json.JSONDecodeError:
+        pass
+    match = re.search(r"\{.*\}", text, flags=re.DOTALL)
+    if not match:
+        return None
+    try:
+        parsed = json.loads(match.group(0))
+        return parsed if isinstance(parsed, dict) else None
+    except json.JSONDecodeError:
+        return None
+
+
+def _format_recent_dialogue(messages: list[dict[str, str]], keep_last: int = 6) -> str:
+    if not messages:
+        return "Aucun historique."
+    lines: list[str] = []
+    for msg in messages[-keep_last:]:
+        role = msg.get("role", "user")
+        content = msg.get("content", "")
+        if content:
+            lines.append(f"{role}: {content}")
+    return "\n".join(lines) if lines else "Aucun historique."
+
+
+def _build_guard_prompt(agent: Any, state: GraphState, query: str) -> str:
+    universe = format_universe_hint(agent, max_items=12)
+    metadata_filter = json.dumps(state.get("metadata_filter") or {}, ensure_ascii=False)
+    recent = _format_recent_dialogue(state.get("messages", []))
+    memory_summary = state.get("memory_summary") or "Aucun résumé mémoire."
+    memory_window = _format_recent_dialogue(state.get("memory_window", []), keep_last=6)
+    return (
+        f"Covered tickers: {universe}\n"
+        f"Heuristic metadata: {metadata_filter}\n"
+        f"Memory summary:\n{memory_summary}\n"
+        f"Memory recent turns:\n{memory_window}\n"
+        f"Recent dialogue:\n{recent}\n\n"
+        f"User query:\n{query}"
+    )
+
+
+async def _llm_guard_decision(
+    agent: Any, state: GraphState, query: str
+) -> tuple[str, str, str, Optional[dict]]:
+    if cached := _guard_cache.get(query):
+        return cached
+
+    prompt = _build_guard_prompt(agent, state, query)
+    raw = ""
+    usage = None
+    try:
+        messages = [
+            {"role": "system", "content": GUARD_SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ]
+        response = await asyncio.to_thread(
+            agent.rag.provider.invoke_with_tools,
+            messages,
+            tools=None,
+            temperature=0.0,
+            max_tokens=180,
+        )
+        raw = response.content or ""
+        usage = response.usage
+        parsed = _extract_first_json_object(raw)
+        route = str(parsed.get("route", "")).strip().lower() if parsed else ""
+        if route in _VALID_ROUTES:
+            reason = str(parsed.get("reason", "llm_guard")).strip() or "llm_guard"
+            result = (route, reason, "llm", usage)
+            _guard_cache[query] = result
+            if len(_guard_cache) > _MAX_CACHE_SIZE:
+                _guard_cache.pop(next(iter(_guard_cache)))
+            return result
+        if raw.strip():
+            result = ("continue", "fallback_parse_error", "fallback", usage)
+            _guard_cache[query] = result
+            if len(_guard_cache) > _MAX_CACHE_SIZE:
+                _guard_cache.pop(next(iter(_guard_cache)))
+            return result
+    except Exception:
+        return "continue", "fallback_provider_error", "fallback", None
+    result = ("continue", "fallback_empty_response", "fallback", usage)
+    _guard_cache[query] = result
+    if len(_guard_cache) > _MAX_CACHE_SIZE:
+        _guard_cache.pop(next(iter(_guard_cache)))
+    return result
+
+
+def _answer_for_route(agent: Any, route: str, query: str) -> str:
+    universe = format_universe_hint(agent, max_items=12)
+    if route == "coverage_info":
+        return f"Entreprises couvertes en mode test/debug : {universe}."
+    if route == "reject_offtopic":
+        return (
+            "Je suis spécialisé en analyse financière avec RAG SEC, prix de marché, "
+            f"validation et rapports. Pose une question sur : {universe}."
+        )
+    if route == "clarify":
+        return (
+            "Ta question est trop large ou manque de contexte. Précise l'entreprise, "
+            f"la période ou le type d'analyse. Si tu veux des infos sur ton portefeuille "
+            f"Alpaca, demande directement « mon portfolio » ou « mes positions ». "
+            f"Entreprises disponibles : {universe}."
+        )
+    if route == "general_chat":
+        return (
+            "Je peux t'aider sur l'analyse financière, les documents SEC, les prix, "
+            f"la validation d'affirmations et les rapports pour : {universe}."
+        )
+    return ""
+
+
+@traceable(name="guard_node")
+async def guard_node(agent: Any, state: GraphState) -> GraphState:
+    query = (state.get("normalized_query") or state.get("query") or "").strip()
+    stats = dict(state.get("stats") or {})
+
+    if not query:
+        stats.update(
+            {
+                "guard_route": "clarify",
+                "guard_source": "rule",
+                "guard_reason": "empty_query",
+            }
+        )
+        return {
+            "answer": "Peux-tu préciser ta question finance (entreprise, période, ou type de document) ?",
+            "tool_calls_pending": False,
+            "stats": stats,
+        }
+
+    portfolio_keywords = [
+        "portfolio",
+        "portefeuille",
+        "compte",
+        "positions",
+        "account",
+        "mon portfolio",
+        "mon compte",
+        "mes positions",
+        "mon investissement",
+        "mes actions",
+        "mon alpaca",
+        "buying power",
+        "equity",
+        "pnl",
+        "profit and loss",
+        "solde",
+        "balance",
+    ]
+    query_lower = query.lower()
+    if any(kw in query_lower for kw in portfolio_keywords):
+        stats.update(
+            {
+                "guard_route": "continue",
+                "guard_source": "rule",
+                "guard_reason": "portfolio_query_detected",
+            }
+        )
+        return {"stats": stats}
+
+    route, reason, source, guard_usage = await _llm_guard_decision(agent, state, query)
+
+    # Fuzzy ticker suggestion: if guard says "clarify" but we detect a close ticker typo,
+    # let the query pass through so the downstream agent can handle it.
+    ticker_suggestion = None
+    if route == "clarify":
+        from src.config import TRACKED_TICKERS
+
+        for word in re.findall(r"[A-Z]{2,5}", query.upper()):
+            suggestion = _ticker_fuzzy_suggest(word, list(TRACKED_TICKERS), max_dist=1)
+            if suggestion:
+                ticker_suggestion = suggestion
+                route = "continue"
+                reason = f"fuzzy_ticker: {word} -> {suggestion}"
+                source = "rule"
+                break
+
+    stats.update(
+        {
+            "guard_route": route,
+            "guard_source": source,
+            "guard_reason": reason,
+        }
+    )
+    if guard_usage:
+        stats["guard_input_tokens"] = guard_usage.get("prompt_tokens", 0)
+        stats["guard_output_tokens"] = guard_usage.get("completion_tokens", 0)
+        stats["guard_total_tokens"] = guard_usage.get("total_tokens", 0)
+
+    answer = _answer_for_route(agent, route, query)
+    if answer:
+        return {
+            "answer": answer,
+            "tool_calls_pending": False,
+            "stats": stats,
+        }
+    if ticker_suggestion:
+        return {
+            "normalized_query": f"{query} (peut-être {ticker_suggestion} ?)",
+            "stats": stats,
+        }
+    return {"stats": stats}
+
+
+def route_after_guard(state: GraphState) -> str:
+    if state.get("answer"):
+        return "finalize"
+    return "agent"

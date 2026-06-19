@@ -11,25 +11,39 @@ services:
     command: ["/bin/bash", "scripts/bootstrap.sh"]
     volumes:
       - ./data:/app/data
-      - ./rag/processed_data:/app/rag/processed_data
-      - ./rag/chroma_db:/app/rag/chroma_db
       - ./reports:/app/reports
     restart: "no"
 
-  finance-rag-ui:
+  finance-rag-api:
     image: finance-rag:latest
-    container_name: finance-rag-ui
+    container_name: finance-rag-api
     user: "${UID:-1000}:${GID:-1000}"
     depends_on:
       bootstrap:
         condition: service_completed_successfully
     ports:
-      - "8501:8501"
+      - "8000:8000"
     env_file:
       - .env
+    environment:
+      - CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000,http://finance-rag-web:3000
+    command: ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
     volumes:
       - ./data:/app/data
-      - ./rag/processed_data:/app/rag/processed_data
-      - ./rag/chroma_db:/app/rag/chroma_db
       - ./reports:/app/reports
+    restart: unless-stopped
+
+  finance-rag-web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        API_PROXY_TARGET: http://finance-rag-api:8000
+    container_name: finance-rag-web
+    depends_on:
+      - finance-rag-api
+    ports:
+      - "3000:3000"
+    environment:
+      - API_PROXY_TARGET=http://finance-rag-api:8000
     restart: unless-stopped
