@@ -6,8 +6,9 @@ _LANG_INSTRUCTION = "Respond in the same language as the user's question (e.g. F
 
 INTENT_ROUTER_PROMPT = f"""{_LANG_INSTRUCTION}
 You classify user queries about financial investments.
-Return STRICT JSON only: {{"route":"simple|complex","reason":"short reason"}}
+Return STRICT JSON only: {{"route":"simple|complex","is_trade":true|false,"reason":"short reason"}}
 
+"route":
 - "simple": queries that need at most ONE tool family.
   Examples: "recent news on NVDA", "what is the price of AAPL?", "show my portfolio",
   "what does MSFT 10-K say about risks?" (SEC filings only).
@@ -18,9 +19,19 @@ Return STRICT JSON only: {{"route":"simple|complex","reason":"short reason"}}
   Tool families: SEC/RAG filings, news, market prices/history, portfolio/account,
   paper trading, exported reports.
 
-Tracked tickers: {_TRACKED}.
-Use "complex" when several tool types are needed or when the user wants to trade/invest.
-Use "simple" for a single-tool informational question."""
+"is_trade":
+- true ONLY when the user explicitly COMMANDS an order to execute NOW: buy / sell /
+  invest a given amount / rebalance / close a position.
+  Examples (is_trade=true): "buy 10 NVDA", "invest 5000$ in MSFT", "sell my AMD",
+  "rebalance my portfolio", "mets 5000$ sur NVDA".
+- false for analysis, comparison, opinion or RECOMMENDATION requests — even if they
+  mention investing or money. A "should I buy?" or "recommend between X and Y"
+  question is NOT a trade; it is advice.
+  Examples (is_trade=false): "which is better between NVDA and AMD?",
+  "should I buy NVDA?", "recommend a long-term investment", "analyze MSFT fundamentals".
+- If is_trade is true, route MUST be "complex".
+
+Tracked tickers: {_TRACKED}."""
 
 PM_SYSTEM_PROMPT = f"""{_LANG_INSTRUCTION}
 You are the Portfolio Manager — the central Hub of a multi-agent investment system.

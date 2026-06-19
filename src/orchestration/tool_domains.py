@@ -77,6 +77,13 @@ TOOL_DOMAIN_KEYWORDS: dict[ToolDomain, tuple[str, ...]] = {
         "activity",
         "transaction",
     ),
+    # IMPORTANT : le domaine "trade" doit rester HAUTE PRÉCISION — il déclenche
+    # une proposition d'ordre (PM -> compliance -> approbation humaine). On n'y
+    # met QUE des verbes/commandes d'exécution explicites. Les mots topiques
+    # mous (placement, allocation, "$"/dollars, mets/prends, "investissement"...)
+    # sont volontairement EXCLUS : ils ne sont pas un ordre. Les cas ambigus
+    # ("mets 5000$ sur NVDA") tombent à vide et sont tranchés par le classifieur
+    # LLM, qui décide alors is_trade. Voir intent_router_node.
     "trade": (
         "achète",
         "acheter",
@@ -86,17 +93,17 @@ TOOL_DOMAIN_KEYWORDS: dict[ToolDomain, tuple[str, ...]] = {
         "action achet",
         "buy",
         # Forme impérative uniquement ("investis 5000$", "investir dans X").
-        # PAS le nom "investissement"/"investisseur" (sujet d'analyse, pas un
-        # ordre) — d'où "investis " avec espace et non "investi"/"investis".
+        # PAS le nom "investissement"/"investisseur" (sujet d'analyse) — d'où
+        # "investis " avec espace, et non "investi"/"investis".
         "investis ",
         "investir",
         "investissez",
-        "placement",
         "vends",
-        "vendre",
-        "vend",
+        "vendez",
+        "vendre ",  # espace : éviter "vendredi"
+        "vend ",  # espace : éviter "vendredi"
         "sell",
-        "vente",
+        "vente ",  # espace : éviter "inventer"
         "trade",
         "order",
         "ordre",
@@ -104,32 +111,22 @@ TOOL_DOMAIN_KEYWORDS: dict[ToolDomain, tuple[str, ...]] = {
         "rebalancer",
         "alloue",
         "allouer",
-        "allocation",
         "place un ordre",
+        "passe un ordre",
+        "passer un ordre",
         "soumet un ordre",
+        "soumettre un ordre",
         "exécute",
         "exécuter",
         "execute",
         "close position",
-        "liquid",
-        "couvre",
-        "couverture",
-        "hedge",
-        "utilise mon",
+        "ferme la position",
+        "ferme ma position",
+        "ferme mes positions",
+        "liquide",  # PAS "liquid" qui matche "liquidité"
+        "liquider",
+        "prends position",
         "prendre position",
-        "mets",
-        "mettre",
-        "met ",
-        "prends",
-        "prendre",
-        "$",
-        "dollars",
-        "dollar",
-        "usd",
-        "€",
-        "euros",
-        "euro",
-        "position sur",
     ),
     "report": (
         "exporter",

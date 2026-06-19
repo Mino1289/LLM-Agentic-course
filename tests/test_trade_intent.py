@@ -83,12 +83,15 @@ class TradeIntentTests(unittest.TestCase):
         }
         self.assertEqual(route_after_compliance(state), "__end__")
 
-    def test_informal_trade_phrasing_routes_complex(self):
+    def test_informal_trade_phrasing_deferred_to_llm(self):
+        # Le domaine trade est désormais haute précision (ordres explicites
+        # seulement). Une tournure informelle comme "mets 500$ sur MSFT" n'est
+        # PAS captée par mots-clés : elle tombe à vide et est tranchée par le
+        # classifieur LLM (qui décide is_trade). Voir IntentRouterTradeTests.
         query = "mets 500$ sur MSFT"
         domains = detect_tool_domains(query)
-        route = resolve_route_from_domains(domains)
-        self.assertIn("trade", domains)
-        self.assertEqual(route, ("complex", "action_keyword"))
+        self.assertNotIn("trade", domains)
+        self.assertIsNone(resolve_route_from_domains(domains))
 
     def test_parse_dollar_amount_from_query(self):
         self.assertEqual(parse_dollar_amount("investis 500$ dans NVDA"), 500.0)

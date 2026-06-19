@@ -73,20 +73,31 @@ async def intent_router_node(agent: Any, state: HubSpokeState) -> HubSpokeState:
             {"role": "system", "content": INTENT_ROUTER_PROMPT},
             {"role": "user", "content": f"User query: {query}"},
         ]
-        response = await agent.rag.provider.ainvoke_with_tools_stream(
+        # ainvoke_with_tools_stream est un async generator : on itère dessus,
+        # on ne l'await pas (un await levait une TypeError silencieusement
+        # rattrapée => le classifieur LLM ne tournait jamais).
+        raw = ""
+        async for chunk in agent.rag.provider.ainvoke_with_tools_stream(
             messages,
             tools=None,
             temperature=0.0,
             max_tokens=120,
-        )
-        raw = ""
-        async for chunk in response:
+        ):
             if chunk.delta:
                 raw += chunk.delta
         parsed = _extract_first_json_object(raw)
         route = str(parsed.get("route", "")).strip().lower() if parsed else ""
         if route in ("simple", "complex"):
             reason = str(parsed.get("reason", "llm_classifier")).strip()
+            # Le LLM tranche is_trade pour les cas ambigus (les mots-clés trade
+            # ne couvrent que les ordres explicites). Repli sur le keyword si
+            # absent.
+            llm_trade = _coerce_bool(parsed.get("is_trade"))
+            trade_requested = llm_trade if llm_trade is not None else "trade" in domains
+            # Un ordre implique forcément le chemin complexe (PM -> compliance
+            # -> approbation humaine).
+            if trade_requested and route == "simple":
+                route = "complex"
             stats.update(
                 {
                     "intent_route": route,
@@ -97,7 +108,7 @@ async def intent_router_node(agent: Any, state: HubSpokeState) -> HubSpokeState:
             _emit_route_progress(route)
             return {
                 "intent_route": route,
-                "trade_requested": "trade" in domains,
+                "trade_requested": trade_requested,
                 "stats": stats,
             }
     except Exception:
@@ -116,6 +127,26 @@ async def intent_router_node(agent: Any, state: HubSpokeState) -> HubSpokeState:
         "trade_requested": "trade" in domains,
         "stats": stats,
     }
+
+
+def _coerce_bool(value: Any) -> bool | None:
+    """Interprète is_trade renvoyé par le LLM (true/false, "true"/"yes"/1...).
+
+    Renvoie None si la valeur est absente/inintelligible, pour permettre un
+    repli sur la détection par mots-clés.
+    """
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in {"true", "yes", "oui", "1", "trade"}:
+        return True
+    if text in {"false", "no", "non", "0", "analysis", "analyse"}:
+        return False
+    return None
 
 
 def _extract_first_json_object(text: str) -> dict[str, Any] | None:
