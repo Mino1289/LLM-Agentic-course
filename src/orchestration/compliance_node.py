@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from typing import Any
 
 from src.graph.tracing import traceable
@@ -147,25 +148,50 @@ def route_after_compliance(state: HubSpokeState) -> str:
     return _route_after_compliance(state)
 
 
+_REASON_KEYWORDS = (
+    "reason",
+    "because",
+    "issue",
+    "insufficient",
+    "exceeds",
+    "exceed",
+    "missing",
+    "concentration",
+    "buying power",
+    "reduce",
+    "limit",
+    "contradict",
+    "unsupported",
+)
+
+# Préfixe verdict imposé par COMPLIANCE_PROMPT ("PASS"/"FAIL" en premier mot).
+_VERDICT_PREFIX = re.compile(r"^\W*(pass|fail)\b[\s:.\-–—]*", re.IGNORECASE)
+
+
+def _is_bare_verdict(line: str) -> bool:
+    """True si la ligne n'est QUE le verdict (ex. "FAIL", "**FAIL**", "FAIL.")."""
+    return re.sub(r"[^a-z]", "", line.lower()) in {"pass", "fail"}
+
+
+def _strip_verdict_prefix(line: str) -> str:
+    """Retire un "FAIL."/"PASS:" collé en tête de ligne, garde l'explication."""
+    return _VERDICT_PREFIX.sub("", line, count=1).strip()
+
+
 def _extract_reasons(result: str) -> list[str]:
-    lines = result.split("\n")
-    reasons = []
-    for line in lines:
-        lower = line.strip().lower()
-        if any(
-            kw in lower
-            for kw in [
-                "reason",
-                "because",
-                "issue",
-                "error",
-                "fail",
-                "insufficient",
-                "exceeds",
-                "missing",
-            ]
-        ):
-            reasons.append(line.strip())
-    if not reasons:
-        reasons = [result.strip()]
-    return reasons
+    # Lignes utiles : non vides et pas seulement le verdict PASS/FAIL, qui sinon
+    # devenait à tort la "raison principale" affichée à l'utilisateur.
+    useful: list[str] = []
+    for line in result.split("\n"):
+        stripped = line.strip()
+        if not stripped or _is_bare_verdict(stripped):
+            continue
+        useful.append(_strip_verdict_prefix(stripped) or stripped)
+    if not useful:
+        return ["Aucune raison détaillée fournie par la conformité."]
+    # On privilégie les lignes qui ressemblent à une raison actionnable, mais on
+    # ne renvoie JAMAIS un simple "FAIL".
+    keyworded = [
+        line for line in useful if any(kw in line.lower() for kw in _REASON_KEYWORDS)
+    ]
+    return keyworded or useful
