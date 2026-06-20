@@ -12,12 +12,26 @@ class TrackedTickersUniverseTests(unittest.TestCase):
     def test_tracked_tickers_has_debug_entries(self):
         from src.config import TRACKED_TICKERS
 
-        self.assertEqual(TRACKED_TICKERS, ("NVDA", "ASML", "AMD", "ARM", "MSFT"))
+        self.assertEqual(
+            TRACKED_TICKERS,
+            ("NVDA", "ASML", "AMD", "ARM", "MSFT", "TSM", "AVGO", "INTC", "QCOM", "MU"),
+        )
 
     def test_tracked_tickers_contains_all_requested_symbols(self):
         from src.config import TRACKED_TICKERS
 
-        expected = {"NVDA", "ASML", "AMD", "ARM", "MSFT"}
+        expected = {
+            "NVDA",
+            "ASML",
+            "AMD",
+            "ARM",
+            "MSFT",
+            "TSM",
+            "AVGO",
+            "INTC",
+            "QCOM",
+            "MU",
+        }
         self.assertEqual(set(TRACKED_TICKERS), expected)
 
 
@@ -82,10 +96,10 @@ class SecTickerFilterTests(unittest.TestCase):
         # every skipped ticker must NOT be in SEC_TICKERS
         self.assertEqual(set(SKIPPED_TICKERS) & set(SEC_TICKERS), set())
 
-    def test_sec_tickers_count_is_5(self):
+    def test_sec_tickers_count_is_10(self):
         from src.fetchers.download_SEC_reports import SEC_TICKERS
 
-        self.assertEqual(len(SEC_TICKERS), 5)
+        self.assertEqual(len(SEC_TICKERS), 10)
 
     def test_pa_ticker_count_is_0(self):
         from src.fetchers.download_SEC_reports import SKIPPED_TICKERS
@@ -158,6 +172,35 @@ class SecFormCoverageTests(unittest.TestCase):
         # Must NOT include 10-K/10-Q (those are US issuers only)
         self.assertNotIn("10-K", forms)
         self.assertNotIn("10-Q", forms)
+
+    def test_get_filings_handles_tsm_foreign_issuer(self):
+        from src.fetchers.download_SEC_reports import get_filings
+
+        # TSM (TSMC) is a Taiwanese foreign private issuer -> 20-F/6-K.
+        response = _FakeResponse(
+            {
+                "filings": {
+                    "recent": {
+                        "form": ["20-F", "6-K", "6-K", "424B5"],
+                        "filingDate": ["2025-04-15"] * 4,
+                        "items": ["", "", "", ""],
+                        "accessionNumber": ["0003-03"] * 4,
+                        "primaryDocument": ["doc.htm"] * 4,
+                    }
+                }
+            }
+        )
+        with (
+            patch(
+                "src.fetchers.download_SEC_reports.requests.get", return_value=response
+            ),
+            patch("src.fetchers.download_SEC_reports.rate_limit_sleep"),
+        ):
+            filings = get_filings("TSM", "0001046179", 2024, 2026)
+        forms = {f["form"] for f in filings}
+        self.assertIn("20-F", forms)
+        self.assertIn("6-K", forms)
+        self.assertNotIn("10-K", forms)
 
 
 class _FakeResponse:

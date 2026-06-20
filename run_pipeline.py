@@ -4,6 +4,7 @@
 Usage:
     python run_pipeline.py                        # tout (sauf download si fichiers déjà présents)
     python run_pipeline.py --download              # force le téléchargement SEC
+    python run_pipeline.py --download --earnings   # + transcripts earnings calls (ALPHAVANTAGE_API_KEY)
     python run_pipeline.py --min-year 2023         # année min (défaut: 2024)
     python run_pipeline.py --max-year 2026         # année max (défaut: 2026)
     python run_pipeline.py --sections 1a,7,8       # sections à extraire
@@ -14,6 +15,7 @@ Usage:
 """
 
 import argparse
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -39,6 +41,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Pipeline RAG complète")
     parser.add_argument(
         "--download", action="store_true", help="Forcer le téléchargement SEC"
+    )
+    parser.add_argument(
+        "--earnings",
+        action="store_true",
+        help="Télécharger aussi les transcripts d'earnings calls (ALPHAVANTAGE_API_KEY requise).",
     )
     parser.add_argument("--min-year", default="2024", help="Année min (défaut: 2024)")
     parser.add_argument("--max-year", default="2026", help="Année max (défaut: 2026)")
@@ -87,6 +94,24 @@ def main() -> None:
                 ],
                 "Étape 1/4 — Téléchargement des rapports SEC",
             )
+
+    want_earnings = (
+        args.earnings
+        or os.getenv("BOOTSTRAP_EARNINGS", "false").strip().lower() == "true"
+    )
+    if want_earnings and not args.skip_download:
+        run(
+            [
+                sys.executable,
+                "-m",
+                "src.fetchers.download_earnings_calls",
+                "--min-year",
+                args.min_year,
+                "--max-year",
+                args.max_year,
+            ],
+            "Étape 1bis/4 — Téléchargement des earnings calls (transcripts)",
+        )
 
     run(
         [
