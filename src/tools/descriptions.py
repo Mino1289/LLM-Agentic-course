@@ -75,7 +75,8 @@ SEC_FILINGS_RAG_DESCRIPTION = (
     "Search SEC filings and earnings call transcripts in ChromaDB. "
     "Filter by document type: 10-K (annual), 10-Q (quarterly), 8-K (events), "
     "20-F (foreign annual), 6-K (foreign interim), EARNINGS_CALL (conference call transcripts). "
-    "Examples: 'MSFT 10-K risk factors 2024', 'ASML 20-F risk factors 2024'."
+    "Examples: 'MSFT 10-K risk factors 2024', 'ASML 20-F risk factors 2024', "
+    "'NVDA EARNINGS_CALL AI demand guidance 2025'."
 )
 
 MARKET_PRICE_DESCRIPTION = (

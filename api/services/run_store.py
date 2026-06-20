@@ -7,20 +7,23 @@ from typing import Any
 
 from api.schemas.chat import ChatMessageDTO
 from api.schemas.settings import AgentSettings
+from src.config import TRACKED_TICKERS
 
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+_TICKERS = ", ".join(TRACKED_TICKERS)
+
 WELCOME_MESSAGES = {
     "fr": (
-        "Bonjour. Je peux analyser **NVDA, AMD, MSFT, ARM, ASML** — interroger les filings SEC, "
+        f"Bonjour. Je peux analyser **{_TICKERS}** — interroger les filings SEC, "
         "les transcripts earnings, valider des affirmations, simuler une allocation, récupérer les "
         "prix et générer des rapports."
     ),
     "en": (
-        "Hello. I can analyze **NVDA, AMD, MSFT, ARM, ASML** — query SEC filings, earnings transcripts, "
+        f"Hello. I can analyze **{_TICKERS}** — query SEC filings, earnings transcripts, "
         "validate claims, simulate allocation, fetch prices, and generate reports."
     ),
 }

@@ -8,7 +8,7 @@ export function getWelcomeMessage(locale: Locale): ChatMessage {
       id: "welcome",
       role: "assistant",
       content:
-        "Bonjour. Je peux analyser **NVDA, AMD, MSFT, ARM, ASML** — interroger les filings SEC, les transcripts earnings, valider des affirmations, simuler une allocation, récupérer les prix et générer des rapports.",
+        "Bonjour. Je peux analyser **NVDA, ASML, AMD, ARM, MSFT, TSM, AVGO, INTC, QCOM, MU** — interroger les filings SEC, les transcripts earnings, valider des affirmations, simuler une allocation, récupérer les prix et générer des rapports.",
       timestamp: "10:23",
     };
   }
@@ -17,7 +17,7 @@ export function getWelcomeMessage(locale: Locale): ChatMessage {
     id: "welcome",
     role: "assistant",
     content:
-      "Hello. I can analyze **NVDA, AMD, MSFT, ARM, ASML** — query SEC filings, earnings transcripts, validate claims, simulate allocation, fetch prices, and generate reports.",
+      "Hello. I can analyze **NVDA, ASML, AMD, ARM, MSFT, TSM, AVGO, INTC, QCOM, MU** — query SEC filings, earnings transcripts, validate claims, simulate allocation, fetch prices, and generate reports.",
     timestamp: "10:23",
   };
 }
